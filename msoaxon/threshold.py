@@ -1,0 +1,74 @@
+"""Spiking-threshold search (port of BinarySearch.m)."""
+
+from .mso_axon import mso_axon
+from .spiking import count_spikes, matlab_round
+from .synaptic import SynParams
+from .two_cpt import two_cpt
+
+START = 5.0
+T_END = 20.0
+V0 = -68.0
+MODEL_TYPE = "active-full"
+INPUT_NODE = 1
+
+
+def sweep_setting(stim_type, i, epsg_pair_dt=1 / 25):
+    """(stop, syn, I_override) for sweep point i (1-indexed, as in the MATLAB loop)."""
+    syn = SynParams(t_end=T_END)
+    if stim_type == "step":
+        return 15.0, syn, None
+    if stim_type in ("ramp", "ramp2"):
+        return 5 + i / 10, syn, None
+    if stim_type == "sine":
+        syn.f = i * 100
+        return START + 1000 / (2 * syn.f), syn, None
+    if stim_type == "EPSG":
+        return 10.0, syn, None
+    if stim_type == "EPSGpair":
+        return START + (i - 1) * epsg_pair_dt, syn, None  # stop = second EPSG onset
+    if stim_type == "Synaptic":
+        syn.random_in = 13986
+        return 15.0, syn, 0.0
+    raise ValueError(f"stimType {stim_type!r} is not supported by the threshold search")
+
+
+def _search(run, soma_col, axon_col, stim_type, i, factor, max_I, zoom, epsg_pair_dt):
+    """The halving search exactly as BinarySearch.m does it; returns the last tested value."""
+    location, previous, distance, first = max_I, 0.0, max_I, 0.0
+    while distance > zoom and location <= max_I:
+        stop, syn, I_override = sweep_setting(stim_type, i, epsg_pair_dt)
+        I = location if I_override is None else I_override
+        _, x = run(stim_type, START, stop, I, syn)
+        spiked = count_spikes(x[:, soma_col], x[:, axon_col], factor) != 0
+        tested = location
+        first = location
+        distance = abs((location - previous) / 2)
+        location = location - distance if spiked else location + distance
+        previous = tested
+    return first
+
+
+def binary_search(stim_type, n_points, node, factor, max_I, zoom=1.0,
+                  epsg_pair_dt=1 / 25, rounded=True):
+    """Return (thresholds_multi, thresholds_two), one value per sweep point.
+
+    epsg_pair_dt: spacing of the second-EPSG delay. BinarySearch.m uses 1/25;
+    the EPSGpair_Thresholds*.jpg plots in the repo were made with 0.1 and 11 points.
+    rounded: apply BinarySearch.m's rounding (to 1 for EPSGpair, to 10 otherwise).
+    """
+    def mso(stim, start, stop, I, syn):
+        return mso_axon(stim, start, stop, I, node, MODEL_TYPE, T_END, V0, INPUT_NODE, syn)
+
+    def two(stim, start, stop, I, syn):
+        return two_cpt(stim, start, stop, I, node, MODEL_TYPE, T_END, V0, INPUT_NODE, syn)
+
+    digits = 0 if stim_type == "EPSGpair" else -1
+    finish = (lambda v: matlab_round(v, digits)) if rounded else (lambda v: v)
+
+    multi = [finish(_search(mso, 0, node - 1, stim_type, i, factor, max_I, zoom, epsg_pair_dt))
+             for i in range(1, n_points + 1)]
+    # BinarySearch.m tests location1 (the multi-compartment variable) in this loop's
+    # while condition; fixed here to test the two-compartment search's own location.
+    two_ = [finish(_search(two, 0, 1, stim_type, i, factor, max_I, zoom, epsg_pair_dt))
+            for i in range(1, n_points + 1)]
+    return multi, two_
