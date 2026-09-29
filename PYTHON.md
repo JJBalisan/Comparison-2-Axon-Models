@@ -113,10 +113,10 @@ Values are for the Python port.
 | EPSP half-width at soma | 523–549 µs | 0.52–0.6 ms |
 | Spike initiation site | AIS | AIS (Lehnert 2014) |
 | Input resistance, active, at rest | 2.5 MΩ steady, ~4.8 MΩ peak | 5 MΩ (Lehnert's model); ~7 MΩ measured |
-| Somatic spike height | ~40 mV above rest | ~17 mV mature, 8.5 mV in vivo |
+| Somatic spike, from inflection (100 ms step) | 7.6 / 13.4 / 19.4 mV at 1.5× / 2× / 3× rheobase | 17 ± 2 mV mature, 5–15 mV near threshold, graded |
 | Best frequency for half-wave sine input | 400–500 Hz | subthreshold resonance 242–300 Hz |
 
-The somatic spike is the clearest mismatch: its size matches juvenile (P14) cells rather than adult ones.
+An earlier version of this table listed a ~40 mV somatic spike as the clearest mismatch. That figure was measured from rest during an EPSG pair at 2× threshold, so it counted the synaptic depolarisation as spike. Measured like the experiments (next section), the spike matches mature cells.
 
 ### Missing relative to current models
 
@@ -124,3 +124,29 @@ The somatic spike is the clearest mismatch: its size matches juvenile (P14) cell
 - glycinergic inhibition
 - binaural or history-dependent input
 - variation in cell properties along the frequency map
+
+### Somatic spike
+
+`uv run scripts/somatic_spike.py` reproduces this; `figures/somatic/` gets the traces and a JSON.
+
+Scott et al. 2005 ([doi](https://doi.org/10.1523/JNEUROSCI.1016-05.2005)) evoked spikes with 100 ms somatic current steps and measured amplitude from the inflection point. Mature cells (≥P21) give **17 ± 2 mV**: 5–15 mV near threshold, growing with the stimulus. Blocking Kv1 (KLT) with dendrotoxin in P20–21 cells raised it **from 15 to 37 mV**.
+
+`msoaxon/somatic.py` measures the model the same way. The inflection is the peak of d²V/dt² after the first 0.15 ms of charging: MSO neurons fire at step onset, while the membrane is still charging at 50–80 mV/ms, so fixed dV/dt criteria pick up the charging rather than the spike.
+
+| Somatic spike amplitude | 1.5× rheobase | 2× | 3× |
+|---|---|---|---|
+| 45-compartment (`msoAxon.m`) | 7.6 mV | 13.4 mV | 19.4 mV |
+| 45-compartment, KLT removed at soma + AIS, rest rebalanced (dendrotoxin) | 25.1 mV | 27.9 mV | 31.9 mV |
+| 2-compartment (`TwoCpt.m`) | 6.2 mV | 15.6 mV | 17.6 mV |
+
+- **The unmodified model already matches mature cells.** Lehnert et al. 2014 report "∼10 mV" for their model too.
+- **The KLT block reproduces the developmental mechanism:** the spike roughly doubles, and rheobase falls from 3784 to 200 pA. No tuning was needed.
+- **Below ~1.5× rheobase** the somatic response is a smooth hump with no distinct inflection, so no value is given.
+- **Spikes driven by EPSG pairs** measure 9–11 mV at 2× threshold, against 8.5 ± 1.3 mV in vivo (van der Heijden et al. 2013). Near threshold the EPSP and spike merge and the inflection is ambiguous.
+
+`mso_axon(..., mem=membrane(v0, ...))` exposes the knobs used for the block:
+- `soma_klt_scale` and `ais_klt_scale`
+- `soma_na_vhalf`: Scott et al. 2010 measured −77 mV for somatic Na inactivation; the model uses −62.5.
+- `rebalance_rest`: sets each leak reversal so rest stays at `v0`. Without it, removing KLT makes the cell fire with no input.
+
+The defaults reproduce `msoAxon.m` exactly.
