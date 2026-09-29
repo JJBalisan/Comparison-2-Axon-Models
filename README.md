@@ -1,5 +1,7 @@
 # Comparison-of-2-compartment-and-muti-compartment-MSO-Axon-Models
 
+**Python port:** see [PYTHON.md](PYTHON.md).
+
 Combine_all Inputs
 
 type

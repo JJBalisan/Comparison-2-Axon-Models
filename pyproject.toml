@@ -1,0 +1,16 @@
+[project]
+name = "msoaxon"
+version = "0.1.0"
+description = "Python port of the 2-compartment vs 45-compartment MSO axon model comparison"
+requires-python = ">=3.11"
+dependencies = ["numpy", "scipy", "matplotlib"]
+
+[dependency-groups]
+dev = ["pytest", "h5py"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["msoaxon"]
