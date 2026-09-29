@@ -34,10 +34,14 @@ FACTOR = 10.0  # spike = axon rises this far above soma (as in the EPSGpair swee
 
 
 def _spikes(model, I, delay, node, v0, epsg_tau, model_kw, start=START):
+    """model_kw may carry stim ("EPSGpair" or, for the 45-compartment model,
+    "EPSGbilateral"), input_node, and model keywords such as morph/input_node2/mem."""
     f = mso_axon if model == "multi" else two_cpt
     syn = SynParams(t_end=T_END, epsg_tau=tuple(epsg_tau))
-    t, x = f("EPSGpair", start, start + delay, I, node, "active-full", T_END, v0, 1, syn,
-             stop_on_spike=FACTOR, **model_kw)
+    kw = dict(model_kw)
+    stim, input_node = kw.pop("stim", "EPSGpair"), kw.pop("input_node", 1)
+    t, x = f(stim, start, start + delay, I, node, "active-full", T_END, v0, input_node, syn,
+             stop_on_spike=FACTOR, **kw)
     axon = node - 1 if model == "multi" else 1
     return t[-1] < T_END or count_spikes(x[:, 0], x[:, axon], FACTOR) > 0
 

@@ -150,3 +150,42 @@ Scott et al. 2005 ([doi](https://doi.org/10.1523/JNEUROSCI.1016-05.2005)) evoked
 - `rebalance_rest`: sets each leak reversal so rest stays at `v0`. Without it, removing KLT makes the cell fire with no input.
 
 The defaults reproduce `msoAxon.m` exactly.
+
+## Dendrites
+
+`mso_axon(..., morph=with_dendrites())` adds two dendrites, following the dendritic variant in Lehnert et al. 2014 (their Fig. 8). The lumped model's 8750 µm² "soma" stands for soma plus dendrites: in the paper's words it "combines the somatic and dendritic membrane surface", sized for 70 pF. So the dendrites take their membrane from it rather than being added on top:
+- two unbranched dendrites, each 200 µm × 5 µm, five compartments each;
+- the soma reduced to 2467 µm², so total membrane stays 8750 µm²;
+- somatic Na density scaled up so total Na is unchanged;
+- no Na or KHT in the dendrites;
+- KLT and h decaying along the dendrites with a 74 µm length constant (Mathews et al. 2010, [doi](https://doi.org/10.1038/nn.2530)).
+
+How to use it:
+- Dendrite compartments are appended after the axon, so compartments 1–45 keep their meaning. Numbers 46–50 are the lateral (ipsilateral) dendrite, 51–55 the medial (contralateral), proximal to distal.
+- New stimulus `EPSGbilateral`: one EPSG at `input_node` at `start`, the other at `input_node2` at `stop`.
+- `membrane(..., morph=D, dendrite_klt_scale=...)` scales dendritic KLT.
+- `uv run scripts/dendrites.py` runs every check below.
+
+Two things the paper doesn't state:
+- **Axial resistivity.** The model's 100 Ω·cm is kept; Mathews used 200, which would attenuate dendritic EPSPs more.
+- **Whether total KLT and h were conserved.** `conserve_totals=True` (default) keeps soma + dendrite totals equal to the lumped model's. `False` starts the gradient at the soma's Table 2 density, halving total KLT.
+
+| | Lumped | Dendrites, totals conserved (default) | Dendrites, KLT from soma density | Literature |
+|---|---|---|---|---|
+| Soma input resistance, steady / peak | 2.4 / 4.7 MΩ | 2.6 / 4.8 MΩ | 4.9 / 7.7 MΩ | 5 MΩ (Lehnert's model); ~7 MΩ measured |
+| Somatic EPSP half-width, unitary EPSG at soma | 547 µs | 527 µs | 691 µs | 0.52–0.6 ms |
+| Same EPSG at mid-dendrite (100 µm): size, rise, half-width | — | 4.1 mV, 221 µs, 536 µs | 5.3 mV, 265 µs, 697 µs | |
+| Mid-dendrite half-width with dendritic KLT removed | — | 689 µs | 910 µs | wider without it (Mathews 2010) |
+| Threshold at 0 delay: bilateral vs unilateral | — | 58.5 vs 82.2 | 37.1 vs 44.0 | bilateral lower (Scott 2010) |
+| Bilateral / summed unilateral EPSP | — | 0.98 | 1.00 | linear in vivo |
+| Coincidence window at 3%, model EPSG / Myoga EPSG | 201 / 218 µs (soma input) | 165 / 179 µs | 222 / 248 µs | 221 µs (Myoga 2014) |
+| EPSG-pair threshold curve at the soma vs lumped (max difference) | — | 12% | 50% | "almost identical" (Lehnert) |
+| Somatic spike at 1.5 / 2 / 3× rheobase | 7.6 / 13.4 / 19.4 mV | 16.3 / 19.5 / 26.6 mV | 21.4 / 26.1 / 29.6 mV | 17 ± 2 mV mature |
+
+Conserving the totals is the default because it reproduces what Lehnert et al. reported for their own dendritic variant: tuning almost identical to the lumped model. It also fixes the EPSP width and keeps the somatic spike near mature size.
+
+Neither variant matches everything:
+- **Conserving totals** narrows the coincidence window below Myoga's value.
+- **The soma-density gradient** matches the input resistance and the window, but leaves the spike too large.
+
+Both reproduce the qualitative dendritic results: attenuation along the cable, EPSP sharpening by dendritic KLT, and the bilateral advantage.

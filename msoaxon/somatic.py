@@ -24,7 +24,9 @@ LOOKBACK = 0.5  # ms before the spike-detection time searched for the takeoff
 
 def _run(model, I, node, v0, mem, t_end=T_END, **kw):
     if model == "multi":
-        return mso_axon("step", START, STOP, I, node, "active-full", t_end, v0, 1, mem=mem, **kw)
+        morph = None if mem is None else getattr(mem, "morph", None)
+        return mso_axon("step", START, STOP, I, node, "active-full", t_end, v0, 1, mem=mem,
+                        morph=morph, **kw)
     return two_cpt("step", START, STOP, I, node, "active-full", t_end, v0, 1, **kw)
 
 
