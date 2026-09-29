@@ -14,7 +14,7 @@ from scipy.sparse import diags, eye, bmat
 from . import constants as C
 from ._solve import breakpoints, epsg_unitary, integrate
 from .synaptic import SynParams, interp_g
-from .two_cpt import STIM_TYPES, stimulus
+from .two_cpt import check_args, stimulus
 
 N = C.N_CPT
 
@@ -145,8 +145,7 @@ def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
     `node` is accepted for call parity with two_cpt; msoAxon.m ignores it too.
     max_step defaults to 0.1*t_end, ode15s's default MaxStep.
     """
-    if stim_type not in STIM_TYPES:
-        raise ValueError(f"unknown stimType {stim_type!r}")
+    check_args(stim_type, model_type, node, input_node, min_node=1)
     if model_type not in ACTIVE_GATES:
         raise ValueError(f"unknown model type {model_type!r}")
     syn = syn or SynParams(t_end=t_end)

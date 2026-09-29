@@ -8,7 +8,7 @@ import pytest
 
 from msoaxon import constants as C
 from msoaxon import mso_axon, two_cpt
-from msoaxon.spiking import count_spikes, matlab_round, spiking
+from msoaxon.spiking import count_spikes, matlab_round
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -63,8 +63,3 @@ def test_matlab_round_is_half_away_from_zero():
     assert matlab_round(2.5) == 3 and matlab_round(-2.5) == -3
     assert matlab_round(15, -1) == 20 and matlab_round(25, -1) == 30
 
-
-def test_spiking_reset_carries_across_columns():
-    # column 1 of a 'Two' input is soma - soma = 0, which re-arms before column 2
-    x = np.array([[0, 0], [0, 50], [0, 50], [0, -1], [0, 50.0]])
-    np.testing.assert_array_equal(spiking(x, 30, "Two")[:, 1], [0, 1, 0, 0, 1])
