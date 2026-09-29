@@ -162,3 +162,21 @@ def test_combine_all_script(tmp_path):
                        capture_output=True, text=True, env={"MPLBACKEND": "Agg", "PATH": ""})
     assert r.returncode == 0, r.stderr
     assert "multi-compartment 1, two-compartment 1" in r.stdout and out.stat().st_size > 0
+
+
+def test_parallel_search_matches_serial():
+    serial = binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=1)
+    assert binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=2) == serial
+
+
+@pytest.mark.parametrize("model", [two_cpt, mso_axon])
+def test_pre_stimulus_cache_does_not_change_results(model):
+    from msoaxon import _solve
+    _solve._QUIET_CACHE.clear()
+    t1, x1 = model("EPSGpair", 5, 5.3, 70, 3, "active-full", 20, -68, 1)
+    assert _solve._QUIET_CACHE  # first run filled it
+    t2, x2 = model("EPSGpair", 5, 5.3, 90, 3, "active-full", 20, -68, 1)  # reuses it
+    _solve._QUIET_CACHE.clear()
+    t3, x3 = model("EPSGpair", 5, 5.3, 90, 3, "active-full", 20, -68, 1)  # recomputes
+    np.testing.assert_array_equal(t2, t3)
+    np.testing.assert_array_equal(x2, x3)

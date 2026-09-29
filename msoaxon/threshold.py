@@ -1,5 +1,8 @@
 """Spiking-threshold search (port of BinarySearch.m)."""
 
+import os
+from concurrent.futures import ProcessPoolExecutor
+
 from .mso_axon import mso_axon
 from .spiking import count_spikes, matlab_round
 from .synaptic import SynParams
@@ -48,27 +51,46 @@ def _search(run, soma_col, axon_col, stim_type, i, factor, max_I, zoom, epsg_pai
     return first
 
 
+def _run(model, stim, start, stop, I, syn, node):
+    f = mso_axon if model == "multi" else two_cpt
+    return f(stim, start, stop, I, node, MODEL_TYPE, T_END, V0, INPUT_NODE, syn)
+
+
+def _point(task):
+    """One sweep point for one model; module-level so worker processes can import it."""
+    model, stim_type, i, node, factor, max_I, zoom, epsg_pair_dt = task
+    axon_col = node - 1 if model == "multi" else 1
+    run = lambda stim, start, stop, I, syn: _run(model, stim, start, stop, I, syn, node)
+    return _search(run, 0, axon_col, stim_type, i, factor, max_I, zoom, epsg_pair_dt)
+
+
 def binary_search(stim_type, n_points, node, factor, max_I, zoom=1.0,
-                  epsg_pair_dt=1 / 25, rounded=True):
+                  epsg_pair_dt=1 / 25, rounded=True, workers=None):
     """Return (thresholds_multi, thresholds_two), one value per sweep point.
 
     epsg_pair_dt: spacing of the second-EPSG delay. BinarySearch.m uses 1/25;
     the EPSGpair_Thresholds*.jpg plots in the repo were made with 0.1 and 11 points.
     rounded: apply BinarySearch.m's rounding (to 1 for EPSGpair, to 10 otherwise).
-    """
-    def mso(stim, start, stop, I, syn):
-        return mso_axon(stim, start, stop, I, node, MODEL_TYPE, T_END, V0, INPUT_NODE, syn)
+    workers: processes for the independent sweep points (default: all CPUs; 1 runs
+    in-process). Results are identical either way. Scripts that call this with
+    workers != 1 need an `if __name__ == "__main__":` guard, since macOS starts
+    worker processes by re-importing the main module.
 
-    def two(stim, start, stop, I, syn):
-        return two_cpt(stim, start, stop, I, node, MODEL_TYPE, T_END, V0, INPUT_NODE, syn)
+    BinarySearch.m tests location1 (the multi-compartment variable) in the second
+    loop's while condition; here each search tests its own location.
+    """
+    # multi-compartment points first: they take ~10x longer, so starting them early
+    # keeps the pool busy while the cheap two-compartment points fill the gaps
+    tasks = [(model, stim_type, i, node, factor, max_I, zoom, epsg_pair_dt)
+             for model in ("multi", "two") for i in range(1, n_points + 1)]
+    workers = min(workers or os.cpu_count() or 1, len(tasks))
+    if workers == 1:
+        results = [_point(t) for t in tasks]
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(_point, tasks))
 
     digits = 0 if stim_type == "EPSGpair" else -1
     finish = (lambda v: matlab_round(v, digits)) if rounded else (lambda v: v)
-
-    multi = [finish(_search(mso, 0, node - 1, stim_type, i, factor, max_I, zoom, epsg_pair_dt))
-             for i in range(1, n_points + 1)]
-    # BinarySearch.m tests location1 (the multi-compartment variable) in this loop's
-    # while condition; fixed here to test the two-compartment search's own location.
-    two_ = [finish(_search(two, 0, 1, stim_type, i, factor, max_I, zoom, epsg_pair_dt))
-            for i in range(1, n_points + 1)]
-    return multi, two_
+    results = [finish(v) for v in results]
+    return results[:n_points], results[n_points:]

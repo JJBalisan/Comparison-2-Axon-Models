@@ -12,7 +12,7 @@ import numpy as np
 from scipy.sparse import diags, eye, bmat
 
 from . import constants as C
-from ._solve import breakpoints, epsg_unitary, integrate
+from ._solve import breakpoints, epsg_unitary, integrate, pre_stimulus_is_quiet
 from .synaptic import SynParams, interp_g
 from .two_cpt import check_args, stimulus
 
@@ -54,8 +54,11 @@ def axial_current(V):
 
 
 def external_current(t, V, stim_type, s, input_node):
-    """Iext density [pA/um^2]; negative is depolarising (it enters dV with a minus)."""
-    Iext = np.zeros(N)
+    """Input current density [pA/um^2] as (0-based compartment, value).
+
+    Only one compartment ever receives input. Negative is depolarising (it
+    enters dV with a minus). "none" means no stimulus.
+    """
     k = input_node - 1
     if stim_type == "ramp":
         slope = 1 / (s.stop - s.start)
@@ -63,40 +66,45 @@ def external_current(t, V, stim_type, s, input_node):
         t_top = s.start + 1 / slope
         I0 = float(s.start <= t <= t_top) * s.I * (t - s.start) * slope / 1000
         if 5 < t <= t_end_local:  # 5 is hardcoded in the original
-            Iext[k] = -I0 * 1e3 / C.SA[0]
+            return k, -I0 * 1e3 / C.SA[0]
     elif stim_type == "ramp2":
         slope = 1 / (s.stop - s.start)
         I0 = min(float(t >= s.start) * s.I * (t - s.start) * slope / 1000, s.I / 1000)
-        Iext[k] = -I0 * 1e3 / C.SA[0]
+        return k, -I0 * 1e3 / C.SA[0]
     elif stim_type == "step":
         if s.start < t <= s.stop:
-            Iext[0] = -s.I / C.SA[0]  # always the soma, regardless of input_node
+            return 0, -s.I / C.SA[0]  # always the soma, regardless of input_node
     elif stim_type == "sine":
         wave = np.sin(2 * np.pi * s.f * (t - s.start) / 1000)
         if s.start < t <= s.stop:
-            Iext[k] = -(s.I * wave * (wave > 0)) / C.SA[0]
+            return k, -(s.I * wave * (wave > 0)) / C.SA[0]
     elif stim_type == "Synaptic":
         if s.start < t <= s.stop:
             g = interp_g(s.t_syn, s.g_syn, t)
-            Iext[k] = g * (V[0] - s.VsynE) / C.SA[0]
+            return k, g * (V[0] - s.VsynE) / C.SA[0]
     elif stim_type == "SynapticPair":
         if s.start < t <= s.stop:
             g = interp_g(s.t_syn, s.g_syn, t) + interp_g(s.t_syn, s.g_syn, t + s.diff)
-            Iext[k] = g * (V[0] - s.VsynE) / C.SA[0]
+            return k, g * (V[0] - s.VsynE) / C.SA[0]
     elif stim_type == "EPSG":
         te = t - s.start
         if s.start < t <= s.stop:
-            Iext[k] = s.I * (0 - V[k]) * float(te >= 0) * epsg_unitary(te) / -C.SA[k]
+            return k, s.I * (0 - V[k]) * float(te >= 0) * epsg_unitary(te) / -C.SA[k]
     elif stim_type == "EPSGpair":
         te = t - s.start
         td = s.stop - s.start
         wave = float(te >= 0) * epsg_unitary(te) + float(te >= td) * epsg_unitary(te - td)
-        Iext[k] = s.I * (0 - V[k]) * wave / -C.SA[k]
-    return Iext
+        return k, s.I * (0 - V[k]) * wave / -C.SA[k]
+    return 0, 0.0
 
 
-def _rhs(t, x, v0, stim_type, s, input_node, gate_mask):
+def _rhs(t, x, v0, stim_type, s, input_node, active):
+    """Right-hand side. Arithmetic is kept expression-for-expression identical to
+    msoAxon.m's order so results are bit-for-bit stable; the speed comes from
+    writing into one output array and skipping gates that are switched off."""
     V, m, h, p, w, z, a = x.reshape(7, N)
+    out = np.empty_like(x)
+    d = out.reshape(7, N)
 
     INa = C.G_NA * m ** 4 * (0.993 * h + 0.007) * (V - V_NA)
     IKHT = C.G_KHT * p * (V - V_K)
@@ -105,25 +113,26 @@ def _rhs(t, x, v0, stim_type, s, input_node, gate_mask):
     Ih = C.G_H * a * (V - V_H)
     Ilk = C.G_LK * (V - v0)  # leak reversal = resting potential
 
-    Iext = external_current(t, V, stim_type, s, input_node)
-    dV = -(INa + IKHT + IKLT + Ih + Ilk + Iext + axial_current(V)) / CAP
+    total = INa + IKHT + IKLT + Ih + Ilk
+    k, iext = external_current(t, V, stim_type, s, input_node)
+    total[k] += iext  # the other compartments would add an exact 0.0
+    d[0] = -(total + axial_current(V)) / CAP
 
+    act_m, act_h, act_p, act_w, act_z, act_a = active
     # Na: Scott et al 2010, 35 C
-    dm = (C.minf(V) - m) / ((0.141 + (-0.0826 / (1 + np.exp((-20.5 - V) / 10.8)))) / 3)
-    dh = (C.hinf(V) - h) / ((4 + (-3.74 / (1 + np.exp((-40.6 - V) / 5.05)))) / 3)
+    d[1] = (C.minf(V) - m) / ((0.141 + (-0.0826 / (1 + np.exp((-20.5 - V) / 10.8)))) / 3) if act_m else 0.0
+    d[2] = (C.hinf(V) - h) / ((4 + (-3.74 / (1 + np.exp((-40.6 - V) / 5.05)))) / 3) if act_h else 0.0
     # KHT: Rothman Manis 2003, 22 C adjusted to 35 C with Q10 of 3
-    dp = (C.pinf(V) - p) / (_P_TEMP * (100 / (4 * np.exp((V + 60) / 32)
-                                               + 5 * np.exp(-(V + 60) / 22)) + 5))
+    d[3] = (C.pinf(V) - p) / (_P_TEMP * (100 / (4 * np.exp((V + 60) / 32)
+                                                 + 5 * np.exp(-(V + 60) / 22)) + 5)) if act_p else 0.0
     # KLT: Mathews et al 2010, 35 C
-    dw = (C.winf(V) - w) / (21.5 / (6 * np.exp((V + 60) / 7)
-                                    + 24 * np.exp(-(V + 60) / 50.6)) + 0.35)
-    dz = (C.zinf(V) - z) / (170 / (5 * np.exp((V + 60) / 10)
-                                   + np.exp(-(V + 70) / 8)) + 10.7)
+    d[4] = (C.winf(V) - w) / (21.5 / (6 * np.exp((V + 60) / 7)
+                                      + 24 * np.exp(-(V + 60) / 50.6)) + 0.35) if act_w else 0.0
+    d[5] = (C.zinf(V) - z) / (170 / (5 * np.exp((V + 60) / 10)
+                                     + np.exp(-(V + 70) / 8)) + 10.7) if act_z else 0.0
     # h: Baumann et al 2013, 32 C adjusted to 35 C
-    da = (C.ainf(V) - a) / (_A_TEMP * (79 + 417 * np.exp(-(V + 61.5) ** 2 / 800)))
-
-    gates = np.stack([dm, dh, dp, dw, dz, da]) * gate_mask[:, None]
-    return np.concatenate([dV, gates.ravel()])
+    d[6] = (C.ainf(V) - a) / (_A_TEMP * (79 + 417 * np.exp(-(V + 61.5) ** 2 / 800))) if act_a else 0.0
+    return out
 
 
 def _jac_sparsity():
@@ -151,10 +160,15 @@ def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
     syn = syn or SynParams(t_end=t_end)
 
     s = stimulus(stim_type, start, stop, I, t_end, syn)
-    gate_mask = np.array(ACTIVE_GATES[model_type], dtype=float)
+    active = tuple(bool(g) for g in ACTIVE_GATES[model_type])
     y0 = np.concatenate([np.full(N, float(v0))] + [np.full(N, g) for g in _GATE0])
+    cuts = breakpoints(stim_type, start, stop, t_end)
+    quiet = None
+    if pre_stimulus_is_quiet(cuts, start, stop):
+        quiet = (("mso", model_type, float(v0)),
+                 lambda t, x: _rhs(t, x, v0, "none", s, input_node, active))
 
-    return integrate(lambda t, x: _rhs(t, x, v0, stim_type, s, input_node, gate_mask),
-                     y0, t_end, breakpoints(stim_type, start, stop, t_end),
-                     rtol=1e-8, atol=1e-8, max_step=max_step or 0.1 * t_end,
-                     jac_sparsity=_JAC_SPARSITY)
+    return integrate(lambda t, x: _rhs(t, x, v0, stim_type, s, input_node, active),
+                     y0, t_end, cuts, rtol=1e-8, atol=1e-8,
+                     max_step=max_step or 0.1 * t_end, jac_sparsity=_JAC_SPARSITY,
+                     quiet=quiet)
