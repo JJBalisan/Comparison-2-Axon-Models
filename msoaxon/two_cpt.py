@@ -209,7 +209,8 @@ def stimulus(stim_type, start, stop, I, t_end, syn):
 
 
 def two_cpt(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
-            syn: SynParams | None = None, stop_on_spike=None, r1=10.0, tau_est=0.71):
+            syn: SynParams | None = None, stop_on_spike=None, r1=10.0, tau_est=0.71,
+            max_step=0.1):
     """Run the two-compartment model. Returns (t, x) with x shaped (n_times, 11).
 
     r1 [MOhm] and tau_est [ms] set the passive calibration (TwoCpt.m: 10 and 0.71;
@@ -236,4 +237,5 @@ def two_cpt(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
                  lambda t, x: _rhs(t, x, P, "none", s))
     spike_stop = None if stop_on_spike is None else spike_event(1, stop_on_spike)
     return integrate(lambda t, x: _rhs(t, x, P, stim_type, s), x0, t_end, cuts,
-                     rtol=1e-6, atol=1e-6, max_step=0.1, quiet=quiet, stop_event=spike_stop)
+                     rtol=1e-6, atol=1e-6, max_step=max_step, quiet=quiet,
+                     stop_event=spike_stop)
