@@ -79,7 +79,8 @@ LUMPED = SimpleNamespace(
     chain=True, jac=_chain_jac_sparsity(), labels=["soma", "AIS", "AIS"] + ["internode", "node"] * 21)
 
 
-def with_dendrites(length=200.0, diameter=5.0, n_seg=5, klt_lambda=74.0, conserve_totals=True):
+def with_dendrites(length=200.0, diameter=5.0, n_seg=5, klt_lambda=74.0, conserve_totals=True,
+                   dendrite_ra=R_AXIAL):
     """Lehnert et al 2014's dendritic variant (their Fig. 8), appended to the axon.
 
     Two identical unbranched dendrites (lateral = ipsilateral input, medial =
@@ -89,7 +90,9 @@ def with_dendrites(length=200.0, diameter=5.0, n_seg=5, klt_lambda=74.0, conserv
     so total Na is unchanged. Dendrites have no Na or KHT; KLT and h decay
     exponentially with distance from the soma (length constant 74 um, Mathews et
     al 2010), starting from the soma's densities; leak and capacitance as at the
-    soma. The paper doesn't give axial resistivity, so the model's 100 Ohm cm is kept.
+    soma. The paper doesn't give axial resistivity, so the model's 100 Ohm cm is the
+    default; dendrite_ra sets it for the dendrite compartments only (Mathews et al
+    2010 used 200 Ohm cm for soma and dendrites). The soma and axon keep 100.
 
     The paper doesn't say whether total KLT and h were kept when they were spread
     along the dendrites; it does say so for Na. conserve_totals=True (default)
@@ -133,10 +136,17 @@ def with_dendrites(length=200.0, diameter=5.0, n_seg=5, klt_lambda=74.0, conserv
     parent = np.concatenate([np.arange(N - 1), [0], lat[:-1], [0], med[:-1]])
     child = np.concatenate([np.arange(1, N), lat, med])
     g_ax = (2 / R_AXIAL) / (l_cm[parent] / xa_cm[parent] + l_cm[child] / xa_cm[child])
+    if dendrite_ra != R_AXIAL:
+        # only edges into a dendrite compartment change, so the axon's conductances
+        # stay bit-identical; each half-compartment uses its own resistivity
+        ra = np.concatenate([np.full(N, R_AXIAL), np.full(n_d, float(dendrite_ra))])
+        into = child >= N
+        p, c = parent[into], child[into]
+        g_ax[into] = 2 / (ra[p] * l_cm[p] / xa_cm[p] + ra[c] * l_cm[c] / xa_cm[c])
     labels = LUMPED.labels + ["lateral dendrite"] * n_seg + ["medial dendrite"] * n_seg
     return SimpleNamespace(
         key=("dendrites", float(length), float(diameter), int(n_seg), float(klt_lambda),
-             bool(conserve_totals)),
+             bool(conserve_totals), float(dendrite_ra)),
         n=n, sa=sa, cap=cap, g_na=g_na, g_kht=g_kht, g_klt=g_klt, g_h=g_h, g_lk=g_lk,
         parent=parent, child=child, g_ax=g_ax, chain=False,
         jac=_tree_jac_sparsity(n, parent, child), labels=labels,

@@ -99,3 +99,15 @@ def test_total_klt_and_h_conserved_by_default():
     assert alt.g_klt[0] == C.G_KLT[0]
     assert np.sum(alt.g_klt[region] * alt.sa[region]) < 0.6 * C.G_KLT[0] * C.SA[0]
     assert alt.key != D.key
+
+
+def test_dendrite_ra_changes_only_dendritic_edges():
+    hi = with_dendrites(dendrite_ra=200)
+    assert hi.key != D.key
+    into = D.child >= 45
+    assert into.sum() == 10
+    np.testing.assert_array_equal(hi.g_ax[~into], D.g_ax[~into])  # soma and axon untouched
+    distal = into & (D.parent >= 45)  # dendrite-to-dendrite edges: both halves at 200
+    np.testing.assert_allclose(hi.g_ax[distal], D.g_ax[distal] / 2, rtol=1e-12)
+    root = into & (D.parent < 45)  # soma-to-dendrite: only the dendritic half doubles
+    assert np.all((hi.g_ax[root] < D.g_ax[root]) & (hi.g_ax[root] > D.g_ax[root] / 2))
