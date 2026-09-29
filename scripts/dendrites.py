@@ -33,7 +33,7 @@ import numpy as np
 
 from msoaxon import mso_axon
 from msoaxon.coincidence import half_width, threshold, threshold_curve
-from msoaxon.mso_axon import LUMPED, membrane, with_dendrites
+from msoaxon.multi import LUMPED, membrane, with_dendrites
 from msoaxon.somatic import rheobase, spike_amplitude
 
 V0 = -68.0

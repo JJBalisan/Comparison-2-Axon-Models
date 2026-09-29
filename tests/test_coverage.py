@@ -202,3 +202,12 @@ def test_stop_on_spike_leaves_non_spiking_runs_alone():
     te, xe = mso_axon(*args, stop_on_spike=10)
     np.testing.assert_array_equal(t, te)
     np.testing.assert_array_equal(x, xe)
+
+
+def test_model_modules_are_importable():
+    # the re-exported functions used to shadow their own submodules
+    import msoaxon
+    import msoaxon.multi as multi
+    import msoaxon.two as two
+
+    assert multi.mso_axon is msoaxon.mso_axon and two.two_cpt is msoaxon.two_cpt

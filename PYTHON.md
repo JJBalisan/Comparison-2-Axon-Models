@@ -15,8 +15,8 @@ uv run scripts/making_threshold_graphs.py --only EPSGpair --jpg-grid   # the rep
 |---|---|
 | `Constants.m` → `Area.mat`, `Fractions.mat` | `msoaxon/constants.py` (computed on import) |
 | `Coupling.mat` | `msoaxon/data/coupling.json` |
-| `TwoCpt.m`, `TwoCptODE.m` | `msoaxon/two_cpt.py` → `two_cpt(...)` |
-| `msoAxon.m` | `msoaxon/mso_axon.py` → `mso_axon(...)` |
+| `TwoCpt.m`, `TwoCptODE.m` | `msoaxon/two.py` → `two_cpt(...)` |
+| `msoAxon.m` | `msoaxon/multi.py` → `mso_axon(...)` |
 | `Synaptic.m` | `msoaxon/synaptic.py` (`SynParams` replaces the `Syn` struct) |
 | `Spiking.m` | `msoaxon/spiking.py` |
 | `BinarySearch.m` | `msoaxon/threshold.py` → `binary_search(...)` |
@@ -80,7 +80,7 @@ The 45-compartment model follows Lehnert et al. 2014 ([doi](https://doi.org/10.1
 | Soma time constant | 0.34 ms | 0.71 ms |
 | Resting potential | −58 mV | −68 mV (from Lehnert) |
 
-The old values survive as comments beside the new ones (`%8.5`, `%-58`). `GOLDWYN_2019` in `two_cpt.py` restores them: `two_cpt(..., v0=-58, r1=8.5, tau_est=0.34)`.
+The old values survive as comments beside the new ones (`%8.5`, `%-58`). `GOLDWYN_2019` in `msoaxon/two.py` restores them: `two_cpt(..., v0=-58, r1=8.5, tau_est=0.34)`.
 
 ### Coincidence window
 

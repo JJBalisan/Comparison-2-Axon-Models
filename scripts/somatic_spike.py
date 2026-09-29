@@ -16,7 +16,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from msoaxon.mso_axon import membrane
+from msoaxon.multi import membrane
 from msoaxon.somatic import _run, rheobase, spike_amplitude
 
 MULTS = (1.5, 2.0, 3.0)  # below ~1.5x the somatic trace has no distinct inflection

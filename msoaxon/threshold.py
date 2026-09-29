@@ -3,10 +3,10 @@
 import os
 from concurrent.futures import ProcessPoolExecutor
 
-from .mso_axon import mso_axon
+from .multi import mso_axon
 from .spiking import count_spikes, matlab_round
 from .synaptic import SynParams
-from .two_cpt import two_cpt
+from .two import two_cpt
 
 START = 5.0
 T_END = 20.0

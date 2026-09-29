@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from msoaxon.coincidence import half_width, probability_trials, threshold_curve
-from msoaxon.two_cpt import GOLDWYN_2019
+from msoaxon.two import GOLDWYN_2019
 
 MYOGA_US = 221  # AP-probability half-width without inhibition (Myoga et al 2014)
 MARGINS = (0.005, 0.03)  # inputs this far above coincident threshold (Myoga: "200 pS (~3%)")

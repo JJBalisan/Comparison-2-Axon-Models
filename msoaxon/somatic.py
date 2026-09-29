@@ -13,8 +13,8 @@ the charging transient and shortly before the axonal spike.
 
 import numpy as np
 
-from .mso_axon import mso_axon
-from .two_cpt import two_cpt
+from .multi import mso_axon
+from .two import two_cpt
 
 START, STOP, T_END = 5.0, 105.0, 110.0
 FACTOR = 10.0  # spike = axon rises this far above soma

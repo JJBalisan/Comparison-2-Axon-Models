@@ -7,7 +7,7 @@ from msoaxon import SynParams, two_cpt
 from msoaxon import _solve
 from msoaxon._solve import epsg_unitary
 from msoaxon.coincidence import half_width, threshold
-from msoaxon.two_cpt import GOLDWYN_2019
+from msoaxon.two import GOLDWYN_2019
 
 GOLDWYN_KW = {k: v for k, v in GOLDWYN_2019.items() if k != "v0"}
 

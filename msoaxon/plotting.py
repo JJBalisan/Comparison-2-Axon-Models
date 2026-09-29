@@ -7,7 +7,7 @@ stimType, inputNode, start, stop, I, Syn.
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .two_cpt import applied_current, stimulus
+from .two import applied_current, stimulus
 
 
 def _panel(ax, t, V, title, labels, t_end, ylabel="Voltage (mV)"):

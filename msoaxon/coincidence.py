@@ -23,10 +23,10 @@ from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 
-from .mso_axon import mso_axon
+from .multi import mso_axon
 from .spiking import count_spikes
 from .synaptic import SynParams
-from .two_cpt import two_cpt
+from .two import two_cpt
 
 START = 5.0
 T_END = 20.0
