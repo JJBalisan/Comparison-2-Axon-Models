@@ -47,7 +47,7 @@ def taup(V):
     return _P_TEMP * (100 / (4 * np.exp((V + 60) / 32) + 5 * np.exp(-(V + 60) / 22)) + 5)
 
 
-def taum(V):  # Rothman-Manis with 35 C adjustment
+def taum(V):  # TwoCpt.m credits Rothman-Manis (35 C); msoAxon.m cites Scott 2010 for the same formula
     return (0.141 + (-0.0826 / (1 + np.exp((-20.5 - V) / 10.8)))) / 3
 
 
@@ -82,10 +82,11 @@ def get_params(v0, node, input_node, model_type, r1=10.0, tau_est=0.71):
         h1 = h2 = 0.0
 
     # 'Active-sodium' (capital A) is how TwoCpt.m spells it, so 'active-sodium'
-    # gets no Na in this model. Kept as-is; see README.
+    # gets no Na in this model. Kept as-is; see PYTHON.md, "Quirks kept on purpose".
     if model_type in ("Active-sodium", "active-full"):
         na1 = C.NA_FRAC[0]
-        P.gNa2 = {3: 119.0, 5: 25.5}.get(node, 140.0)  # 140 is a placeholder
+        # only nodes 3 and 5 were calibrated; TwoCpt.m uses 140 for every other node
+        P.gNa2 = {3: 119.0, 5: 25.5}.get(node, 140.0)
     else:
         na1 = 0.0
         P.gNa2 = 0.0
@@ -213,6 +214,18 @@ def two_cpt(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
             syn: SynParams | None = None, stop_on_spike=None, r1=10.0, tau_est=0.71,
             max_step=0.1):
     """Run the two-compartment model. Returns (t, x) with x shaped (n_times, 11).
+
+    Arguments are as in mso_axon (see its docstring for what start, stop and I
+    mean for each stim_type), with these differences, all from TwoCptODE.m:
+    - currents enter compartment 1 if input_node == 1, else compartment 2 (the
+      axon); step, ramp and sine are on for start <= t < stop (or <= stop)
+      rather than start < t <= stop;
+    - ramp2 always starts at t = 5, whatever `start` is;
+    - EPSG is not cut off at stop.
+    - node (2..45) picks the axon compartment whose coupling constants and
+      channel fractions set the second compartment; only nodes 3 and 5 have a
+      calibrated axonal Na density (see get_params).
+    - max_step is a fixed 0.1 ms, not a fraction of t_end.
 
     r1 [MOhm] and tau_est [ms] set the passive calibration (TwoCpt.m: 10 and 0.71;
     Goldwyn et al 2019: 8.5 and 0.34, with v0 = -58, see GOLDWYN_2019).

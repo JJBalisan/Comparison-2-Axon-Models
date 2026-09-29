@@ -1,4 +1,4 @@
-"""45-compartment MSO soma + axon model (port of msoAxon.m).
+"""Multi-compartment MSO soma + axon model (port of msoAxon.m, 45 compartments).
 
 Equations as in Lehnert et al 2014 unless noted. All quantities are densities
 (pA/um^2, nS/um^2).
@@ -225,7 +225,7 @@ def bilateral_current(t, V, s, a, b, sa):
 
 def membrane(v0, soma_klt_scale=1.0, ais_klt_scale=1.0, soma_na_vhalf=-62.5,
              rebalance_rest=False, morph=None, dendrite_klt_scale=1.0):
-    """Per-compartment channel overrides for the 45-compartment model.
+    """Per-compartment channel overrides for the multi-compartment model.
 
     Defaults reproduce msoAxon.m exactly. The knobs are the ones the mature-MSO
     literature points to:
@@ -242,7 +242,9 @@ def membrane(v0, soma_klt_scale=1.0, ais_klt_scale=1.0, soma_na_vhalf=-62.5,
       only). Mathews et al 2010 found dendritic Kv1 sharpens EPSPs.
     """
     morph = morph or LUMPED
-    m = SimpleNamespace(key=(float(soma_klt_scale), float(ais_klt_scale),
+    # v0 is in the key because the leak reversals (vlk) are built from it: without
+    # it, membrane(-60) and membrane(-68) would share a pre-stimulus cache entry
+    m = SimpleNamespace(key=(float(v0), float(soma_klt_scale), float(ais_klt_scale),
                              float(soma_na_vhalf), bool(rebalance_rest), float(dendrite_klt_scale)),
                         morph_key=morph.key, morph=morph)
     m.g_na = morph.g_na
@@ -250,6 +252,7 @@ def membrane(v0, soma_klt_scale=1.0, ais_klt_scale=1.0, soma_na_vhalf=-62.5,
     m.g_klt[0] *= soma_klt_scale
     m.g_klt[1:3] *= ais_klt_scale
     m.g_klt[N:] *= dendrite_klt_scale
+    # stored negated, as the "+ 62.5" in hinf's exp((V + 62.5) / 7.77) expects
     m.na_vhalf = np.full(morph.n, 62.5)
     m.na_vhalf[0] = -soma_na_vhalf
     m.vlk = np.full(morph.n, float(v0))
@@ -313,9 +316,26 @@ def _rhs(t, x, v0, stim_type, s, input_node, active, mem, morph=LUMPED, input_no
 def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
              syn: SynParams | None = None, max_step=None, stop_on_spike=None, mem=None,
              morph=None, input_node2=None):
-    """Run the 45-compartment model. Returns (t, y) with y shaped (n_times, 7*n).
+    """Run the multi-compartment model. Returns (t, y) with y shaped (n_times, 7*n).
 
-    `node` is accepted for call parity with two_cpt; msoAxon.m ignores it too.
+    Arguments shared with two_cpt (compartments are 1-indexed, times in ms):
+    - stim_type: one of MSO_STIM_TYPES. What `start`, `stop` and `I` mean depends
+      on it:
+        step, sine: current [pA] on from start to stop (step always into the soma)
+        ramp: rises from 0 at start to I [pA] at stop, then off
+        ramp2: rises with slope I/(stop - start) from start, then holds at I [pA]
+        EPSG: peak conductance [nS] of the unitary EPSG waveform, onset at start
+          (in this model it is also cut off at stop)
+        EPSGpair: two EPSGs at input_node, onsets at start and stop
+        EPSGbilateral: first EPSG at input_node at start, second at input_node2 at stop
+        Synaptic, SynapticPair: I is ignored; the conductance comes from `syn`,
+          applied from start to stop
+    - node: the compartment stop_on_spike compares with the soma (msoAxon.m
+      itself ignores it). node=1 is the soma, so stop_on_spike would never fire.
+    - model_type: which channels are active (ACTIVE_GATES).
+    - t_end: end time [ms]; v0: initial and (unless mem says otherwise) leak
+      reversal potential [mV]; input_node: where the stimulus enters.
+    - syn: synaptic waveform settings (SynParams), also the EPSG time constants.
     max_step defaults to 0.1*t_end, ode15s's default MaxStep.
     stop_on_spike: if given (mV), stop as soon as compartment `node` rises that far
     above the soma; t then ends before t_end.
@@ -346,6 +366,9 @@ def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
         y0 = np.concatenate([np.full(n, float(v0)), *mem.y0_gates])
     cuts = breakpoints(stim_type, start, stop, t_end)
     quiet = None
+    # unlike two_cpt, step shares the prefix: msoAxon.m switches stimuli on for
+    # t > start (the EPSG waveforms are zero at onset), so the equations at
+    # t == start are still stimulus-free
     if pre_stimulus_is_quiet(cuts, start, stop):
         quiet = (("mso", model_type, float(v0), mem.key, morph.key),
                  lambda t, x: _rhs(t, x, v0, "none", s, input_node, active, mem, morph))

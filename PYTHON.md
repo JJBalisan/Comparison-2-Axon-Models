@@ -58,6 +58,8 @@ These are in the MATLAB and are reproduced unchanged, because changing them woul
 - `TwoCpt.m` enables sodium for `'Active-sodium'` (capital A), so `active-sodium` means *no* Na in the 2-CPT model but Na-only in the 45-CPT model.
 - The 2-CPT model holds KLT inactivation `z` fixed at its resting value.
 - In `msoAxon.m`, `step` always injects into the soma whatever `inputNode` is; `ramp` only applies for `t > 5` (hardcoded); `EPSG`/`EPSGpair` scale by the input compartment's area while the other stimuli use the soma's.
+- `TwoCptODE.m` starts `ramp2` at t = 5 whatever `start` is; `msoAxon.m` starts it at `start`.
+- `TwoCpt.m` has calibrated axonal Na (`gNa2`) only for nodes 3 (119) and 5 (25.5). Every other node gets the placeholder 140, so 2-CPT runs at those nodes use an uncalibrated value.
 - `Spiking.m` doesn't clear `reset` between columns.
 - `SA(2)` uses `1.66/3` where `0.66/2` was probably meant. The stored `Area.mat` was built with it.
 - `BinarySearch.m` reports the ceiling (`max`) when nothing fires, so a returned 15000 means "no threshold found", not "threshold ≈ 15000". It also assumes spiking gets easier as input grows. That fails for `EPSG` with factor 30: a very large conductance holds the soma near 0 mV, so the axon never gets 30 mV above it. The `ramp` sweep's first point (stop = 5.1) returns the ceiling in both models for the same reason.
