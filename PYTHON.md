@@ -42,6 +42,7 @@ There is no MATLAB here, so nothing was compared run-for-run. What was checked:
 ## Deliberate differences
 
 - **Solver:** `ode15s` → scipy `solve_ivp(method="BDF")` with the same tolerances (2-CPT 1e-6, `max_step` 0.1; 45-CPT 1e-8, `max_step` 0.1·tEnd, ode15s's default). Integration restarts at stimulus on/off times so the solver can't step over a narrow EPSG. The 45-CPT model gets a sparse Jacobian pattern.
+- **Threshold search stops each run at its first spike** (`stop_on_spike`), since it only needs yes or no. The stop is found on the continuous solution, not the saved solver steps, so in principle it could count a crossing that falls between two steps. Across every production sweep (184 thresholds) the results are identical to running each simulation to `tEnd`. Sweep points also run in parallel (`workers`, default all CPUs).
 - **Synaptic noise:** numpy's RNG can't reproduce MATLAB's `rng(seed); randn`, so `Synaptic`/`SynapticPair` runs are statistically equivalent, not identical.
 - **`interp1q` out of range** returns 0, not NaN. `TwoCptODE.m` already guarded this for `SynapticPair`. `msoAxon.m` didn't, which is likely the "Problem including Synaptic pair" comment in `Combine_all.m`.
 - **`BinarySearch.m`:** the two-compartment loop tested `location1` in its `while` condition. It now tests its own `location2`.

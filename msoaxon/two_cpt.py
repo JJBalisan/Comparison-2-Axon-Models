@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from . import constants as C
-from ._solve import breakpoints, epsg_unitary, integrate, pre_stimulus_is_quiet
+from ._solve import breakpoints, epsg_unitary, integrate, pre_stimulus_is_quiet, spike_event
 from .synaptic import SynParams, interp_g, synaptic
 
 STIM_TYPES = ("step", "ramp", "ramp2", "sine", "Synaptic", "SynapticPair", "EPSG", "EPSGpair")
@@ -200,8 +200,12 @@ def stimulus(stim_type, start, stop, I, t_end, syn):
 
 
 def two_cpt(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
-            syn: SynParams | None = None):
-    """Run the two-compartment model. Returns (t, x) with x shaped (n_times, 11)."""
+            syn: SynParams | None = None, stop_on_spike=None):
+    """Run the two-compartment model. Returns (t, x) with x shaped (n_times, 11).
+
+    stop_on_spike: if given (mV), stop as soon as the axon compartment rises that
+    far above the soma; t then ends before t_end.
+    """
     check_args(stim_type, model_type, node, input_node, min_node=2)  # node 1 is the soma
     syn = syn or SynParams(t_end=t_end)
     P = get_params(v0, node, input_node, model_type)
@@ -218,5 +222,6 @@ def two_cpt(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
             and pre_stimulus_is_quiet(cuts, start, stop)):
         quiet = (("two", node, model_type, float(v0), input_node),
                  lambda t, x: _rhs(t, x, P, "none", s))
+    spike_stop = None if stop_on_spike is None else spike_event(1, stop_on_spike)
     return integrate(lambda t, x: _rhs(t, x, P, stim_type, s), x0, t_end, cuts,
-                     rtol=1e-6, atol=1e-6, max_step=0.1, quiet=quiet)
+                     rtol=1e-6, atol=1e-6, max_step=0.1, quiet=quiet, stop_event=spike_stop)

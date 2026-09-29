@@ -12,7 +12,7 @@ import numpy as np
 from scipy.sparse import diags, eye, bmat
 
 from . import constants as C
-from ._solve import breakpoints, epsg_unitary, integrate, pre_stimulus_is_quiet
+from ._solve import breakpoints, epsg_unitary, integrate, pre_stimulus_is_quiet, spike_event
 from .synaptic import SynParams, interp_g
 from .two_cpt import check_args, stimulus
 
@@ -148,11 +148,13 @@ _JAC_SPARSITY = _jac_sparsity()
 
 
 def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
-             syn: SynParams | None = None, max_step=None):
+             syn: SynParams | None = None, max_step=None, stop_on_spike=None):
     """Run the 45-compartment model. Returns (t, y) with y shaped (n_times, 315).
 
     `node` is accepted for call parity with two_cpt; msoAxon.m ignores it too.
     max_step defaults to 0.1*t_end, ode15s's default MaxStep.
+    stop_on_spike: if given (mV), stop as soon as compartment `node` rises that far
+    above the soma; t then ends before t_end.
     """
     check_args(stim_type, model_type, node, input_node, min_node=1)
     if model_type not in ACTIVE_GATES:
@@ -168,7 +170,8 @@ def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
         quiet = (("mso", model_type, float(v0)),
                  lambda t, x: _rhs(t, x, v0, "none", s, input_node, active))
 
+    spike_stop = None if stop_on_spike is None else spike_event(node - 1, stop_on_spike)
     return integrate(lambda t, x: _rhs(t, x, v0, stim_type, s, input_node, active),
                      y0, t_end, cuts, rtol=1e-8, atol=1e-8,
                      max_step=max_step or 0.1 * t_end, jac_sparsity=_JAC_SPARSITY,
-                     quiet=quiet)
+                     quiet=quiet, stop_event=spike_stop)

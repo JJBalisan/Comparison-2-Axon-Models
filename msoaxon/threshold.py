@@ -41,8 +41,10 @@ def _search(run, soma_col, axon_col, stim_type, i, factor, max_I, zoom, epsg_pai
     while distance > zoom and location <= max_I:
         stop, syn, I_override = sweep_setting(stim_type, i, epsg_pair_dt)
         I = location if I_override is None else I_override
-        _, x = run(stim_type, START, stop, I, syn)
-        spiked = count_spikes(x[:, soma_col], x[:, axon_col], factor) != 0
+        t, x = run(stim_type, START, stop, I, syn, factor)
+        # the run stops at the first spike, where axon - soma equals factor exactly,
+        # so an early end counts as a spike alongside the sampled check
+        spiked = t[-1] < T_END or count_spikes(x[:, soma_col], x[:, axon_col], factor) != 0
         tested = location
         first = location
         distance = abs((location - previous) / 2)
@@ -51,16 +53,19 @@ def _search(run, soma_col, axon_col, stim_type, i, factor, max_I, zoom, epsg_pai
     return first
 
 
-def _run(model, stim, start, stop, I, syn, node):
+def _run(model, stim, start, stop, I, syn, factor, node):
+    """One simulation, stopped at the first spike: the search only needs yes/no."""
     f = mso_axon if model == "multi" else two_cpt
-    return f(stim, start, stop, I, node, MODEL_TYPE, T_END, V0, INPUT_NODE, syn)
+    return f(stim, start, stop, I, node, MODEL_TYPE, T_END, V0, INPUT_NODE, syn,
+             stop_on_spike=factor)
 
 
 def _point(task):
     """One sweep point for one model; module-level so worker processes can import it."""
     model, stim_type, i, node, factor, max_I, zoom, epsg_pair_dt = task
     axon_col = node - 1 if model == "multi" else 1
-    run = lambda stim, start, stop, I, syn: _run(model, stim, start, stop, I, syn, node)
+    run = lambda stim, start, stop, I, syn, factor: _run(model, stim, start, stop, I, syn,
+                                                         factor, node)
     return _search(run, 0, axon_col, stim_type, i, factor, max_I, zoom, epsg_pair_dt)
 
 
