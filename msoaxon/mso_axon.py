@@ -89,11 +89,12 @@ def external_current(t, V, stim_type, s, input_node):
     elif stim_type == "EPSG":
         te = t - s.start
         if s.start < t <= s.stop:
-            return k, s.I * (0 - V[k]) * float(te >= 0) * epsg_unitary(te) / -C.SA[k]
+            return k, s.I * (0 - V[k]) * float(te >= 0) * epsg_unitary(te, s.epsg_tau) / -C.SA[k]
     elif stim_type == "EPSGpair":
         te = t - s.start
         td = s.stop - s.start
-        wave = float(te >= 0) * epsg_unitary(te) + float(te >= td) * epsg_unitary(te - td)
+        wave = (float(te >= 0) * epsg_unitary(te, s.epsg_tau)
+                + float(te >= td) * epsg_unitary(te - td, s.epsg_tau))
         return k, s.I * (0 - V[k]) * wave / -C.SA[k]
     return 0, 0.0
 
