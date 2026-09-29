@@ -19,6 +19,7 @@ class SynParams:
     random_in: int = 1396  # RNG seed
     diff: float = 1.0  # time offset of the second input for SynapticPair [ms]
     f: float = 200.0  # sine frequency [Hz]
+    epsg_tau: tuple = (0.1, 0.18)  # EPSG/EPSGpair (rise, decay) [ms]; Myoga et al 2014 used decay 0.3
 
 
 def synaptic(syn: SynParams):

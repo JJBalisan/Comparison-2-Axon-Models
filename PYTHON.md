@@ -61,3 +61,66 @@ These are in the MATLAB and are reproduced unchanged, because changing them woul
 - `Spiking.m` doesn't clear `reset` between columns.
 - `SA(2)` uses `1.66/3` where `0.66/2` was probably meant. The stored `Area.mat` was built with it.
 - `BinarySearch.m` reports the ceiling (`max`) when nothing fires, so a returned 15000 means "no threshold found", not "threshold ≈ 15000". It also assumes spiking gets easier as input grows. That fails for `EPSG` with factor 30: a very large conductance holds the soma near 0 mV, so the axon never gets 30 mV above it. The `ramp` sweep's first point (stop = 5.1) returns the ceiling in both models for the same reason.
+
+## Comparison with the literature
+
+`uv run scripts/coincidence_window.py` reproduces the numbers below; `figures/coincidence/` gets the plot and a JSON of every curve.
+
+### Lineage
+
+The 45-compartment model follows Lehnert et al. 2014 ([doi](https://doi.org/10.1523/JNEUROSCI.4038-13.2014)). The two-compartment model is the coupling-constant framework of Goldwyn, Remme & Rinzel 2019 ([doi](https://doi.org/10.1371/journal.pcbi.1006476)).
+
+`TwoCpt.m` changes Goldwyn's passive targets:
+
+| | Goldwyn 2019 | `TwoCpt.m` |
+|---|---|---|
+| Input resistance | 8.5 MΩ | 10 MΩ |
+| Soma time constant | 0.34 ms | 0.71 ms |
+| Resting potential | −58 mV | −68 mV (from Lehnert) |
+
+The old values survive as comments beside the new ones (`%8.5`, `%-58`). `GOLDWYN_2019` in `two_cpt.py` restores them: `two_cpt(..., v0=-58, r1=8.5, tau_est=0.34)`.
+
+### Coincidence window
+
+Measured the way Myoga et al. 2014 did in adult gerbil MSO at 35 °C ([doi](https://doi.org/10.1038/ncomms4790)):
+- two identical EPSGs, their relative timing stepped in 20 µs;
+- inputs slightly above the coincident threshold, so spike probability peaks near 100%;
+- result: the full width of the spike-probability curve at half maximum. They measured **221 µs**.
+
+| Model | Model EPSG (decay 0.18 ms) | Myoga EPSG (decay 0.3 ms) |
+|---|---|---|
+| 45-compartment | 201 µs | 218 µs |
+| 2-compartment, `TwoCpt.m` | 199 µs | 216 µs |
+| 2-compartment, Goldwyn 2019 calibration | 166 µs | 181 µs |
+
+These widths use inputs 3% above threshold. At 0.5% they shrink to 65–89 µs. The margin matters a lot, and the paper's "200 pS (~3%)" is ambiguous: 200 pS is closer to 0.5% of their 43 nS EPSGs.
+
+How the widths are computed:
+- They come from thresholds resolved to 1e-4 (`msoaxon/coincidence.py`). Probability is 50% where the threshold rises to the input level.
+- Noisy trials check this: 1% amplitude jitter plus 5 µs onset jitter give 200 µs against the estimate's 199 µs. If the noise is large enough to keep peak probability near 85%, the half-maximum width comes out about 10% wider.
+
+Findings:
+- With matched methods, the original calibration reproduces the measured window closely.
+- Goldwyn's faster membrane narrows it by about 17%.
+- An earlier estimate here (half-way point of the threshold curve, ~340 µs) measured a different quantity.
+
+### Other benchmarks
+
+Values are for the Python port.
+
+| | Model | Literature |
+|---|---|---|
+| EPSP half-width at soma | 523–549 µs | 0.52–0.6 ms |
+| Spike initiation site | AIS | AIS (Lehnert 2014) |
+| Input resistance, active, at rest | 2.5 MΩ steady, ~4.8 MΩ peak | 5 MΩ (Lehnert's model); ~7 MΩ measured |
+| Somatic spike height | ~40 mV above rest | ~17 mV mature, 8.5 mV in vivo |
+| Best frequency for half-wave sine input | 400–500 Hz | subthreshold resonance 242–300 Hz |
+
+The somatic spike is the clearest mismatch: its size matches juvenile (P14) cells rather than adult ones.
+
+### Missing relative to current models
+
+- dendrites
+- glycinergic inhibition
+- binaural or history-dependent input
+- variation in cell properties along the frequency map

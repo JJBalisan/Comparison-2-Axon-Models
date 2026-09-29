@@ -7,9 +7,21 @@ _QUIET_CACHE = {}
 _QUIET_CACHE_SIZE = 64
 
 
-def epsg_unitary(t):
-    """Unitary EPSG waveform, peak-normalised by 0.21317."""
-    return (1 / 0.21317) * (t > 0) * (np.exp(-t / 0.18) - np.exp(-t / 0.1))
+EPSG_TAU = (0.1, 0.18)  # (rise, decay) [ms], the Franken et al 2015 waveform used by the MATLAB
+
+
+def epsg_unitary(t, tau=EPSG_TAU):
+    """Unitary EPSG waveform (difference of exponentials) with peak 1.
+
+    The default kinetics keep the MATLAB expression, peak-normalised by 0.21317,
+    so results are unchanged; other (rise, decay) pairs are normalised exactly.
+    """
+    if tau == EPSG_TAU:
+        return (1 / 0.21317) * (t > 0) * (np.exp(-t / 0.18) - np.exp(-t / 0.1))
+    rise, decay = tau
+    t_peak = np.log(decay / rise) * rise * decay / (decay - rise)
+    peak = np.exp(-t_peak / decay) - np.exp(-t_peak / rise)
+    return (1 / peak) * (t > 0) * (np.exp(-t / decay) - np.exp(-t / rise))
 
 
 def breakpoints(stim_type, start, stop, t_end):
