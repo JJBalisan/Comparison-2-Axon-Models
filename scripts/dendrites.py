@@ -23,6 +23,7 @@ lumped results they are compared with.
 
 import argparse
 import json
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import matplotlib
@@ -79,6 +80,11 @@ def main():
     ap.add_argument("--dendrite-ra", type=float, default=100.0,
                     help="axial resistivity of the dendrites [Ohm cm] (Mathews et al 2010: 200)")
     a = ap.parse_args()
+    with ProcessPoolExecutor() as pool:  # one pool for every parallel call below
+        run(a, pool)
+
+
+def run(a, pool):
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     D = with_dendrites(conserve_totals=not a.klt_from_soma, dendrite_ra=a.dendrite_ra)
@@ -132,7 +138,7 @@ def main():
     bil = dict(stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m, morph=D)
     E, curves = {}, {}
     for kname, tau in (("model EPSG (0.18 ms)", (0.1, 0.18)), ("Myoga EPSG (0.3 ms)", (0.1, 0.3))):
-        th = threshold_curve("multi", delays, epsg_tau=tau, model_kw=bil)
+        th = threshold_curve("multi", delays, epsg_tau=tau, model_kw=bil, executor=pool)
         curves[kname] = th
         E[kname] = {f"margin_{m}": float(half_width(delays, th, m) * 1e3) for m in (0.005, 0.03)}
         print("E", kname, E[kname], flush=True)
@@ -140,7 +146,8 @@ def main():
 
     # F. EPSG-pair threshold vs delay at the soma, lumped vs dendritic
     fd = np.round(np.arange(0, 1.0001, 0.04), 4)
-    F = {"lumped": threshold_curve("multi", fd), "dendritic": threshold_curve("multi", fd, model_kw=dict(morph=D))}
+    F = {"lumped": threshold_curve("multi", fd, executor=pool),
+         "dendritic": threshold_curve("multi", fd, model_kw=dict(morph=D), executor=pool)}
     res["F_soma_pair_curve"] = {"delays_ms": fd.tolist(), **{k: v.tolist() for k, v in F.items()},
                                 "max_rel_diff": float(np.max(np.abs(F["dendritic"] / F["lumped"] - 1)))}
     print("F max relative difference", res["F_soma_pair_curve"]["max_rel_diff"], flush=True)

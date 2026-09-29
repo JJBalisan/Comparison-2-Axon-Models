@@ -8,6 +8,7 @@ across all CPUs unless --workers says otherwise.
 """
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -34,6 +35,14 @@ def main():
     ap.add_argument("--out-dir", help="save PNGs here instead of showing them")
     ap.add_argument("--workers", type=int, help="processes for sweep points (default: all CPUs)")
     a = ap.parse_args()
+    if a.workers == 1:  # in-process, as binary_search(workers=1) does
+        run(a, None)
+    else:
+        with ProcessPoolExecutor(max_workers=a.workers) as pool:  # shared by every sweep
+            run(a, pool)
+
+
+def run(a, pool):
 
     for stim in a.only or SWEEPS:
         n, factor, max_I, xs, title, xlabel = SWEEPS[stim]
@@ -45,7 +54,8 @@ def main():
             x_values = np.arange(n) * dt  # delay between the two EPSGs
         else:
             x_values = xs(n)
-        multi, two = binary_search(stim, n, a.node, factor, max_I, workers=a.workers, **kw)
+        multi, two = binary_search(stim, n, a.node, factor, max_I, workers=a.workers,
+                                   executor=pool, **kw)
         print(f"{stim}: multi={multi}\n{' ' * len(stim)}  two  ={two}")
         fig = threshold_figure(x_values, multi, two, f"{title} Thresholds Compartment {a.node}", xlabel)
         if a.out_dir:

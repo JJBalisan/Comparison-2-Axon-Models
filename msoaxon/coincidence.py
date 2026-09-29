@@ -18,11 +18,9 @@ This is new analysis code, not part of the MATLAB port: it uses a standard
 bracketing bisection rather than BinarySearch.m's halving search.
 """
 
-import os
-from concurrent.futures import ProcessPoolExecutor
-
 import numpy as np
 
+from ._parallel import map_tasks
 from .multi import mso_axon
 from .spiking import count_spikes
 from .synaptic import SynParams
@@ -69,15 +67,14 @@ def _threshold_task(args):
 
 
 def threshold_curve(model, delays, node=3, v0=-68.0, epsg_tau=(0.1, 0.18), model_kw=None,
-                    rel_tol=1e-4, workers=None):
-    """threshold() at each delay, in parallel (needs a __main__ guard in scripts)."""
+                    rel_tol=1e-4, workers=None, executor=None):
+    """threshold() at each delay, in parallel (needs a __main__ guard in scripts).
+
+    workers / executor: see _parallel.map_tasks.
+    """
     tasks = [(model, float(d), node, v0, tuple(epsg_tau), model_kw or {}, rel_tol)
              for d in delays]
-    workers = min(workers or os.cpu_count() or 1, len(tasks))
-    if workers == 1:
-        return np.array([_threshold_task(t) for t in tasks])
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        return np.array(list(pool.map(_threshold_task, tasks)))
+    return np.array(map_tasks(_threshold_task, tasks, workers, executor))
 
 
 def half_width(delays, thresholds, margin):
@@ -108,7 +105,7 @@ def _trial(args):
 
 def probability_trials(model, delays, amplitude, n_trials=200, amp_cv=0.03, jitter=0.015,
                        node=3, v0=-68.0, epsg_tau=(0.1, 0.18), model_kw=None, seed=0,
-                       workers=None):
+                       workers=None, executor=None):
     """Spike probability per delay from noisy trials, to check half_width's shortcut.
 
     Noise per trial: the pair's amplitude scaled by N(1, amp_cv), and each EPSG's
@@ -122,10 +119,5 @@ def probability_trials(model, delays, amplitude, n_trials=200, amp_cv=0.03, jitt
             t1 = START + rng.normal(0, jitter)
             t2 = START + d + rng.normal(0, jitter)
             tasks.append((model, amp, t1, t2, node, v0, tuple(epsg_tau), model_kw or {}))
-    workers = min(workers or os.cpu_count() or 1, len(tasks))
-    if workers == 1:
-        hits = [_trial(t) for t in tasks]
-    else:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            hits = list(pool.map(_trial, tasks, chunksize=16))
+    hits = map_tasks(_trial, tasks, workers, executor, chunksize=16)
     return np.array(hits, float).reshape(len(delays), n_trials).mean(axis=1)

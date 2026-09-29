@@ -10,6 +10,7 @@ and checks the threshold shortcut against noisy trials.
 
 import argparse
 import json
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import matplotlib
@@ -38,6 +39,11 @@ def main():
     ap.add_argument("--node", type=int, default=3)
     ap.add_argument("--trials", type=int, default=200, help="noisy trials per delay for the check")
     a = ap.parse_args()
+    with ProcessPoolExecutor() as pool:  # one pool for every parallel call below
+        run(a, pool)
+
+
+def run(a, pool):
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -45,7 +51,8 @@ def main():
     curves, rows = {}, []
     for cname, (model, v0, kw) in CONFIGS.items():
         for kname, tau in KINETICS.items():
-            th = threshold_curve(model, delays, node=a.node, v0=v0, epsg_tau=tau, model_kw=kw)
+            th = threshold_curve(model, delays, node=a.node, v0=v0, epsg_tau=tau, model_kw=kw,
+                                 executor=pool)
             curves[(cname, kname)] = th
             widths = [half_width(delays, th, m) * 1e3 for m in MARGINS]
             rows.append((cname, kname, th[0], widths))
@@ -62,7 +69,7 @@ def main():
     # jitter plus 5 us onset jitter per EPSG (a noise source the shortcut ignores)
     prob = probability_trials(model, mc_delays, amp, n_trials=a.trials, amp_cv=0.01,
                               jitter=0.005, node=a.node, v0=v0, epsg_tau=KINETICS[kname],
-                              model_kw=kw)
+                              model_kw=kw, executor=pool)
     p_half = prob.max() / 2
     j = np.nonzero(prob < p_half)[0][0]
     mc_width = 2 * np.interp(p_half, [prob[j], prob[j - 1]], [mc_delays[j], mc_delays[j - 1]]) * 1e3
