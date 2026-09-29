@@ -162,3 +162,43 @@ def test_combine_all_script(tmp_path):
                        capture_output=True, text=True, env={"MPLBACKEND": "Agg", "PATH": ""})
     assert r.returncode == 0, r.stderr
     assert "multi-compartment 1, two-compartment 1" in r.stdout and out.stat().st_size > 0
+
+
+def test_parallel_search_matches_serial():
+    serial = binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=1)
+    assert binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=2) == serial
+
+
+@pytest.mark.parametrize("model", [two_cpt, mso_axon])
+def test_pre_stimulus_cache_does_not_change_results(model):
+    from msoaxon import _solve
+    _solve._QUIET_CACHE.clear()
+    t1, x1 = model("EPSGpair", 5, 5.3, 70, 3, "active-full", 20, -68, 1)
+    assert _solve._QUIET_CACHE  # first run filled it
+    t2, x2 = model("EPSGpair", 5, 5.3, 90, 3, "active-full", 20, -68, 1)  # reuses it
+    _solve._QUIET_CACHE.clear()
+    t3, x3 = model("EPSGpair", 5, 5.3, 90, 3, "active-full", 20, -68, 1)  # recomputes
+    np.testing.assert_array_equal(t2, t3)
+    np.testing.assert_array_equal(x2, x3)
+
+
+@pytest.mark.parametrize("model,axon", [(two_cpt, 1), (mso_axon, 2)])
+def test_stop_on_spike_truncates_the_full_run(model, axon):
+    args = ("EPSGpair", 5, 5.3, 70, 3, "active-full", 20, -68, 1)
+    t, x = model(*args)
+    te, xe = model(*args, stop_on_spike=10)
+    assert te[-1] < 20 and np.isclose(xe[-1, axon] - xe[-1, 0], 10)
+    # same accepted steps as the full run until the step where the spike is found
+    np.testing.assert_array_equal(te[:-1], t[:len(te) - 1])
+    np.testing.assert_array_equal(xe[:-1], x[:len(te) - 1])
+    # and the first sample above the factor in the full run comes right after
+    first = np.argmax(x[:, axon] - x[:, 0] > 10)
+    assert t[first - 1] <= te[-1] <= t[first]
+
+
+def test_stop_on_spike_leaves_non_spiking_runs_alone():
+    args = ("EPSGpair", 5, 5, 40, 3, "active-full", 20, -68, 1)
+    t, x = mso_axon(*args)
+    te, xe = mso_axon(*args, stop_on_spike=10)
+    np.testing.assert_array_equal(t, te)
+    np.testing.assert_array_equal(x, xe)

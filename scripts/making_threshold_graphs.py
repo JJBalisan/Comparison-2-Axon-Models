@@ -3,8 +3,8 @@
     uv run scripts/making_threshold_graphs.py --node 3 --out-dir figures
     uv run scripts/making_threshold_graphs.py --only EPSGpair --jpg-grid   # the repo's jpgs
 
-Each binary-search point runs ~8 simulations per model, so the full set takes
-a few minutes.
+Each binary-search point runs ~8 simulations per model; points run in parallel
+across all CPUs unless --workers says otherwise.
 """
 
 import argparse
@@ -32,6 +32,7 @@ def main():
     ap.add_argument("--jpg-grid", action="store_true",
                     help="EPSGpair on the grid the repo's jpgs used: 11 points 0.1 ms apart, unrounded")
     ap.add_argument("--out-dir", help="save PNGs here instead of showing them")
+    ap.add_argument("--workers", type=int, help="processes for sweep points (default: all CPUs)")
     a = ap.parse_args()
 
     for stim in a.only or SWEEPS:
@@ -44,7 +45,7 @@ def main():
             x_values = np.arange(n) * dt  # delay between the two EPSGs
         else:
             x_values = xs(n)
-        multi, two = binary_search(stim, n, a.node, factor, max_I, **kw)
+        multi, two = binary_search(stim, n, a.node, factor, max_I, workers=a.workers, **kw)
         print(f"{stim}: multi={multi}\n{' ' * len(stim)}  two  ={two}")
         fig = threshold_figure(x_values, multi, two, f"{title} Thresholds Compartment {a.node}", xlabel)
         if a.out_dir:
