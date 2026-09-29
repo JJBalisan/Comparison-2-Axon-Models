@@ -18,16 +18,17 @@ MODEL_TYPES = ("passive", "active-KLT", "active-H", "active-KLT+H", "active-sodi
                "Active-sodium", "active-KHT", "active-full")
 
 
-def check_args(stim_type, model_type, node, input_node, min_node):
+def check_args(stim_type, model_type, node, input_node, min_node, stim_types=STIM_TYPES,
+               n_max=C.N_CPT):
     """Reject inputs that numpy's negative indexing would otherwise accept silently."""
-    if stim_type not in STIM_TYPES:
+    if stim_type not in stim_types:
         raise ValueError(f"unknown stimType {stim_type!r}")
     if model_type not in MODEL_TYPES:
         raise ValueError(f"unknown model type {model_type!r}; expected one of {MODEL_TYPES}")
     if not min_node <= node <= C.N_CPT:
         raise ValueError(f"node must be {min_node}..{C.N_CPT} (1-indexed), got {node}")
-    if not 1 <= input_node <= C.N_CPT:
-        raise ValueError(f"input_node must be 1..{C.N_CPT} (1-indexed), got {input_node}")
+    if not 1 <= input_node <= n_max:
+        raise ValueError(f"input_node must be 1..{n_max} (1-indexed), got {input_node}")
 
 # Gating kinetics (from getParam in TwoCpt.m)
 _A_TEMP = 3 ** ((32 - 35) / 10)
