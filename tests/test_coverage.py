@@ -119,10 +119,10 @@ def test_epsgpair_thresholds_match_repo_jpg():
 
 
 def test_binary_search_rounding_and_ceiling():
-    multi, two = binary_search("step", 1, 3, 30, 15000)
+    multi, two = binary_search("step", 1, 3, 30, 15000, workers=1)
     assert all(v % 10 == 0 and 0 < v < 15000 for v in multi + two)
     # a stimulus that never fires reports the ceiling, as BinarySearch.m does
-    multi, _ = binary_search("EPSG", 1, 3, 30, 15000)
+    multi, _ = binary_search("EPSG", 1, 3, 30, 15000, workers=1)
     assert multi == [15000]
 
 
@@ -162,11 +162,6 @@ def test_combine_all_script(tmp_path):
                        capture_output=True, text=True, env={"MPLBACKEND": "Agg", "PATH": ""})
     assert r.returncode == 0, r.stderr
     assert "multi-compartment 1, two-compartment 1" in r.stdout and out.stat().st_size > 0
-
-
-def test_parallel_search_matches_serial():
-    serial = binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=1)
-    assert binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=2) == serial
 
 
 @pytest.mark.parametrize("model", [two_cpt, mso_axon])
@@ -213,12 +208,13 @@ def test_model_modules_are_importable():
     assert multi.mso_axon is msoaxon.mso_axon and two.two_cpt is msoaxon.two_cpt
 
 
-def test_shared_executor_matches_serial():
+def test_parallel_runs_match_serial():
     from concurrent.futures import ProcessPoolExecutor
 
     from msoaxon.coincidence import threshold_curve
 
     serial = binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=1)
+    assert binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=2) == serial
     curve = threshold_curve("two", [0.0, 0.2], workers=1)
     with ProcessPoolExecutor(max_workers=2) as pool:  # one pool reused across calls
         assert binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, executor=pool) == serial

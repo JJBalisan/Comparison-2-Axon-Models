@@ -60,9 +60,10 @@ def test_dendritic_epsp_is_attenuated_and_slowed():
 
 def test_bilateral_inputs_beat_unilateral():
     # Scott et al 2010: EPSGs on opposite dendrites reach threshold more easily
-    bil = threshold("multi", 0.0, rel_tol=1e-3, model_kw=dict(morph=D),
+    # (58.5 vs 82.2, so a 1% tolerance is plenty)
+    bil = threshold("multi", 0.0, rel_tol=1e-2, model_kw=dict(morph=D),
                     stim="EPSGbilateral", input_node=MID_L, input_node2=MID_M)
-    uni = threshold("multi", 0.0, rel_tol=1e-3, model_kw=dict(morph=D),
+    uni = threshold("multi", 0.0, rel_tol=1e-2, model_kw=dict(morph=D),
                     stim="EPSGbilateral", input_node=MID_L, input_node2=MID_L)
     assert bil < uni
 
