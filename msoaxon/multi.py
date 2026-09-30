@@ -34,8 +34,6 @@ _G_AX = (2 / R_AXIAL) / (C.L_CM[:-1] / C.XA_CM[:-1] + C.L_CM[1:] / C.XA_CM[1:])
 
 MSO_STIM_TYPES = STIM_TYPES + ("EPSGbilateral",)
 
-_P_TEMP = 3 ** ((22 - 35) / 10)
-_A_TEMP = 3 ** ((32 - 35) / 10)
 
 # which gating blocks (m, h, p, w, z, a) evolve for each model type
 ACTIVE_GATES = {
@@ -256,14 +254,14 @@ def membrane(v0, soma_klt_scale=1.0, ais_klt_scale=1.0, soma_na_vhalf=-62.5,
     m.g_klt[0] *= soma_klt_scale
     m.g_klt[1:3] *= ais_klt_scale
     m.g_klt[N:] *= dendrite_klt_scale
-    # stored negated, as the "+ 62.5" in hinf's exp((V + 62.5) / 7.77) expects
+    # stored negated, as C.hinf's vhalf (exp((V + vhalf) / 7.77)) expects
     m.na_vhalf = np.full(morph.n, 62.5)
     m.na_vhalf[0] = -soma_na_vhalf
     m.vlk = np.full(morph.n, float(v0))
     m.y0_gates = None
     if rebalance_rest:
         V = np.full(morph.n, float(v0))
-        gates = (C.minf(V), 1.0 / (1.0 + np.exp((V + m.na_vhalf) / 7.77)), C.pinf(V),
+        gates = (C.minf(V), C.hinf(V, m.na_vhalf), C.pinf(V),
                  C.winf(V), C.zinf(V), C.ainf(V))
         mi, hi, pi, wi, zi, ai = gates
         I_ion = (m.g_na * mi ** 4 * (0.993 * hi + 0.007) * (V - V_NA)
@@ -300,20 +298,13 @@ def _rhs(t, x, stim_type, s, input_node, active, mem, morph=LUMPED, input_node2=
     d[0] = -(total + axial_current(V, morph)) / morph.cap
 
     act_m, act_h, act_p, act_w, act_z, act_a = active
-    # Na: Scott et al 2010, 35 C
-    d[1] = (C.minf(V) - m) / ((0.141 + (-0.0826 / (1 + np.exp((-20.5 - V) / 10.8)))) / 3) if act_m else 0.0
-    hinf = 1.0 / (1.0 + np.exp((V + mem.na_vhalf) / 7.77))  # C.hinf, per-compartment midpoint
-    d[2] = (hinf - h) / ((4 + (-3.74 / (1 + np.exp((-40.6 - V) / 5.05)))) / 3) if act_h else 0.0
-    # KHT: Rothman Manis 2003, 22 C adjusted to 35 C with Q10 of 3
-    d[3] = (C.pinf(V) - p) / (_P_TEMP * (100 / (4 * np.exp((V + 60) / 32)
-                                                 + 5 * np.exp(-(V + 60) / 22)) + 5)) if act_p else 0.0
-    # KLT: Mathews et al 2010, 35 C
-    d[4] = (C.winf(V) - w) / (21.5 / (6 * np.exp((V + 60) / 7)
-                                      + 24 * np.exp(-(V + 60) / 50.6)) + 0.35) if act_w else 0.0
-    d[5] = (C.zinf(V) - z) / (170 / (5 * np.exp((V + 60) / 10)
-                                     + np.exp(-(V + 70) / 8)) + 10.7) if act_z else 0.0
-    # h: Baumann et al 2013, 32 C adjusted to 35 C
-    d[6] = (C.ainf(V) - a) / (_A_TEMP * (79 + 417 * np.exp(-(V + 61.5) ** 2 / 800))) if act_a else 0.0
+    # sources for each time constant are in constants.py
+    d[1] = (C.minf(V) - m) / C.taum(V) if act_m else 0.0
+    d[2] = (C.hinf(V, mem.na_vhalf) - h) / C.tauh(V) if act_h else 0.0  # per-compartment midpoint
+    d[3] = (C.pinf(V) - p) / C.taup(V) if act_p else 0.0
+    d[4] = (C.winf(V) - w) / C.tauw(V) if act_w else 0.0
+    d[5] = (C.zinf(V) - z) / C.tauz(V) if act_z else 0.0
+    d[6] = (C.ainf(V) - a) / C.taua(V) if act_a else 0.0
     return out
 
 

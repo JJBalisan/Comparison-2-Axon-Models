@@ -14,31 +14,6 @@ from ._common import check_args, stimulus
 from ._solve import breakpoints, integrate, pre_stimulus_is_quiet, spike_event
 from .synaptic import SynParams, epsg_unitary, interp_g
 
-# Gating kinetics (from getParam in TwoCpt.m)
-_A_TEMP = 3 ** ((32 - 35) / 10)
-_P_TEMP = 3 ** ((22 - 35) / 10)
-
-
-def tauw(V):
-    return 21.5 / (6 * np.exp((V + 60) / 7) + 24 * np.exp(-(V + 60) / 50.6)) + 0.35
-
-
-def taua(V):
-    return _A_TEMP * (79 + 417 * np.exp(-(V + 61.5) ** 2 / 800))
-
-
-def taup(V):
-    return _P_TEMP * (100 / (4 * np.exp((V + 60) / 32) + 5 * np.exp(-(V + 60) / 22)) + 5)
-
-
-def taum(V):  # TwoCpt.m credits Rothman-Manis (35 C); msoAxon.m cites Scott 2010 for the same formula
-    return (0.141 + (-0.0826 / (1 + np.exp((-20.5 - V) / 10.8)))) / 3
-
-
-def tauh(V):
-    return (4 + (-3.74 / (1 + np.exp((-40.6 - V) / 5.05)))) / 3
-
-
 # Passive targets of Goldwyn, Remme & Rinzel 2019 (PLoS Comput Biol 15:e1006476), the
 # paper this model's coupling-constant framework comes from. TwoCpt.m still carries
 # them as comments (%8.5, %-58) beside the values it replaced them with.
@@ -171,15 +146,15 @@ def _rhs(t, x, P, stim_type, s):
     return [
         (-Ilk1 - IKLT1 - IC + Iapp1 - INa1 - Ih1 - IKHT) / P.cap1,
         (-Ilk2 - IKLT2 + IC + Iapp2 - INa2 - Ih2) / P.cap2,
-        (C.winf(V1) - w1) / tauw(V1),
-        (C.hinf(V1) - h1) / tauh(V1),
-        (C.winf(V2) - w2) / tauw(V2),
-        (C.minf(V1) - m1) / taum(V1),
-        (C.minf(V2) - m2) / taum(V2),
-        (C.hinf(V2) - h2) / tauh(V2),
-        (C.pinf(V1) - p) / taup(V1),
-        (C.ainf(V1) - a1) / taua(V1),
-        (C.ainf(V2) - a2) / taua(V2),
+        (C.winf(V1) - w1) / C.tauw(V1),
+        (C.hinf(V1) - h1) / C.tauh(V1),
+        (C.winf(V2) - w2) / C.tauw(V2),
+        (C.minf(V1) - m1) / C.taum(V1),
+        (C.minf(V2) - m2) / C.taum(V2),
+        (C.hinf(V2) - h2) / C.tauh(V2),
+        (C.pinf(V1) - p) / C.taup(V1),
+        (C.ainf(V1) - a1) / C.taua(V1),
+        (C.ainf(V2) - a2) / C.taua(V2),
     ]
 
 
