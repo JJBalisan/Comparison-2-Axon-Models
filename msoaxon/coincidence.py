@@ -23,7 +23,6 @@ import numpy as np
 from ._bisect import smallest_firing
 from ._parallel import map_tasks
 from .multi import mso_axon
-from .spiking import count_spikes
 from .synaptic import SynParams
 from .two import two_cpt
 
@@ -39,10 +38,9 @@ def _spikes(model, I, delay, node, v0, epsg_tau, model_kw, start=START):
     syn = SynParams(t_end=T_END, epsg_tau=tuple(epsg_tau))
     kw = dict(model_kw)
     stim, input_node = kw.pop("stim", "EPSGpair"), kw.pop("input_node", 1)
-    t, x = f(stim, start, start + delay, I, node, "active-full", T_END, v0, input_node, syn,
+    t, _ = f(stim, start, start + delay, I, node, "active-full", T_END, v0, input_node, syn,
              stop_on_spike=FACTOR, **kw)
-    axon = node - 1 if model == "multi" else 1
-    return t[-1] < T_END or count_spikes(x[:, 0], x[:, axon], FACTOR) > 0
+    return t[-1] < T_END  # stopped at the first spike
 
 
 def threshold(model, delay, node=3, v0=-68.0, epsg_tau=(0.1, 0.18), model_kw=None,
