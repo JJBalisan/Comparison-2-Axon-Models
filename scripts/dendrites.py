@@ -29,7 +29,7 @@ import numpy as np
 
 from msoaxon import mso_axon
 from msoaxon._parallel import process_pool
-from msoaxon.coincidence import half_width, threshold
+from msoaxon.coincidence import threshold, window
 from msoaxon.measure import passive_step, soma_on_grid
 from msoaxon.multi import LUMPED, membrane, with_dendrites
 from msoaxon.somatic import rheobase, spike_amplitude
@@ -106,8 +106,13 @@ def run(a, pool):
                   0.0, stim="EPSGbilateral", input_node=mid_l, input_node2=mid_l, **dend),
               "both at the soma, dendritic model": th_job(0.0, **dend),
               "both at the soma, lumped model": th_job(0.0)}
-    delays = np.round(np.arange(0, 0.6001, 0.1 if a.quick else 0.02), 4)
     kinetics = (("model EPSG (0.18 ms)", EPSG_TAU), ("Myoga EPSG (0.3 ms)", (0.1, 0.3)))
+    # E's widths come from window() (fixed input, bisection over delay); its curves
+    # are only drawn, so they use a 50 us grid
+    W_jobs = {(kname, m): pool.submit(window, "multi", m, epsg_tau=tau, rel_tol=tol,
+                                      delay_tol=1e-3 if a.quick else 1e-4, **bil)
+              for kname, tau in kinetics for m in (0.005, 0.03)}
+    delays = np.round(np.arange(0, 0.6001, 0.1 if a.quick else 0.05), 4)
     E_jobs = {kname: [th_job(d, tau, **bil) for d in delays] for kname, tau in kinetics}
     fd = np.round(np.arange(0, 1.0001, 0.2 if a.quick else 0.04), 4)
     F_jobs = {"lumped": [th_job(d) for d in fd], "dendritic": [th_job(d, **dend) for d in fd]}
@@ -152,8 +157,8 @@ def run(a, pool):
     # E. coincidence window with bilateral dendritic inputs
     E, curves = {}, {}
     for kname, _ in kinetics:
-        th = curves[kname] = collect(E_jobs[kname])
-        E[kname] = {f"margin_{m}": float(half_width(delays, th, m) * 1e3) for m in (0.005, 0.03)}
+        curves[kname] = collect(E_jobs[kname])
+        E[kname] = {f"margin_{m}": float(W_jobs[kname, m].result()[0] * 1e3) for m in (0.005, 0.03)}
         print("E", kname, E[kname], flush=True)
     res["E_window_bilateral_dendritic_us"] = E
 
