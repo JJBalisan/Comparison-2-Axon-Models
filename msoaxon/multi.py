@@ -20,7 +20,7 @@ from scipy.sparse import bmat, coo_matrix, diags, eye
 from . import constants as C
 from ._solve import breakpoints, epsg_unitary, integrate, pre_stimulus_is_quiet, spike_event
 from .synaptic import SynParams, interp_g
-from .two_cpt import STIM_TYPES, check_args, stimulus
+from .two import STIM_TYPES, check_args, stimulus
 
 N = C.N_CPT
 

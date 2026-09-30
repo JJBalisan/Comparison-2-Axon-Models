@@ -202,3 +202,34 @@ def test_stop_on_spike_leaves_non_spiking_runs_alone():
     te, xe = mso_axon(*args, stop_on_spike=10)
     np.testing.assert_array_equal(t, te)
     np.testing.assert_array_equal(x, xe)
+
+
+def test_model_modules_are_importable():
+    # the re-exported functions used to shadow their own submodules
+    import msoaxon
+    import msoaxon.multi as multi
+    import msoaxon.two as two
+
+    assert multi.mso_axon is msoaxon.mso_axon and two.two_cpt is msoaxon.two_cpt
+
+
+def test_shared_executor_matches_serial():
+    from concurrent.futures import ProcessPoolExecutor
+
+    from msoaxon.coincidence import threshold_curve
+
+    serial = binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=1)
+    curve = threshold_curve("two", [0.0, 0.2], workers=1)
+    with ProcessPoolExecutor(max_workers=2) as pool:  # one pool reused across calls
+        assert binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, executor=pool) == serial
+        np.testing.assert_array_equal(threshold_curve("two", [0.0, 0.2], executor=pool), curve)
+
+
+def test_smallest_firing():
+    from msoaxon._bisect import smallest_firing
+
+    assert smallest_firing(lambda x: x >= 3.0, 1.0, 100.0, 1e-6) == pytest.approx(3.0, rel=1e-6)
+    assert smallest_firing(lambda x: x >= 3.0, 1.0, 100.0, 1e-6) >= 3.0  # returns a firing value
+    assert smallest_firing(lambda x: False, 1.0, 100.0, 1e-3) == np.inf
+    # the ceiling bounds the doubling: 64 is tested, 128 exceeds 100, so 90 is never reached
+    assert smallest_firing(lambda x: x >= 90.0, 1.0, 100.0, 1e-3) == np.inf

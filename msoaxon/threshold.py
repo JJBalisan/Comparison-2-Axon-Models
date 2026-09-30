@@ -1,12 +1,10 @@
 """Spiking-threshold search (port of BinarySearch.m)."""
 
-import os
-from concurrent.futures import ProcessPoolExecutor
-
-from .mso_axon import mso_axon
+from ._parallel import map_tasks
+from .multi import mso_axon
 from .spiking import count_spikes, matlab_round
 from .synaptic import SynParams
-from .two_cpt import two_cpt
+from .two import two_cpt
 
 START = 5.0
 T_END = 20.0
@@ -70,7 +68,7 @@ def _point(task):
 
 
 def binary_search(stim_type, n_points, node, factor, max_I, zoom=1.0,
-                  epsg_pair_dt=1 / 25, rounded=True, workers=None):
+                  epsg_pair_dt=1 / 25, rounded=True, workers=None, executor=None):
     """Return (thresholds_multi, thresholds_two), one value per sweep point.
 
     epsg_pair_dt: spacing of the second-EPSG delay. BinarySearch.m uses 1/25;
@@ -80,6 +78,7 @@ def binary_search(stim_type, n_points, node, factor, max_I, zoom=1.0,
     in-process). Results are identical either way. Scripts that call this with
     workers != 1 need an `if __name__ == "__main__":` guard, since macOS starts
     worker processes by re-importing the main module.
+    executor: an existing process pool to use instead (see _parallel.map_tasks).
 
     BinarySearch.m tests location1 (the multi-compartment variable) in the second
     loop's while condition; here each search tests its own location.
@@ -88,12 +87,7 @@ def binary_search(stim_type, n_points, node, factor, max_I, zoom=1.0,
     # keeps the pool busy while the cheap two-compartment points fill the gaps
     tasks = [(model, stim_type, i, node, factor, max_I, zoom, epsg_pair_dt)
              for model in ("multi", "two") for i in range(1, n_points + 1)]
-    workers = min(workers or os.cpu_count() or 1, len(tasks))
-    if workers == 1:
-        results = [_point(t) for t in tasks]
-    else:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            results = list(pool.map(_point, tasks))
+    results = map_tasks(_point, tasks, workers, executor)
 
     digits = 0 if stim_type == "EPSGpair" else -1
     finish = (lambda v: matlab_round(v, digits)) if rounded else (lambda v: v)

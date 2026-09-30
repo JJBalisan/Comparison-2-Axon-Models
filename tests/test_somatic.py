@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from msoaxon import _solve, mso_axon
-from msoaxon.mso_axon import membrane
+from msoaxon.multi import membrane
 from msoaxon.somatic import rheobase, spike_amplitude
 
 DTX = dict(soma_klt_scale=0, ais_klt_scale=0, rebalance_rest=True)

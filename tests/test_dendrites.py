@@ -6,7 +6,7 @@ import pytest
 from msoaxon import _solve, mso_axon
 from msoaxon import constants as C
 from msoaxon.coincidence import threshold
-from msoaxon.mso_axon import LUMPED, _tree_jac_sparsity, axial_current, membrane, with_dendrites
+from msoaxon.multi import LUMPED, _tree_jac_sparsity, axial_current, membrane, with_dendrites
 
 D = with_dendrites()
 MID_L, MID_M = int(D.lateral[2]), int(D.medial[2])
