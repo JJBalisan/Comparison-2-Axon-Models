@@ -18,7 +18,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --locked
-      - run: uv run pytest -q --cov --cov-report=term
+      # the slow script tests don't depend on the Python version: run them on 3.12 only
+      - run: uv run pytest -q --cov --cov-report=term ${{ matrix.python-version != '3.12' && '-m "not slow"' || '' }}
         env:
           MPLBACKEND: Agg
       # one table per run is enough; the matrix entries cover the same code

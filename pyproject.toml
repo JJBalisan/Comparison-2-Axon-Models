@@ -15,6 +15,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["msoaxon"]
 
+[tool.pytest.ini_options]
+markers = ["slow: end-to-end script runs (CI runs them on one Python version only)"]
+
 [tool.coverage.run]
 source = ["msoaxon"]
 branch = true

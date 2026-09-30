@@ -15,7 +15,9 @@ uv run scripts/making_threshold_graphs.py --only EPSGpair --jpg-grid   # the rep
 `dendrites.py`, `coincidence_window.py` and `somatic_spike.py` take `--quick` (coarse
 delay grids, 1% threshold tolerance, fewer multiples), and `making_threshold_graphs.py`
 takes `--points N`. The same code runs in seconds instead of minutes; the numbers are
-for smoke tests, not results. `tests/test_scripts.py` runs every script this way.
+for smoke tests, not results. `tests/test_scripts.py` runs every script this way; those
+tests are marked `slow` (`uv run pytest -m "not slow"` skips them), and CI runs them on
+Python 3.12 only.
 
 | MATLAB | Python |
 |---|---|

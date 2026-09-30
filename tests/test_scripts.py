@@ -16,6 +16,10 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 
+# about 60 s locally, ~4 min on a CI runner; the scripts don't depend on the Python
+# version, so CI runs these on 3.12 only (deselect locally with -m "not slow")
+pytestmark = pytest.mark.slow
+
 
 def run_script(name, *args):
     r = subprocess.run([sys.executable, str(REPO / "scripts" / name), *map(str, args)],
