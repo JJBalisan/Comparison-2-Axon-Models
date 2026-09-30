@@ -32,4 +32,4 @@ def spikes(model, stim, start, stop, I, node, t_end, v0, input_node, syn=None, *
     """
     t, _ = run_model(model, stim, start, stop, I, node, t_end, v0, input_node, syn,
                      stop_on_spike=factor, **kw)
-    return t[-1] < t_end
+    return bool(t[-1] < t_end)
