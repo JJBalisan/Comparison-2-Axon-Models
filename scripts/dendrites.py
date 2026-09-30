@@ -23,7 +23,6 @@ lumped results they are compared with.
 
 import argparse
 import json
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import matplotlib
@@ -33,6 +32,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from msoaxon import mso_axon
+from msoaxon._parallel import process_pool
 from msoaxon.coincidence import half_width, threshold
 from msoaxon.measure import passive_step, soma_on_grid
 from msoaxon.multi import LUMPED, membrane, with_dendrites
@@ -80,7 +80,7 @@ def main():
     ap.add_argument("--dendrite-ra", type=float, default=100.0,
                     help="axial resistivity of the dendrites [Ohm cm] (Mathews et al 2010: 200)")
     a = ap.parse_args()
-    with ProcessPoolExecutor() as pool:  # one pool for every parallel call below
+    with process_pool() as pool:  # one pool for every parallel call below
         run(a, pool)
 
 

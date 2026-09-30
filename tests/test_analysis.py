@@ -160,3 +160,16 @@ def test_stimulus_at_time_zero_skips_the_prestimulus_cache():
     t, y = mso_axon("step", 0, 5, 500.0, 3, "active-full", 5, -68.0, 1)
     assert not _solve._QUIET_CACHE  # nothing stimulus-free to share
     assert y[-1, 0] > -68.0  # the step is on from the start
+
+
+def test_pools_never_fork():
+    from concurrent.futures import ProcessPoolExecutor
+
+    from msoaxon._parallel import pool_context
+
+    assert pool_context("fork").get_start_method() == "forkserver"
+    assert pool_context("spawn").get_start_method() == "spawn"
+    assert pool_context().get_start_method() != "fork"  # this platform's choice
+    # the forkserver context really runs tasks (it's what Linux gets)
+    with ProcessPoolExecutor(2, mp_context=pool_context("fork")) as pool:
+        assert map_tasks(abs, [-1, -2, -3], executor=pool) == [1, 2, 3]

@@ -18,6 +18,9 @@ packages = ["msoaxon"]
 [tool.pytest.ini_options]
 addopts = "-n auto"  # pytest-xdist: one worker per CPU; -n 0 runs serially (e.g. for --pdb)
 markers = ["slow: end-to-end script runs (CI runs them on one Python version only)"]
+# forking a multi-threaded process can deadlock; _parallel.pool_context avoids it,
+# so a pool that still forks from a threaded process fails the test
+filterwarnings = ['error:This process .* is multi-threaded:DeprecationWarning']
 
 [tool.coverage.run]
 source = ["msoaxon"]
