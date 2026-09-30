@@ -32,28 +32,37 @@ G_LK = np.concatenate([[0.0005, 0.0005, 0.0005], _alternating(0.0002, 0.05)])
 
 
 # --- Steady-state gating functions shared by both models -------------------------
+# V in mV; each returns the open fraction at steady state. Sources as msoAxon.m gives
+# them (Lehnert et al 2014 used the same channel models).
+
+
 def minf(V):
+    """Na activation: Scott et al 2010."""
     return 1.0 / (1.0 + np.exp((V + 46.0) / -11.0))
 
 
 def hinf(V, vhalf=62.5):
-    """Na inactivation; vhalf is the negated midpoint (default: -62.5 mV)."""
+    """Na inactivation: Scott et al 2010. vhalf is the negated midpoint (default -62.5 mV)."""
     return 1.0 / (1.0 + np.exp((V + vhalf) / 7.77))
 
 
 def pinf(V):
+    """KHT activation: Rothman & Manis 2003, without their slow activation gate."""
     return 1.0 / (1.0 + np.exp(-(V + 23.0) / 6.0))
 
 
 def winf(V):
+    """KLT activation: Mathews et al 2010."""
     return 1.0 / (1.0 + np.exp((V + 57.34) / -11.7))
 
 
 def zinf(V):
+    """KLT inactivation: Mathews et al 2010; never below 0.27 (non-inactivating part)."""
     return (1 - 0.27) / (1.0 + np.exp((V + 67.0) / 6.16)) + 0.27
 
 
 def ainf(V):
+    """h activation: Baumann et al 2013."""
     return 1.0 / (1.0 + np.exp(0.1 * (V + 80.4)))
 
 

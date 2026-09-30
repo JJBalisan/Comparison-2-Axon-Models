@@ -129,24 +129,30 @@ def applied_current(t, V1, stim_type, s):
 
 
 def _rhs(t, x, P, stim_type, s):
+    """TwoCptODE.m. Compartment 1 is the soma, 2 the axon node; currents in pA."""
     V1, V2, w1, h1, w2, m1, m2, h2, p, a1, a2 = x
-    z = P.z_rest
+    z = P.z_rest  # KLT inactivation is frozen at rest in this model
 
+    # soma: KHT exists only here. Na, KLT and h have their value at rest subtracted
+    # (the *0 terms from get_params); KHT and leak don't
     IKHT = P.gKHT * p * (V1 - P.VK)
     INa1 = P.gNa1 * m1 ** 4 * (0.993 * h1 + 0.007) * (V1 - P.ENa) - P.INa0_1
     Ilk1 = P.glk1 * (V1 - P.Elk)
     IKLT1 = P.gKLT1 * w1 ** 4 * z * (V1 - P.EK) - P.IKLT0_1
     Ih1 = P.gh1 * a1 * (V1 - P.Vh) - P.Ih0_1
 
+    # axon compartment: no KHT
     Ilk2 = P.glk2 * (V2 - P.Elk)
     INa2 = P.gNa2 * m2 ** 4 * (0.993 * h2 + 0.007) * (V2 - P.ENa) - P.INa0_2
     IKLT2 = P.gKLT2 * w2 ** 4 * z * (V2 - P.EK) - P.IKLT0_2
     Ih2 = P.gh2 * a2 * (V2 - P.Vh) - P.Ih0_2
 
-    IC = P.gC * (V1 - V2)
+    IC = P.gC * (V1 - V2)  # coupling current, soma to axon
     Iapp = applied_current(t, V1, stim_type, s)
     Iapp1, Iapp2 = (Iapp, 0.0) if P.IappLoc == 1 else (0.0, Iapp)
 
+    # same order as the state vector; the gates relax to steady state with the
+    # shared time constants in constants.py
     return [
         (-Ilk1 - IKLT1 - IC + Iapp1 - INa1 - Ih1 - IKHT) / P.cap1,
         (-Ilk2 - IKLT2 + IC + Iapp2 - INa2 - Ih2) / P.cap2,
