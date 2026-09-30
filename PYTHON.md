@@ -6,6 +6,7 @@ remain the reference.
 ```bash
 uv sync
 uv run pytest                                              # constants + sanity checks
+uv run pytest --cov                                        # plus line + branch coverage (as CI)
 uv run scripts/combine_all.py --stim EPSGpair --node 3     # Combine_all.m
 uv run scripts/making_threshold_graphs.py --node 3         # Making_Threshold_graphs.m
 uv run scripts/making_threshold_graphs.py --only EPSGpair --jpg-grid   # the repo's jpgs
