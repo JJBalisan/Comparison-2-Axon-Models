@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from msoaxon import mso_axon
-from msoaxon.coincidence import half_width, threshold, threshold_curve
+from msoaxon.coincidence import half_width, threshold
 from msoaxon.measure import passive_step, soma_on_grid
 from msoaxon.multi import LUMPED, membrane, with_dendrites
 from msoaxon.somatic import rheobase, spike_amplitude
@@ -92,6 +92,30 @@ def run(a, pool):
     tol = 1e-2 if a.quick else 1e-4  # threshold / rheobase tolerance
     res = {}
 
+    # Every threshold search (C, E, F) and the rheobase (G) is independent of the rest,
+    # so all of them go to the pool now, in one batch, and run while A, B and D are
+    # computed here. Each search is deterministic, so the results don't depend on this.
+    def th_job(delay, tau=EPSG_TAU, **kw):
+        return pool.submit(threshold, "multi", float(delay), epsg_tau=tuple(tau), rel_tol=tol, **kw)
+
+    def collect(jobs):
+        return np.array([j.result() for j in jobs])
+
+    dend = dict(model_kw=dict(morph=D))
+    bil = dict(stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m, **dend)
+    mem_d = membrane(V0, morph=D)
+    rb_job = pool.submit(rheobase, "multi", mem=mem_d, rel_tol=tol)  # the longest single job
+    C_jobs = {"bilateral (one EPSG per dendrite)": th_job(0.0, **bil),
+              "unilateral (both on the lateral dendrite)": th_job(
+                  0.0, stim="EPSGbilateral", input_node=mid_l, input_node2=mid_l, **dend),
+              "both at the soma, dendritic model": th_job(0.0, **dend),
+              "both at the soma, lumped model": th_job(0.0)}
+    delays = np.round(np.arange(0, 0.6001, 0.1 if a.quick else 0.02), 4)
+    kinetics = (("model EPSG (0.18 ms)", EPSG_TAU), ("Myoga EPSG (0.3 ms)", (0.1, 0.3)))
+    E_jobs = {kname: [th_job(d, tau, **bil) for d in delays] for kname, tau in kinetics}
+    fd = np.round(np.arange(0, 1.0001, 0.2 if a.quick else 0.04), 4)
+    F_jobs = {"lumped": [th_job(d) for d in fd], "dendritic": [th_job(d, **dend) for d in fd]}
+
     # A. passive
     reb = {"lumped": membrane(V0, rebalance_rest=True),
            "dendritic": membrane(V0, rebalance_rest=True, morph=D),
@@ -115,12 +139,7 @@ def run(a, pool):
     res["B_epsp"] = B
 
     # C. bilateral vs unilateral threshold at zero delay (default membranes)
-    C = {"bilateral (one EPSG per dendrite)": threshold("multi", 0.0, model_kw=dict(morph=D),
-            rel_tol=tol, stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m),
-         "unilateral (both on the lateral dendrite)": threshold("multi", 0.0, model_kw=dict(morph=D),
-            rel_tol=tol, stim="EPSGbilateral", input_node=mid_l, input_node2=mid_l),
-         "both at the soma, dendritic model": threshold("multi", 0.0, model_kw=dict(morph=D), rel_tol=tol),
-         "both at the soma, lumped model": threshold("multi", 0.0, rel_tol=tol)}
+    C = {k: j.result() for k, j in C_jobs.items()}
     res["C_threshold"] = C
     print("C", C, flush=True)
 
@@ -135,30 +154,25 @@ def run(a, pool):
     print("D", res["D_summation"], flush=True)
 
     # E. coincidence window with bilateral dendritic inputs
-    delays = np.round(np.arange(0, 0.6001, 0.1 if a.quick else 0.02), 4)
-    bil = dict(stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m, model_kw=dict(morph=D))
     E, curves = {}, {}
-    for kname, tau in (("model EPSG (0.18 ms)", EPSG_TAU), ("Myoga EPSG (0.3 ms)", (0.1, 0.3))):
-        th = threshold_curve("multi", delays, epsg_tau=tau, rel_tol=tol, executor=pool, **bil)
-        curves[kname] = th
+    for kname, _ in kinetics:
+        th = curves[kname] = collect(E_jobs[kname])
         E[kname] = {f"margin_{m}": float(half_width(delays, th, m) * 1e3) for m in (0.005, 0.03)}
         print("E", kname, E[kname], flush=True)
     res["E_window_bilateral_dendritic_us"] = E
 
     # F. EPSG-pair threshold vs delay at the soma, lumped vs dendritic
-    fd = np.round(np.arange(0, 1.0001, 0.2 if a.quick else 0.04), 4)
-    F = {"lumped": threshold_curve("multi", fd, rel_tol=tol, executor=pool),
-         "dendritic": threshold_curve("multi", fd, model_kw=dict(morph=D), rel_tol=tol, executor=pool)}
+    F = {k: collect(jobs) for k, jobs in F_jobs.items()}
     res["F_soma_pair_curve"] = {"delays_ms": fd.tolist(), **{k: v.tolist() for k, v in F.items()},
                                 "max_rel_diff": float(np.max(np.abs(F["dendritic"] / F["lumped"] - 1)))}
     print("F max relative difference", res["F_soma_pair_curve"]["max_rel_diff"], flush=True)
 
     # G. somatic spike (Scott protocol), dendritic model
-    mem_d = membrane(V0, morph=D)
-    rb = rheobase("multi", mem=mem_d, rel_tol=tol)
+    rb = rb_job.result()
     mults = (1.5, 3.0) if a.quick else (1.5, 2.0, 3.0)
+    amp_jobs = {k: pool.submit(spike_amplitude, "multi", rb * k, mem=mem_d) for k in mults}
     res["G_somatic_spike"] = dict(rheobase_pA=float(rb), amplitudes_mV={
-        str(k): float(spike_amplitude("multi", rb * k, mem=mem_d)["amplitude"]) for k in mults})
+        str(k): float(j.result()["amplitude"]) for k, j in amp_jobs.items()})
     print("G", res["G_somatic_spike"], flush=True)
 
     # figure
