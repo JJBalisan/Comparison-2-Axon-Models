@@ -237,3 +237,49 @@ def test_run_model_rejects_multi_only_keywords_for_two():
         run_model("two", "step", 5, 10, 100.0, 3, 10, -68.0, 1, mem=object())
     with pytest.raises(ValueError, match='"multi" or "two"'):
         run_model("Two", "step", 5, 10, 100.0, 3, 10, -68.0, 1)
+
+
+def _smooth_response(threshold, level=10.0):
+    """A stand-in for an EPSG-pair search: the peak rises convexly and smoothly
+    through `level` at `threshold`, like the models' axon - soma at 10 mV."""
+    calls = []
+
+    def respond(x):
+        calls.append(x)
+        peak = level * (x / threshold) ** 12
+        return peak >= level, min(peak, level)
+    return respond, calls
+
+
+@pytest.mark.parametrize("threshold", [3.7, 47.72, 48.0, 190.0, 1500.0])
+def test_smallest_crossing_keeps_bisections_guarantee(threshold):
+    from msoaxon._bisect import smallest_crossing, smallest_firing
+
+    respond, calls = _smooth_response(threshold)
+    hi = smallest_crossing(respond, 50.0, 2000.0, 1e-4, 10.0)
+    assert threshold <= hi <= threshold * (1 + 1e-4)  # spikes, and within rel_tol
+    n_bisect = [0]
+
+    def fires(x):
+        n_bisect[0] += 1
+        return x >= threshold
+    smallest_firing(fires, 50.0, 2000.0, 1e-4)
+    assert len(calls) < n_bisect[0]  # and in fewer runs than bisection
+
+
+def test_smallest_crossing_gives_up_past_the_ceiling():
+    from msoaxon._bisect import smallest_crossing
+
+    respond, _ = _smooth_response(5000.0)
+    assert smallest_crossing(respond, 50.0, 2000.0, 1e-4, 10.0) == np.inf
+
+
+def test_crossing_works_in_either_direction():
+    # window() searches delay, where the spiking side is the smaller value
+    from msoaxon._bisect import crossing
+
+    def respond(d):  # the peak falls smoothly through 10 as the delay passes 0.1
+        peak = 10.0 * np.exp(-(d - 0.1) * 8)
+        return peak >= 10.0, min(peak, 10.0)
+    far, near = crossing(respond, 1.0, 0.0, lambda n, y: 1e-4, 10.0, [(1.0, respond(1.0)[1])])
+    assert near <= 0.1 <= far and far - near <= 1e-4

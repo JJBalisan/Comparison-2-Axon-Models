@@ -20,9 +20,9 @@ bracketing bisection rather than BinarySearch.m's halving search.
 
 import numpy as np
 
-from ._bisect import smallest_firing
+from ._bisect import crossing, smallest_crossing
 from ._parallel import map_tasks
-from ._dispatch import spikes
+from ._dispatch import response
 from .synaptic import EPSG_TAU, SynParams
 
 START = 5.0
@@ -30,29 +30,37 @@ T_END = 20.0
 FACTOR = 10.0  # spike = axon rises this far above soma (as in the EPSGpair sweeps)
 
 
-def _spikes(model, I, delay, node, v0, epsg_tau, site, model_kw, start=START):
-    """One EPSG pair, `delay` apart; site = (stim, input_node, input_node2)."""
+def _respond(model, I, delay, node, v0, epsg_tau, site, model_kw, start=START):
+    """One EPSG pair, `delay` apart: (spiked, peak axon - soma); site = (stim,
+    input_node, input_node2)."""
     stim, input_node, input_node2 = site
     syn = SynParams(t_end=T_END, epsg_tau=tuple(epsg_tau))
     if input_node2 is not None:
         model_kw = {**model_kw, "input_node2": input_node2}
-    return spikes(model, stim, start, start + delay, I, node, T_END, v0, input_node, syn,
-                  factor=FACTOR, **model_kw)
+    return response(model, stim, start, start + delay, I, node, T_END, v0, input_node, syn,
+                    factor=FACTOR, **model_kw)
+
+
+def _spikes(model, I, delay, node, v0, epsg_tau, site, model_kw, start=START):
+    return _respond(model, I, delay, node, v0, epsg_tau, site, model_kw, start)[0]
 
 
 def threshold(model, delay, node=3, v0=-68.0, epsg_tau=EPSG_TAU, model_kw=None,
               rel_tol=1e-4, guess=50.0, ceiling=2000.0, *, stim="EPSGpair", input_node=1,
               input_node2=None):
-    """Smallest EPSG-pair amplitude that spikes at this delay, to rel_tol (bisection).
+    """Smallest EPSG-pair amplitude that spikes at this delay, to rel_tol.
+
+    Bisection helped by interpolating the peak axon - soma of the runs that don't
+    spike (_bisect.smallest_crossing): ~10 runs instead of ~15, same guarantee.
 
     stim: "EPSGpair" (both EPSGs at input_node) or, for the multi-compartment
     model, "EPSGbilateral" (the second at input_node2).
     model_kw: further model keywords, e.g. morph/mem, or r1/tau_est for "two".
-    Returns inf if nothing up to `ceiling` spikes (see _bisect.smallest_firing).
+    Returns inf if nothing up to `ceiling` spikes.
     """
     site, model_kw = (stim, input_node, input_node2), model_kw or {}
-    return smallest_firing(lambda I: _spikes(model, I, delay, node, v0, epsg_tau, site, model_kw),
-                           guess, ceiling, rel_tol)
+    return smallest_crossing(lambda I: _respond(model, I, delay, node, v0, epsg_tau, site, model_kw),
+                             guess, ceiling, rel_tol, FACTOR)
 
 
 def _threshold_task(task):
@@ -116,16 +124,17 @@ def window(model, margin, node=3, v0=-68.0, epsg_tau=EPSG_TAU, model_kw=None, re
         input_node2=input_node2)
     amp = (1 + margin) * th0
 
-    def fires(delay):
-        return _spikes(model, amp, delay, node, v0, epsg_tau, site, model_kw)
+    def respond(delay):
+        return _respond(model, amp, delay, node, v0, epsg_tau, site, model_kw)
 
-    if fires(max_delay):
+    spiked, peak = respond(max_delay)
+    if spiked:
         return np.nan, th0
-    lo, hi = 0.0, max_delay  # amp > th0, so it fires at delay 0
-    while hi - lo > delay_tol:
-        mid = (lo + hi) / 2
-        lo, hi = (mid, hi) if fires(mid) else (lo, mid)
-    return lo + hi, th0  # twice the midpoint of the final bracket
+    # amp > th0, so it spikes at delay 0; the peak falls smoothly through FACTOR as
+    # the delay grows, so the same interpolation as in threshold() applies
+    far, near = crossing(respond, max_delay, 0.0, lambda n, y: delay_tol, FACTOR,
+                         [(max_delay, peak)])
+    return far + near, th0  # twice the midpoint of the final bracket
 
 
 def _trial(args):
