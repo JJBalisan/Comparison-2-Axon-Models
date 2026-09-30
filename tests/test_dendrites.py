@@ -124,3 +124,12 @@ def test_prestimulus_cache_separates_membrane_v0():
     t2, y2 = mso_axon(*args, mem=membrane(-68.0))
     np.testing.assert_array_equal(t1, t2)
     np.testing.assert_array_equal(y1, y2)
+
+
+def test_shared_arrays_are_read_only_and_dendrite_scale_needs_dendrites():
+    with pytest.raises(ValueError, match="read-only"):
+        C.G_KLT[0] = 0.0
+    with pytest.raises(ValueError, match="read-only"):
+        LUMPED.g_ax[0] = 0.0
+    with pytest.raises(ValueError, match="dendrite_klt_scale"):
+        membrane(-68.0, dendrite_klt_scale=0.5)

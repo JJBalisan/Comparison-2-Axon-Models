@@ -77,6 +77,8 @@ LUMPED = SimpleNamespace(
     key="lumped", n=N, sa=C.SA, cap=CAP, g_na=C.G_NA, g_kht=C.G_KHT, g_klt=C.G_KLT,
     g_h=C.G_H, g_lk=C.G_LK, parent=np.arange(N - 1), child=np.arange(1, N), g_ax=_G_AX,
     chain=True, jac=_chain_jac_sparsity(), labels=["soma", "AIS", "AIS"] + ["internode", "node"] * 21)
+for _a in (CAP, _G_AX, LUMPED.parent, LUMPED.child):  # read-only, as in constants.py
+    _a.flags.writeable = False
 
 
 def with_dendrites(length=200.0, diameter=5.0, n_seg=5, klt_lambda=74.0, conserve_totals=True,
@@ -242,6 +244,8 @@ def membrane(v0, soma_klt_scale=1.0, ais_klt_scale=1.0, soma_na_vhalf=-62.5,
       only). Mathews et al 2010 found dendritic Kv1 sharpens EPSPs.
     """
     morph = morph or LUMPED
+    if dendrite_klt_scale != 1.0 and morph.n == N:
+        raise ValueError("dendrite_klt_scale needs a morphology with dendrites (morph=with_dendrites())")
     # v0 is in the key because the leak reversals (vlk) are built from it: without
     # it, membrane(-60) and membrane(-68) would share a pre-stimulus cache entry
     m = SimpleNamespace(key=(float(v0), float(soma_klt_scale), float(ais_klt_scale),
@@ -270,7 +274,7 @@ def membrane(v0, soma_klt_scale=1.0, ais_klt_scale=1.0, soma_na_vhalf=-62.5,
     return m
 
 
-def _rhs(t, x, v0, stim_type, s, input_node, active, mem, morph=LUMPED, input_node2=None):
+def _rhs(t, x, stim_type, s, input_node, active, mem, morph=LUMPED, input_node2=None):
     """Right-hand side. Arithmetic is kept expression-for-expression identical to
     msoAxon.m's order so results are bit-for-bit stable; the speed comes from
     writing into one output array and skipping gates that are switched off."""
@@ -371,10 +375,10 @@ def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
     # t == start are still stimulus-free
     if pre_stimulus_is_quiet(cuts, start, stop):
         quiet = (("mso", model_type, float(v0), mem.key, morph.key),
-                 lambda t, x: _rhs(t, x, v0, "none", s, input_node, active, mem, morph))
+                 lambda t, x: _rhs(t, x, "none", s, input_node, active, mem, morph))
 
     spike_stop = None if stop_on_spike is None else spike_event(node - 1, stop_on_spike)
-    return integrate(lambda t, x: _rhs(t, x, v0, stim_type, s, input_node, active, mem,
+    return integrate(lambda t, x: _rhs(t, x, stim_type, s, input_node, active, mem,
                                        morph, input_node2),
                      y0, t_end, cuts, rtol=1e-8, atol=1e-8,
                      max_step=max_step or 0.1 * t_end, jac_sparsity=morph.jac,

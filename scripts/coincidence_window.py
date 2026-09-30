@@ -71,8 +71,12 @@ def run(a, pool):
                               jitter=0.005, node=a.node, v0=v0, epsg_tau=KINETICS[kname],
                               model_kw=kw, executor=pool)
     p_half = prob.max() / 2
-    j = np.nonzero(prob < p_half)[0][0]
-    mc_width = 2 * np.interp(p_half, [prob[j], prob[j - 1]], [mc_delays[j], mc_delays[j - 1]]) * 1e3
+    below = np.nonzero(prob < p_half)[0]
+    if len(below) == 0 or below[0] == 0:  # never falls to half within mc_delays, or never rises
+        mc_width = np.nan
+    else:
+        j = below[0]
+        mc_width = 2 * np.interp(p_half, [prob[j], prob[j - 1]], [mc_delays[j], mc_delays[j - 1]]) * 1e3
     shortcut = half_width(delays, th, 0.03) * 1e3
     print(f"noisy-trial check ({cname}, {kname}, 3%): peak probability {prob.max():.2f}, "
           f"half-width {mc_width:.0f} us vs threshold shortcut {shortcut:.0f} us", flush=True)

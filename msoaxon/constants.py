@@ -98,3 +98,10 @@ XA_CM = XA * 1e-8  # [cm^2]
 _coupling = json.loads((Path(__file__).parent / "data" / "coupling.json").read_text())
 COUPLING1 = np.array(_coupling["coupling1"])  # forward, length 44, index node-2
 COUPLING2 = np.array(_coupling["coupling2"])  # backward
+
+
+# The arrays above are shared by reference (e.g. membrane() hands them to the
+# model unchanged), so an in-place edit would change every later run while the
+# pre-stimulus cache keys stay the same. Make them read-only.
+for _a in [v for v in list(globals().values()) if isinstance(v, np.ndarray)]:
+    _a.flags.writeable = False
