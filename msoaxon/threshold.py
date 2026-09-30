@@ -32,6 +32,19 @@ def sweep_setting(stim_type, i, epsg_pair_dt=1 / 25):
     raise ValueError(f"stimType {stim_type!r} is not supported by the threshold search")
 
 
+def sweep_x(stim_type, i, epsg_pair_dt=1 / 25):
+    """What sweep point i varies, for plotting: the ramp top, the sine frequency, or
+    the delay between the two EPSGs."""
+    stop, syn, _ = sweep_setting(stim_type, i, epsg_pair_dt)
+    if stim_type in ("ramp", "ramp2"):
+        return stop
+    if stim_type == "sine":
+        return syn.f
+    if stim_type == "EPSGpair":
+        return (i - 1) * epsg_pair_dt  # stop - START, without the rounding of the subtraction
+    raise ValueError(f"no x-axis for stimType {stim_type!r}")
+
+
 def _search(spiked_at, stim_type, i, factor, max_I, zoom, epsg_pair_dt):
     """The halving search exactly as BinarySearch.m does it; returns the last tested value."""
     location, previous, distance, first = max_I, 0.0, max_I, 0.0

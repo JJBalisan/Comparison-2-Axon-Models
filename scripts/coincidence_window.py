@@ -114,15 +114,15 @@ def run(a, pool):
     fig.tight_layout()
     fig.savefig(out / "coincidence_window.png", dpi=140)
 
-    json.dump({"delays_ms": delays.tolist(), "margins": MARGINS, "myoga_half_width_us": MYOGA_US,
+    summary = {"delays_ms": delays.tolist(), "margins": MARGINS, "myoga_half_width_us": MYOGA_US,
                "curves": {f"{c} | {k}": v.tolist() for (c, k), v in curves.items()},
                "half_widths_us": [{"model": c, "epsg": k, "threshold0": t0,
                                    **{f"margin_{m}": w for m, w in zip(MARGINS, ws)}}
                                   for c, k, t0, ws in rows],
                "noisy_check": {"half_width_us": mc_width, "shortcut_us": shortcut,
                                "peak_probability": float(prob.max()),
-                               "delays_ms": mc_delays.tolist(), "probability": prob.tolist()}},
-              open(out / "coincidence_window.json", "w"), indent=1)
+                               "delays_ms": mc_delays.tolist(), "probability": prob.tolist()}}
+    (out / "coincidence_window.json").write_text(json.dumps(summary, indent=1))
     print(f"saved {out}/coincidence_window.png and .json")
 
 

@@ -15,14 +15,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from msoaxon.plotting import threshold_figure
-from msoaxon.threshold import binary_search
+from msoaxon.threshold import binary_search, sweep_x
 
-# stimType: (n_points, factor, max, x-values(n), title, xlabel)
+# stimType: (n_points, factor, max, title, xlabel); x-values come from threshold.sweep_x
 SWEEPS = {
-    "ramp": (15, 30, 15000, lambda n: 5 + np.arange(1, n + 1) / 10, "Ramp", "Stop Value"),
-    "sine": (12, 30, 15000, lambda n: 100 * np.arange(1, n + 1), "Sine", "Frequency"),
-    "ramp2": (15, 30, 15000, lambda n: 5 + np.arange(1, n + 1) / 10, "Ramp2", "Stop Value"),
-    "EPSGpair": (25, 10, 150, None, "EPSGpair", "Time Difference"),
+    "ramp": (15, 30, 15000, "Ramp", "Stop Value"),
+    "sine": (12, 30, 15000, "Sine", "Frequency"),
+    "ramp2": (15, 30, 15000, "Ramp2", "Stop Value"),
+    "EPSGpair": (25, 10, 150, "EPSGpair", "Time Difference"),
 }
 
 
@@ -45,15 +45,13 @@ def main():
 def run(a, pool):
 
     for stim in a.only or SWEEPS:
-        n, factor, max_I, xs, title, xlabel = SWEEPS[stim]
-        kw = {}
+        n, factor, max_I, title, xlabel = SWEEPS[stim]
+        kw, dt = {}, 1 / 25
         if stim == "EPSGpair":
-            dt = 0.1 if a.jpg_grid else 1 / 25
+            dt = 0.1 if a.jpg_grid else dt
             n = 11 if a.jpg_grid else n
             kw = dict(epsg_pair_dt=dt, rounded=not a.jpg_grid)
-            x_values = np.arange(n) * dt  # delay between the two EPSGs
-        else:
-            x_values = xs(n)
+        x_values = np.array([sweep_x(stim, i, dt) for i in range(1, n + 1)])
         multi, two = binary_search(stim, n, a.node, factor, max_I, workers=a.workers,
                                    executor=pool, **kw)
         print(f"{stim}: multi={multi}\n{' ' * len(stim)}  two  ={two}")

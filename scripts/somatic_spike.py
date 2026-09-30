@@ -60,7 +60,7 @@ def main():
                  "Mature MSO: 17 ± 2 mV; dendrotoxin: 15 → 37 mV", fontsize=11)
     fig.tight_layout()
     fig.savefig(out / "somatic_spike.png", dpi=130)
-    json.dump(results, open(out / "somatic_spike.json", "w"), indent=1)
+    (out / "somatic_spike.json").write_text(json.dumps(results, indent=1))
     print(f"saved {out}/somatic_spike.png and .json")
 
 

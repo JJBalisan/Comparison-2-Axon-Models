@@ -178,7 +178,7 @@ def run(a, pool):
     ax[2].legend(frameon=False)
     fig.tight_layout()
     fig.savefig(out / "dendrites.png", dpi=130)
-    json.dump(res, open(out / "dendrites.json", "w"), indent=1)
+    (out / "dendrites.json").write_text(json.dumps(res, indent=1))
     print(f"saved {out}/dendrites.png and .json")
 
 
