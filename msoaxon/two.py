@@ -10,8 +10,8 @@ from types import SimpleNamespace
 import numpy as np
 
 from . import constants as C
-from ._common import check_args, stimulus
-from ._solve import breakpoints, integrate, pre_stimulus_is_quiet, spike_event
+from ._common import _stops, check_args, stimulus
+from ._solve import breakpoints, integrate, pre_stimulus_is_quiet
 from .synaptic import SynParams, epsg_unitary, interp_g
 
 # Passive targets of Goldwyn, Remme & Rinzel 2019 (PLoS Comput Biol 15:e1006476), the
@@ -170,7 +170,7 @@ def _rhs(t, x, P, stim_type, s):
 
 def two_cpt(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
             syn: SynParams | None = None, stop_on_spike=None, r1=10.0, tau_est=0.71,
-            max_step=0.1):
+            max_step=0.1, stop_when_settled=False):
     """Run the two-compartment model. Returns (t, x) with x shaped (n_times, 11).
 
     Arguments are as in mso_axon (see its docstring for what start, stop and I
@@ -207,7 +207,7 @@ def two_cpt(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
             and pre_stimulus_is_quiet(cuts, start, stop)):
         quiet = (("two", node, model_type, float(v0), input_node, r1, tau_est),
                  lambda t, x: _rhs(t, x, P, "none", s))
-    spike_stop = None if stop_on_spike is None else spike_event(1, stop_on_spike)
-    return integrate(lambda t, x: _rhs(t, x, P, stim_type, s), x0, t_end, cuts,
-                     rtol=1e-6, atol=1e-6, max_step=max_step, quiet=quiet,
-                     stop_event=spike_stop)
+    rhs = lambda t, x: _rhs(t, x, P, stim_type, s)  # noqa: E731
+    return integrate(rhs, x0, t_end, cuts, rtol=1e-6, atol=1e-6, max_step=max_step,
+                     quiet=quiet, stop_event=_stops(rhs, 1, stop_on_spike, stop_when_settled,
+                                                   stim_type, s, 2))

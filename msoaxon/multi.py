@@ -18,8 +18,8 @@ import numpy as np
 from scipy.sparse import bmat, coo_matrix, diags, eye
 
 from . import constants as C
-from ._common import STIM_TYPES, check_args, stimulus
-from ._solve import breakpoints, integrate, pre_stimulus_is_quiet, spike_event
+from ._common import _stops, STIM_TYPES, check_args, stimulus
+from ._solve import breakpoints, integrate, pre_stimulus_is_quiet
 from .synaptic import SynParams, epsg_unitary, interp_g
 
 N = C.N_CPT
@@ -354,7 +354,7 @@ def _rhs(t, x, stim_type, s, input_node, active, mem, morph=LUMPED, input_node2=
 
 def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
              syn: SynParams | None = None, max_step=None, stop_on_spike=None, mem=None,
-             morph=None, input_node2=None):
+             morph=None, input_node2=None, stop_when_settled=False):
     """Run the multi-compartment model. Returns (t, y) with y shaped (n_times, 7*n).
 
     Arguments shared with two_cpt (compartments are 1-indexed, times in ms):
@@ -378,6 +378,8 @@ def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
     max_step defaults to 0.1*t_end, ode15s's default MaxStep.
     stop_on_spike: if given (mV), stop as soon as compartment `node` rises that far
     above the soma; t then ends before t_end.
+    stop_when_settled: with stop_on_spike, also stop once the input is over and no
+    spike can follow (_solve.settled_event), for callers that only need yes/no.
     mem: channel overrides from membrane() (default: msoAxon.m's own).
     morph: LUMPED or with_dendrites(); defaults to mem's morphology, else LUMPED.
     input_node2: second input site for "EPSGbilateral" (first EPSG at input_node
@@ -412,9 +414,8 @@ def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
         quiet = (("mso", model_type, float(v0), mem.key, morph.key),
                  lambda t, x: _rhs(t, x, "none", s, input_node, active, mem, morph))
 
-    spike_stop = None if stop_on_spike is None else spike_event(node - 1, stop_on_spike)
-    return integrate(lambda t, x: _rhs(t, x, stim_type, s, input_node, active, mem,
-                                       morph, input_node2),
-                     y0, t_end, cuts, rtol=1e-8, atol=1e-8,
+    rhs = lambda t, x: _rhs(t, x, stim_type, s, input_node, active, mem, morph, input_node2)  # noqa: E731
+    return integrate(rhs, y0, t_end, cuts, rtol=1e-8, atol=1e-8,
                      max_step=max_step or 0.1 * t_end, jac_sparsity=morph.jac,
-                     quiet=quiet, stop_event=spike_stop)
+                     quiet=quiet, stop_event=_stops(rhs, node - 1, stop_on_spike,
+                                                   stop_when_settled, stim_type, s, n))

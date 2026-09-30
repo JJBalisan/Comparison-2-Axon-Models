@@ -112,15 +112,16 @@ Measured the way Myoga et al. 2014 did in adult gerbil MSO at 35 °C ([doi](http
 
 | Model | Model EPSG (decay 0.18 ms) | Myoga EPSG (decay 0.3 ms) |
 |---|---|---|
-| 45-compartment | 201 µs | 218 µs |
-| 2-compartment, `TwoCpt.m` | 199 µs | 216 µs |
-| 2-compartment, Goldwyn 2019 calibration | 166 µs | 181 µs |
+| 45-compartment | 201 µs | 219 µs |
+| 2-compartment, `TwoCpt.m` | 199 µs | 217 µs |
+| 2-compartment, Goldwyn 2019 calibration | 167 µs | 183 µs |
 
-These widths use inputs 3% above threshold. At 0.5% they shrink to 65–89 µs. The margin matters a lot, and the paper's "200 pS (~3%)" is ambiguous: 200 pS is closer to 0.5% of their 43 nS EPSGs.
+These widths use inputs 3% above threshold. At 0.5% they shrink to 70–91 µs. The margin matters a lot, and the paper's "200 pS (~3%)" is ambiguous: 200 pS is closer to 0.5% of their 43 nS EPSGs.
 
 How the widths are computed:
-- They come from thresholds resolved to 1e-4 (`msoaxon/coincidence.py`). Probability is 50% where the threshold rises to the input level.
-- Noisy trials check this: 1% amplitude jitter plus 5 µs onset jitter give 200 µs against the estimate's 199 µs. If the noise is large enough to keep peak probability near 85%, the half-maximum width comes out about 10% wider.
+- `coincidence.window()` does what the experiment does: it fixes the input at (1 + margin) × the coincident threshold (resolved to 1e-4) and bisects over delay, to 0.1 µs, for where that input stops spiking. Probability is 50% there. About 30 simulations per window, within 0.5 µs of the same search at 1e-7.
+- Earlier versions read the crossing off a threshold curve on a 20 µs grid. Linear interpolation across a curve that bends upward read 0.1–4 µs low, most at the 0.5% margin.
+- Noisy trials check this: 1% amplitude jitter plus 5 µs onset jitter give 200 µs against `window()`'s 199 µs. If the noise is large enough to keep peak probability near 85%, the half-maximum width comes out about 10% wider.
 
 Findings:
 - With matched methods, the original calibration reproduces the measured window closely.
@@ -201,7 +202,7 @@ Two things the paper doesn't state:
 | Mid-dendrite half-width with dendritic KLT removed | — | 689 µs | 910 µs | wider without it (Mathews 2010) |
 | Threshold at 0 delay: bilateral vs unilateral | — | 58.5 vs 82.2 | 37.1 vs 44.0 | bilateral lower (Scott 2010) |
 | Bilateral / summed unilateral EPSP | — | 0.98 | 1.00 | linear in vivo |
-| Coincidence window at 3%, model EPSG / Myoga EPSG | 201 / 218 µs (soma input) | 165 / 179 µs | 222 / 248 µs | 221 µs (Myoga 2014) |
+| Coincidence window at 3%, model EPSG / Myoga EPSG | 201 / 219 µs (soma input) | 165 / 181 µs | 223 / 249 µs | 221 µs (Myoga 2014) |
 | EPSG-pair threshold curve at the soma vs lumped (max difference) | — | 12% | 50% | "almost identical" (Lehnert) |
 | Somatic spike at 1.5 / 2 / 3× rheobase | 7.6 / 13.4 / 19.4 mV | 16.3 / 19.5 / 26.6 mV | 21.4 / 26.1 / 29.6 mV | 17 ± 2 mV mature |
 
@@ -225,7 +226,7 @@ Both reproduce the qualitative dendritic results: attenuation along the cable, E
 | Mid / soma EPSP size | 0.79 → 0.60 | 0.84 → 0.67 |
 | Threshold at 0 delay: bilateral vs unilateral | 58.5 vs 82.2 → 76.6 vs 206.7 | 37.1 vs 44.0 → 41.5 vs 63.5 |
 | Bilateral / summed unilateral EPSP | 0.98 → 1.00 | 1.00 → 1.02 |
-| Coincidence window at 3%, model / Myoga EPSG | 165 / 179 → 137 / 148 µs | 222 / 248 → 208 / 229 µs |
+| Coincidence window at 3%, model / Myoga EPSG | 165 / 181 → 139 / 149 µs | 223 / 249 → 209 / 230 µs |
 | Pair threshold curve at the soma vs lumped (max difference) | 12% → 24% | 50% → 54% |
 | Somatic spike at 1.5 / 2 / 3× rheobase | 16.3 / 19.5 / 26.6 → 19.3 / 24.5 / 29.9 mV | 21.4 / 26.1 / 29.6 → 25.5 / 29.7 / 35.8 mV |
 
@@ -233,6 +234,6 @@ What the higher resistivity does:
 - **It isolates the soma from the dendrites.** Somatic EPSPs get larger and narrower, dendritic EPSPs are attenuated more, and the soma sees less of the dendritic membrane.
 - **It makes the bilateral advantage much stronger.** With conserved totals, two EPSGs on one dendrite need 2.7× the bilateral threshold, up from 1.4×. The local depolarisation saturates the synaptic driving force, and dendritic KLT shunts it (Scott et al. 2010's argument).
 - **Summation stays linear**, within 2%.
-- **It moves each variant away from what it already matched.** With conserved totals the window narrows further from Myoga's 221 µs, and the curve drifts from Lehnert's "almost identical". With the soma-density gradient the window is still close (229 µs with the Myoga EPSG), but the spike grows further past 17 mV.
+- **It moves each variant away from what it already matched.** With conserved totals the window narrows further from Myoga's 221 µs, and the curve drifts from Lehnert's "almost identical". With the soma-density gradient the window is still close (230 µs with the Myoga EPSG), but the spike grows further past 17 mV.
 
 So 200 Ω·cm doesn't reconcile the two variants. 100 stays the default.

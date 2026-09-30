@@ -24,12 +24,23 @@ def run_model(model, stim, start, stop, I, node, t_end, v0, input_node, syn=None
     return two_cpt(stim, start, stop, I, node, model_type, t_end, v0, input_node, syn, **kw)
 
 
+# spikes() stops runs once the input is over and no spike can follow (A1 in the
+# search-speed plan); False restores running every non-spiking run to t_end
+STOP_WHEN_SETTLED = True
+
+
 def spikes(model, stim, start, stop, I, node, t_end, v0, input_node, syn=None, *, factor, **kw):
     """True if compartment `node` rises `factor` mV above the soma before t_end.
 
-    The run stops at that first spike (stop_on_spike), so it ends early exactly
-    when there is one.
+    The run stops at that first spike (stop_on_spike) or, once the input is over,
+    as soon as no spike can follow (stop_when_settled). Both end before t_end, so
+    the final state tells them apart: a spike stop ends with axon - soma at
+    `factor`, a settled stop at or below factor / 2 (see _solve.settled_event).
+    The test sits at 0.75 * factor, away from both: the settled event can fire
+    exactly as axon - soma falls through factor / 2, so testing at factor / 2
+    itself misread three near-threshold ramp runs as spikes.
     """
-    t, _ = run_model(model, stim, start, stop, I, node, t_end, v0, input_node, syn,
-                     stop_on_spike=factor, **kw)
-    return bool(t[-1] < t_end)
+    t, x = run_model(model, stim, start, stop, I, node, t_end, v0, input_node, syn,
+                     stop_on_spike=factor, stop_when_settled=STOP_WHEN_SETTLED, **kw)
+    axon = node - 1 if model == "multi" else 1
+    return bool(t[-1] < t_end and x[-1, axon] - x[-1, 0] > 0.75 * factor)

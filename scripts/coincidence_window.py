@@ -4,8 +4,9 @@
 
 Runs three models (45-compartment; two-compartment as in TwoCpt.m; two-compartment
 recalibrated to Goldwyn et al 2019's passive targets) with the model's EPSG
-(decay 0.18 ms) and Myoga's (0.3 ms), computes each spike-probability half-width,
-and checks the threshold shortcut against noisy trials.
+(decay 0.18 ms) and Myoga's (0.3 ms), finds each spike-probability half-width
+directly (coincidence.window: fixed input, bisection over delay), and checks it
+against noisy trials. Threshold curves are drawn on a 50 us grid.
 """
 
 import argparse
@@ -15,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from msoaxon._parallel import process_pool
-from msoaxon.coincidence import half_width, probability_trials, threshold_curve
+from msoaxon.coincidence import probability_trials, threshold_curve, window
 from msoaxon.synaptic import EPSG_TAU
 from msoaxon.two import GOLDWYN_2019
 
@@ -47,26 +48,37 @@ def run(a, pool):
     out.mkdir(parents=True, exist_ok=True)
 
     tol = 1e-2 if a.quick else 1e-4  # threshold tolerance
-    delays = np.round(np.arange(0, 1.0001, 0.1 if a.quick else 0.02), 4)
-    curves, rows = {}, []
-    for cname, (model, v0, kw) in CONFIGS.items():
-        for kname, tau in KINETICS.items():
-            th = threshold_curve(model, delays, node=a.node, v0=v0, epsg_tau=tau, model_kw=kw,
-                                 rel_tol=tol, executor=pool)
-            curves[(cname, kname)] = th
-            widths = [half_width(delays, th, m) * 1e3 for m in MARGINS]
-            rows.append((cname, kname, th[0], widths))
-            print(f"{cname} | {kname}: threshold(0) {th[0]:.2f}, plateau/zero-delay {th[-1] / th[0]:.2f}, "
-                  + ", ".join(f"half-width @{m:.1%} {w:.0f} us" for m, w in zip(MARGINS, widths)), flush=True)
+    delay_tol = 1e-3 if a.quick else 1e-4  # window boundary tolerance [ms]
+    combos = [(c, k) for c in CONFIGS for k in KINETICS]
+    # the widths come from window(), all submitted at once; the curves are only drawn
+    win_jobs = {}
+    for cname, kname in combos:
+        model, v0, kw = CONFIGS[cname]
+        for m in MARGINS:
+            win_jobs[cname, kname, m] = pool.submit(
+                window, model, m, node=a.node, v0=v0, epsg_tau=KINETICS[kname], model_kw=kw,
+                rel_tol=tol, delay_tol=delay_tol)
+    delays = np.round(np.arange(0, 1.0001, 0.1 if a.quick else 0.05), 4)
+    curves, rows, direct = {}, [], {}
+    for cname, kname in combos:
+        model, v0, kw = CONFIGS[cname]
+        th = curves[cname, kname] = threshold_curve(
+            model, delays, node=a.node, v0=v0, epsg_tau=KINETICS[kname], model_kw=kw,
+            rel_tol=tol, executor=pool)
+        res = [win_jobs[cname, kname, m].result() for m in MARGINS]
+        th0, widths = res[0][1], [w * 1e3 for w, _ in res]
+        direct[cname, kname] = dict(zip(MARGINS, widths))
+        rows.append((cname, kname, th0, widths))
+        print(f"{cname} | {kname}: threshold(0) {th0:.2f}, plateau/zero-delay {th[-1] / th0:.2f}, "
+              + ", ".join(f"half-width @{m:.1%} {w:.1f} us" for m, w in zip(MARGINS, widths)), flush=True)
 
-    # check the shortcut with real noisy trials (2-cpt TwoCpt.m, model EPSG, 3% margin)
+    # check window() against real noisy trials (2-cpt TwoCpt.m, model EPSG, 3% margin)
     cname, kname = list(CONFIGS)[1], list(KINETICS)[0]
     model, v0, kw = CONFIGS[cname]
-    th = curves[(cname, kname)]
-    amp = (1 + 0.03) * th[0]
+    amp = (1 + 0.03) * rows[combos.index((cname, kname))][2]
     mc_delays = np.round(np.arange(0, 0.3001, 0.1 if a.quick else 0.02), 4)
     # small noise so probability peaks near 100%, as in Myoga's protocol; 1% amplitude
-    # jitter plus 5 us onset jitter per EPSG (a noise source the shortcut ignores)
+    # jitter plus 5 us onset jitter per EPSG (a noise source window() ignores)
     prob = probability_trials(model, mc_delays, amp, n_trials=a.trials, amp_cv=0.01,
                               jitter=0.005, node=a.node, v0=v0, epsg_tau=KINETICS[kname],
                               model_kw=kw, executor=pool)
@@ -77,9 +89,9 @@ def run(a, pool):
     else:
         j = below[0]
         mc_width = 2 * np.interp(p_half, [prob[j], prob[j - 1]], [mc_delays[j], mc_delays[j - 1]]) * 1e3
-    shortcut = half_width(delays, th, 0.03) * 1e3
+    direct_us = direct[cname, kname][0.03]
     print(f"noisy-trial check ({cname}, {kname}, 3%): peak probability {prob.max():.2f}, "
-          f"half-width {mc_width:.0f} us vs threshold shortcut {shortcut:.0f} us", flush=True)
+          f"half-width {mc_width:.0f} us vs window() {direct_us:.0f} us", flush=True)
 
     # figure: normalised threshold curves, and probability curves
     # imported here rather than at the top: pool workers re-import this script,
@@ -106,10 +118,9 @@ def run(a, pool):
     a2.plot(sym, np.concatenate([prob[:0:-1], prob]), "o-", color=colours[1], lw=1.5,
             label=f"2-cpt TwoCpt.m, noisy trials (FWHM {mc_width:.0f} us)")
     for c, cname, y in zip(colours, CONFIGS, (0.56, 0.5, 0.44)):  # offset so all show
-        th = curves[(cname, list(KINETICS)[0])]
-        w = half_width(delays, th, 0.03) * 1e3
+        w = direct[cname, list(KINETICS)[0]][0.03]
         a2.plot([-w / 2, w / 2], [y, y], color=c, lw=4, alpha=0.8,
-                label=f"{cname.split(' (')[0]}: {w:.0f} us (shortcut, 3%)")
+                label=f"{cname.split(' (')[0]}: {w:.0f} us (window(), 3%)")
     a2.axvspan(-MYOGA_US / 2, MYOGA_US / 2, color="0.85", zorder=0,
                label=f"Myoga 2014 in vitro: {MYOGA_US} us")
     a2.set(xlim=(-320, 320), ylim=(-0.03, 1.05), xlabel="Delay between EPSGs (us)",
@@ -119,12 +130,13 @@ def run(a, pool):
     fig.tight_layout()
     fig.savefig(out / "coincidence_window.png", dpi=140)
 
-    summary = {"delays_ms": delays.tolist(), "margins": MARGINS, "myoga_half_width_us": MYOGA_US,
+    summary = {"curve_delays_ms": delays.tolist(), "margins": MARGINS, "myoga_half_width_us": MYOGA_US,
+               "half_width_method": "coincidence.window: fixed input, bisection over delay",
                "curves": {f"{c} | {k}": v.tolist() for (c, k), v in curves.items()},
                "half_widths_us": [{"model": c, "epsg": k, "threshold0": t0,
                                    **{f"margin_{m}": w for m, w in zip(MARGINS, ws)}}
                                   for c, k, t0, ws in rows],
-               "noisy_check": {"half_width_us": mc_width, "shortcut_us": shortcut,
+               "noisy_check": {"half_width_us": mc_width, "window_us": direct_us,
                                "peak_probability": float(prob.max()),
                                "delays_ms": mc_delays.tolist(), "probability": prob.tolist()}}
     (out / "coincidence_window.json").write_text(json.dumps(summary, indent=1))

@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 from . import constants as C
+from ._solve import input_end, settled_event, spike_event
 from .synaptic import synaptic
 
 STIM_TYPES = ("step", "ramp", "ramp2", "sine", "Synaptic", "SynapticPair", "EPSG", "EPSGpair")
@@ -32,3 +33,20 @@ def stimulus(stim_type, start, stop, I, t_end, syn):
         s.t_syn, s.g_syn = synaptic(syn)
         s.VsynE, s.diff = syn.VsynE, syn.diff
     return s
+
+
+def _stops(rhs, axon_col, stop_on_spike, stop_when_settled, stim_type, s, n_v):
+    """The terminal events for a run: none, the spike stop, or both stops.
+
+    n_v: how many leading state entries are voltages (2 for two_cpt, n for mso_axon).
+    """
+    if stop_on_spike is None:
+        if stop_when_settled:
+            raise ValueError("stop_when_settled needs stop_on_spike")
+        return None
+    events = [spike_event(axon_col, stop_on_spike)]
+    if stop_when_settled:
+        t_off = input_end(stim_type, s.start, s.stop, s.t_end, s.epsg_tau)
+        if t_off < s.t_end:
+            events.append(settled_event(rhs, t_off, axon_col, stop_on_spike, n_v))
+    return events

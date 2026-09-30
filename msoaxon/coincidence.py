@@ -93,6 +93,41 @@ def half_width(delays, thresholds, margin):
     return 2 * d
 
 
+def window(model, margin, node=3, v0=-68.0, epsg_tau=EPSG_TAU, model_kw=None, rel_tol=1e-4,
+           delay_tol=1e-4, max_delay=1.0, threshold0=None, *, stim="EPSGpair", input_node=1,
+           input_node2=None):
+    """Coincidence-window width [ms] at `margin`, found directly. Returns (width, th0).
+
+    Myoga et al held the input size fixed and varied the delay, and this does the
+    same: find the coincident threshold th0 (one bisection, skipped if threshold0 is
+    given), fix the amplitude at (1 + margin) * th0, and bisect over delay, to
+    delay_tol, for where that input stops spiking. The width is twice that delay.
+
+    It measures the same thing as half_width(delays, threshold_curve(...), margin),
+    but needs ~15 + ~14 runs instead of ~15 per delay of the curve, and has no
+    linear interpolation between grid points. It assumes a single boundary: once
+    the threshold curve rises above (1 + margin) * th0 it stays above. Every saved
+    curve does (their only dips are <0.1% of th0, on the plateau at about twice
+    th0). width is nan if the input still spikes at max_delay.
+    """
+    site, model_kw = (stim, input_node, input_node2), model_kw or {}
+    th0 = threshold0 if threshold0 is not None else threshold(
+        model, 0.0, node, v0, epsg_tau, model_kw, rel_tol, stim=stim, input_node=input_node,
+        input_node2=input_node2)
+    amp = (1 + margin) * th0
+
+    def fires(delay):
+        return _spikes(model, amp, delay, node, v0, epsg_tau, site, model_kw)
+
+    if fires(max_delay):
+        return np.nan, th0
+    lo, hi = 0.0, max_delay  # amp > th0, so it fires at delay 0
+    while hi - lo > delay_tol:
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if fires(mid) else (lo, mid)
+    return lo + hi, th0  # twice the midpoint of the final bracket
+
+
 def _trial(args):
     model, amp, t1, t2, node, v0, epsg_tau, site, model_kw = args
     first, second = min(t1, t2), max(t1, t2)
