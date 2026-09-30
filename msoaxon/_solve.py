@@ -20,6 +20,22 @@ def breakpoints(stim_type, start, stop, t_end):
     return sorted(p for p in pts if 0 < p < t_end)
 
 
+def input_end(stim_type, start, stop, t_end, epsg_tau):
+    """Time after which the stimulus no longer drives the cell.
+
+    EPSGs: the last onset plus 20 decay constants, when the conductance is below
+    ~2e-9 of its peak (neither model's EPSG ends sooner: two_cpt never cuts it
+    off). step, ramp, sine and the synaptic inputs are off after `stop`. ramp2
+    holds its current to t_end, so it never ends.
+    """
+    if stim_type in ("EPSG", "EPSGpair", "EPSGbilateral"):
+        last = start if stim_type == "EPSG" else max(start, stop)
+        return last + 20 * max(epsg_tau)
+    if stim_type in ("step", "ramp", "sine", "Synaptic", "SynapticPair"):
+        return max(start, stop)
+    return t_end
+
+
 def pre_stimulus_is_quiet(cuts, start, stop):
     """True when no stimulus acts before the first breakpoint, so [0, cuts[0]] can be shared."""
     return bool(cuts) and cuts[0] <= min(start, stop)
@@ -41,6 +57,34 @@ def spike_event(axon_col, factor):
     """
     def event(t, x):
         return x[axon_col] - x[0] - factor
+    event.terminal = True
+    event.direction = 1
+    return event
+
+
+def settled_event(rhs, t_off, axon_col, factor, n_v):
+    """Terminal event: after t_off, stop once a spike is no longer possible.
+
+    Fires at the first time after t_off when axon - soma is below factor / 2 and
+    every compartment's voltage is falling. t_off (input_end) guarantees the input
+    has stopped driving the cell; all voltages falling guarantees its response has
+    peaked everywhere, a stronger condition than axon - soma falling (which also
+    passed the benchmark's --check, but stops later). With no input and every
+    compartment repolarising, the run's yes/no is decided;
+    the searches, which only need that answer, stop here instead of integrating
+    the return to rest (scripts/benchmark_search.py measures the saving).
+
+    The event is -1 until then and only switches sign when the condition holds,
+    so it never alters the solver's steps: a run that doesn't stop is identical
+    to one without the event, and one that does is identical up to the stop.
+    spikes() tells the two stops apart by the final state: a spike stop ends with
+    axon - soma at factor, a settled stop at or below factor / 2.
+    """
+    def event(t, x):
+        if t < t_off or x[axon_col] - x[0] >= factor / 2:
+            return -1.0
+        dv = np.asarray(rhs(t, x)[:n_v])  # voltages come first in both models' state
+        return 1.0 if np.all(dv < 0) else -1.0
     event.terminal = True
     event.direction = 1
     return event
@@ -69,7 +113,8 @@ def integrate(rhs, y0, t_end, cuts, rtol, atol, max_step, jac_sparsity=None, qui
     in a threshold sweep that is every run, since only the stimulus changes.
     `key` must capture everything the stimulus-free dynamics depend on.
 
-    stop_event: optional terminal event; integration ends where it fires, so
+    stop_event: optional terminal event, or a list of them (spike_event and
+    settled_event); integration ends where one fires, so
     the returned t ends before t_end. Not applied to the cached quiet prefix,
     where there is no input to drive it.
     """

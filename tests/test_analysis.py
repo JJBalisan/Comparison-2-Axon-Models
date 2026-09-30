@@ -173,3 +173,60 @@ def test_pools_never_fork():
     # the forkserver context really runs tasks (it's what Linux gets)
     with ProcessPoolExecutor(2, mp_context=pool_context("fork")) as pool:
         assert map_tasks(abs, [-1, -2, -3], executor=pool) == [1, 2, 3]
+
+
+# --- settled stop (_solve.settled_event, search-speed A1) --------------------------
+
+def test_input_end_per_stimulus():
+    from msoaxon._solve import input_end
+
+    tau = (0.1, 0.18)
+    assert input_end("EPSG", 5, 10, 20, tau) == pytest.approx(5 + 3.6)  # onset, not the cut-off
+    assert input_end("EPSGpair", 5, 5.3, 20, tau) == pytest.approx(5.3 + 3.6)
+    assert input_end("EPSGbilateral", 5, 5.3, 20, (0.1, 0.3)) == pytest.approx(5.3 + 6.0)
+    assert input_end("step", 5, 105, 110, tau) == 105
+    assert input_end("ramp2", 5, 5.5, 20, tau) == 20  # holds its current: never ends
+
+
+@pytest.mark.parametrize("model", ["multi", "two"])
+def test_settled_stop_ends_quiet_runs_early_with_the_same_answer(model):
+    from msoaxon._dispatch import run_model, spikes
+    from msoaxon._solve import input_end
+
+    args = (model, "EPSGpair", 5, 5.3, 20.0, 3, 20, -68.0, 1)  # far below threshold
+    t_full, _ = run_model(*args, stop_on_spike=10)
+    t, x = run_model(*args, stop_on_spike=10, stop_when_settled=True)
+    t_off = input_end("EPSGpair", 5, 5.3, 20, (0.1, 0.18))
+    # stopped after the input ended (the root-finder may land a few 1e-15 ms early
+    # when the condition already holds at t_off, where the event switches)
+    assert t_full[-1] == 20 and t_off - 1e-9 <= t[-1] < 20
+    axon = 2 if model == "multi" else 1
+    assert x[-1, axon] - x[-1, 0] < 5  # below factor / 2: a settled stop, not a spike
+    # identical solver steps up to the stop (the last point is the event time itself)
+    np.testing.assert_array_equal(t[:-1], t_full[:len(t) - 1])
+    assert spikes(*args, factor=10) is False
+
+
+@pytest.mark.parametrize("model", ["multi", "two"])
+def test_spike_stops_are_still_spikes(model):
+    # a spike happens before the input ends, so the settled event can't touch it
+    from msoaxon._dispatch import run_model, spikes
+
+    args = (model, "EPSGpair", 5, 5.3, 150.0, 3, 20, -68.0, 1)
+    t1, y1 = run_model(*args, stop_on_spike=10)
+    t2, y2 = run_model(*args, stop_on_spike=10, stop_when_settled=True)
+    np.testing.assert_array_equal(y1, y2)
+    axon = 2 if model == "multi" else 1
+    assert y2[-1, axon] - y2[-1, 0] == pytest.approx(10, abs=1e-6)
+    assert spikes(*args, factor=10) is True
+
+
+def test_runs_that_never_settle_are_unchanged():
+    from msoaxon._dispatch import run_model
+
+    args = ("multi", "ramp2", 5, 5.5, 3000.0, 3, 20, -68.0, 1)  # ramp2 never ends
+    t1, y1 = run_model(*args, stop_on_spike=30)
+    t2, y2 = run_model(*args, stop_on_spike=30, stop_when_settled=True)
+    np.testing.assert_array_equal(y1, y2)
+    with pytest.raises(ValueError, match="needs stop_on_spike"):
+        run_model(*args, stop_when_settled=True)
