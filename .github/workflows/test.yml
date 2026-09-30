@@ -18,6 +18,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --locked
-      - run: uv run pytest -q
+      - run: uv run pytest -q --cov --cov-report=term
         env:
           MPLBACKEND: Agg
+      # one table per run is enough; the matrix entries cover the same code
+      - name: Coverage summary
+        if: matrix.python-version == '3.12'
+        run: |
+          echo "## Coverage (Python ${{ matrix.python-version }})" >> "$GITHUB_STEP_SUMMARY"
+          uv run coverage report --format=markdown --no-skip-covered >> "$GITHUB_STEP_SUMMARY"

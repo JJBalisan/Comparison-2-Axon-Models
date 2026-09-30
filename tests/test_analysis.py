@@ -151,3 +151,12 @@ def test_count_rising_edges():
 
     assert count_rising_edges([0, 1, 1, 0, 1, 0, 0, 1]) == 3
     assert count_rising_edges([1, 1, 0]) == 0  # a marker at the first sample isn't an edge
+
+
+def test_stimulus_at_time_zero_skips_the_prestimulus_cache():
+    from msoaxon import mso_axon
+
+    _solve._QUIET_CACHE.clear()
+    t, y = mso_axon("step", 0, 5, 500.0, 3, "active-full", 5, -68.0, 1)
+    assert not _solve._QUIET_CACHE  # nothing stimulus-free to share
+    assert y[-1, 0] > -68.0  # the step is on from the start
