@@ -7,6 +7,7 @@ import pytest
 from msoaxon import _solve
 from msoaxon._parallel import map_tasks
 from msoaxon.coincidence import threshold_curve
+from msoaxon.synaptic import EPSG_TAU
 
 
 def test_map_tasks_handles_no_tasks():
@@ -230,3 +231,36 @@ def test_runs_that_never_settle_are_unchanged():
     np.testing.assert_array_equal(y1, y2)
     with pytest.raises(ValueError, match="needs stop_on_spike"):
         run_model(*args, stop_when_settled=True)
+
+
+# --- coincidence windows found directly (coincidence.window, search-speed C1) --------
+
+def test_window_brackets_the_spike_boundary():
+    from msoaxon.coincidence import _spikes, window
+
+    w, th0 = window("two", 0.03)
+    amp, d = 1.03 * th0, w / 2
+    site = ("EPSGpair", 1, None)
+    assert _spikes("two", amp, d - 2e-4, 3, -68.0, EPSG_TAU, site, {})  # still spikes just inside
+    assert not _spikes("two", amp, d + 2e-4, 3, -68.0, EPSG_TAU, site, {})  # not just outside
+    assert 0.19 < w < 0.21  # PYTHON.md: ~199 us for TwoCpt.m at 3%
+
+
+def test_window_agrees_with_the_threshold_curve():
+    # the grid method interpolates linearly between 20 us points and so sits a
+    # little low; on a fine grid the two agree closely
+    from msoaxon.coincidence import half_width, window
+
+    w, th0 = window("two", 0.03)
+    delays = np.round(np.arange(0, 0.2001, 0.005), 4)
+    grid = half_width(delays, threshold_curve("two", delays), 0.03)
+    assert abs(w - grid) < 1e-3  # within 1 us
+
+
+def test_window_reuses_threshold0_and_reports_no_window():
+    from msoaxon.coincidence import window
+
+    w, th0 = window("two", 0.03)
+    assert window("two", 0.03, threshold0=th0) == (w, th0)
+    w_big, _ = window("two", 1.5, threshold0=th0)  # 2.5x th0 spikes even on the plateau
+    assert np.isnan(w_big)
