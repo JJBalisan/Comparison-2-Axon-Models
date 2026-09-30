@@ -29,6 +29,23 @@ def run_model(model, stim, start, stop, I, node, t_end, v0, input_node, syn=None
 STOP_WHEN_SETTLED = True
 
 
+def response(model, stim, start, stop, I, node, t_end, v0, input_node, syn=None, *, factor,
+             **kw):
+    """(spiked, peak): whether compartment `node` rose `factor` mV above the soma
+    before t_end (see spikes()), and the largest axon - soma of the run [mV].
+
+    For a run that didn't spike the peak says how close it came, which lets a
+    search interpolate towards the threshold instead of halving (_bisect.crossing);
+    for one that did, the run stopped at the crossing, so the peak is ~factor.
+    The settled stop keeps the peak: it only ends runs whose response has peaked.
+    """
+    t, x = run_model(model, stim, start, stop, I, node, t_end, v0, input_node, syn,
+                     stop_on_spike=factor, stop_when_settled=STOP_WHEN_SETTLED, **kw)
+    axon = node - 1 if model == "multi" else 1
+    margin = x[:, axon] - x[:, 0]
+    return bool(t[-1] < t_end and margin[-1] > 0.75 * factor), float(margin.max())
+
+
 def spikes(model, stim, start, stop, I, node, t_end, v0, input_node, syn=None, *, factor, **kw):
     """True if compartment `node` rises `factor` mV above the soma before t_end.
 
