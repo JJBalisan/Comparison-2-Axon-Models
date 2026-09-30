@@ -25,10 +25,6 @@ import argparse
 import json
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 
 from msoaxon import mso_axon
@@ -175,7 +171,12 @@ def run(a, pool):
         str(k): float(j.result()["amplitude"]) for k, j in amp_jobs.items()})
     print("G", res["G_somatic_spike"], flush=True)
 
-    # figure
+    # imported here rather than at the top: pool workers re-import this script,
+    # and only the main process draws
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
     fig, ax = plt.subplots(1, 3, figsize=(17, 4.8))
     for label, (g, v) in traces.items():
         ax[0].plot(g - 5, v / v.max(), lw=1.8, label=f"{label} ({B[label]['amp']:.1f} mV)")
