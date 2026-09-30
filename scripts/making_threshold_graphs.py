@@ -8,12 +8,12 @@ across all CPUs unless --workers says otherwise.
 """
 
 import argparse
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+from msoaxon._parallel import process_pool
 from msoaxon.plotting import threshold_figure
 from msoaxon.threshold import binary_search, sweep_x
 
@@ -39,7 +39,7 @@ def main():
     if a.workers == 1:  # in-process, as binary_search(workers=1) does
         run(a, None)
     else:
-        with ProcessPoolExecutor(max_workers=a.workers) as pool:  # shared by every sweep
+        with process_pool(a.workers) as pool:  # shared by every sweep
             run(a, pool)
 
 

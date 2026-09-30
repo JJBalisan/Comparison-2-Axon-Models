@@ -10,7 +10,6 @@ and checks the threshold shortcut against noisy trials.
 
 import argparse
 import json
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import matplotlib
@@ -19,6 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from msoaxon._parallel import process_pool
 from msoaxon.coincidence import half_width, probability_trials, threshold_curve
 from msoaxon.synaptic import EPSG_TAU
 from msoaxon.two import GOLDWYN_2019
@@ -42,7 +42,7 @@ def main():
     ap.add_argument("--quick", action="store_true",
                     help="coarse grids and 1%% threshold tolerance: a smoke test, not results")
     a = ap.parse_args()
-    with ProcessPoolExecutor() as pool:  # one pool for every parallel call below
+    with process_pool() as pool:  # one pool for every parallel call below
         run(a, pool)
 
 

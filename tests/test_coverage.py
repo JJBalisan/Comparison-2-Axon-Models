@@ -209,14 +209,13 @@ def test_model_modules_are_importable():
 
 
 def test_parallel_runs_match_serial():
-    from concurrent.futures import ProcessPoolExecutor
-
+    from msoaxon._parallel import process_pool
     from msoaxon.coincidence import threshold_curve
 
     serial = binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=1)
     assert binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=2) == serial
     curve = threshold_curve("two", [0.0, 0.2], workers=1)
-    with ProcessPoolExecutor(max_workers=2) as pool:  # one pool reused across calls
+    with process_pool(2) as pool:  # one pool reused across calls
         assert binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, executor=pool) == serial
         np.testing.assert_array_equal(threshold_curve("two", [0.0, 0.2], executor=pool), curve)
 
