@@ -13,6 +13,7 @@ the charging transient and shortly before the axonal spike.
 
 import numpy as np
 
+from ._bisect import smallest_firing
 from .multi import mso_axon
 from .two import two_cpt
 
@@ -36,16 +37,8 @@ def fires(model, I, node=3, v0=-68.0, mem=None):
 
 
 def rheobase(model, node=3, v0=-68.0, mem=None, rel_tol=1e-4, guess=2000.0):
-    """Smallest 100 ms somatic step [pA] that fires, by bisection."""
-    lo, hi = 0.0, guess
-    while not fires(model, hi, node, v0, mem):
-        lo, hi = hi, hi * 2
-        if hi > 1e6:
-            return np.inf
-    while hi - lo > rel_tol * hi:
-        mid = (lo + hi) / 2
-        lo, hi = (lo, mid) if fires(model, mid, node, v0, mem) else (mid, hi)
-    return hi
+    """Smallest 100 ms somatic step [pA] that fires, by bisection (inf above 1e6)."""
+    return smallest_firing(lambda I: fires(model, I, node, v0, mem), guess, 1e6, rel_tol)
 
 
 def spike_amplitude(model, I, node=3, v0=-68.0, mem=None):

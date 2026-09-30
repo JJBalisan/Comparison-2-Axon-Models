@@ -20,6 +20,7 @@ bracketing bisection rather than BinarySearch.m's halving search.
 
 import numpy as np
 
+from ._bisect import smallest_firing
 from ._parallel import map_tasks
 from .multi import mso_axon
 from .spiking import count_spikes
@@ -46,20 +47,13 @@ def _spikes(model, I, delay, node, v0, epsg_tau, model_kw, start=START):
 
 def threshold(model, delay, node=3, v0=-68.0, epsg_tau=(0.1, 0.18), model_kw=None,
               rel_tol=1e-4, guess=50.0, ceiling=2000.0):
-    """Smallest EPSG-pair amplitude that spikes at this delay, to rel_tol (bisection)."""
+    """Smallest EPSG-pair amplitude that spikes at this delay, to rel_tol (bisection).
+
+    Returns inf if nothing up to `ceiling` spikes (see _bisect.smallest_firing).
+    """
     model_kw = model_kw or {}
-    lo, hi = 0.0, guess
-    while not _spikes(model, hi, delay, node, v0, epsg_tau, model_kw):
-        lo, hi = hi, hi * 2
-        if hi > ceiling:
-            return np.inf
-    while (hi - lo) > rel_tol * hi:
-        mid = (lo + hi) / 2
-        if _spikes(model, mid, delay, node, v0, epsg_tau, model_kw):
-            hi = mid
-        else:
-            lo = mid
-    return hi
+    return smallest_firing(lambda I: _spikes(model, I, delay, node, v0, epsg_tau, model_kw),
+                           guess, ceiling, rel_tol)
 
 
 def _threshold_task(args):
