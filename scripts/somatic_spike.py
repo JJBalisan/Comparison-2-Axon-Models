@@ -11,11 +11,6 @@ import argparse
 import json
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
 from msoaxon.multi import membrane
 from msoaxon.somatic import rheobase, spike_amplitude
 
@@ -36,6 +31,12 @@ def main():
     a = ap.parse_args()
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
+
+    # imported here rather than at the top, like the pool scripts, so importing this
+    # module stays cheap
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(1, len(CASES), figsize=(15, 4.2), sharey=True)
     results = {}
