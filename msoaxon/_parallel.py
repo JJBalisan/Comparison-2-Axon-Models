@@ -16,7 +16,7 @@ def map_tasks(fn, tasks, workers=None, executor=None, chunksize=1):
     if executor is not None:
         return list(executor.map(fn, tasks, chunksize=chunksize))
     workers = min(workers or os.cpu_count() or 1, len(tasks))
-    if workers == 1:
+    if workers <= 1:  # also no tasks at all, which a pool of 0 workers would reject
         return [fn(t) for t in tasks]
     with ProcessPoolExecutor(max_workers=workers) as pool:
         return list(pool.map(fn, tasks, chunksize=chunksize))

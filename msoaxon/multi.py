@@ -60,6 +60,8 @@ def _chain_jac_sparsity():
 
 
 def _tree_jac_sparsity(n, parent, child):
+    """_chain_jac_sparsity for any tree: dV couples to its own V, to each V it shares
+    an edge (parent[k], child[k]) with, and to its own gates; each gate to its own V."""
     I = eye(n, format="csr")
     adj = coo_matrix((np.ones(2 * len(parent)), (np.r_[parent, child], np.r_[child, parent])),
                      shape=(n, n))
@@ -70,6 +72,23 @@ def _tree_jac_sparsity(n, parent, child):
     return bmat(blocks).tocsc()
 
 
+# A morphology is a SimpleNamespace with these fields (LUMPED and with_dendrites()):
+#   key       hashable summary of every setting, part of the pre-stimulus cache key
+#   n         number of compartments (45 for LUMPED)
+#   sa, cap   membrane area [um^2] and capacitance [ms nS/um^2] per compartment
+#   g_na, g_kht, g_klt, g_h, g_lk
+#             channel densities [nS/um^2] per compartment (membrane() may override
+#             g_na / g_klt / the leak reversal without touching these)
+#   parent, child, g_ax
+#             the axial edges, 0-based: current flows along parent[k] -> child[k]
+#             with conductance g_ax[k] [S]
+#   chain     True if the edges are exactly 0-1-2-..., so axial_current can use
+#             msoAxon.m's own float order
+#   jac       sparsity pattern of the 7n x 7n Jacobian for the BDF solver
+#   labels    a name per compartment ("soma", "AIS", "node", "lateral dendrite", ...)
+#   lateral, medial (with_dendrites only)
+#             1-indexed compartment numbers of each dendrite, proximal to distal
+#
 # The unbranched 45-compartment chain of msoAxon.m (soma, 2 AIS, 21 internode/node pairs)
 LUMPED = SimpleNamespace(
     key="lumped", n=N, sa=C.SA, cap=CAP, g_na=C.G_NA, g_kht=C.G_KHT, g_klt=C.G_KLT,

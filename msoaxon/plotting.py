@@ -33,6 +33,18 @@ def input_trace(graph, t2, x):
 
 
 def graphing(graph, t1, y, t2=None, x=None, t3=None, z=None):
+    """Draw graph["Type"] and return the figure (Graphing.m).
+
+    (t1, y) is the multi-compartment run, (t2, x) the two-compartment run at
+    graph["node"] and (t3, z) a second two-compartment run (node 5 in
+    Combine_all.m). What each Type uses:
+      Contour, MultiCompartment        t1, y
+      TwoCompartment                   t1, y, where y is a *two-compartment* run
+      ModelComparison, NodeComparison  t1, y, t2, x
+      ModelComparison2                 t2, x, t3, z
+      Input                            t2, x (the current is recomputed on it)
+      Multigraph                       all six
+    """
     node, t_end, kind = graph["node"], graph["tEnd"], graph["Type"]
     fig = plt.figure(figsize=(9, 7))
 
