@@ -91,7 +91,11 @@ def get_params(v0, node, input_node, model_type, r1=10.0, tau_est=0.71):
 
 
 def applied_current(t, V1, stim_type, s):
-    """Input current [pA] at time t (the Iapp branch of TwoCptODE). "none" means no stimulus."""
+    """Input current [pA] at time t (the Iapp branch of TwoCptODE). "none" means no stimulus.
+
+    Deliberately not shared with multi.external_current: see the table above that
+    function for how the two MATLAB files differ.
+    """
     if stim_type == "none":
         return 0.0
     if stim_type == "step":

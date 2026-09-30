@@ -168,6 +168,31 @@ def axial_current(V, morph=LUMPED):
     return -I * 1e9 / morph.sa
 
 
+# external_current and two.applied_current look like duplicates but each copies its
+# own MATLAB file (msoAxon.m / TwoCptODE.m), and they differ on purpose. Merging them
+# would change results. The differences:
+#
+#                 multi (this file)                     two (applied_current)
+#   units, sign   density [pA/um^2], negative           current [pA], positive
+#                 depolarises (enters dV with a minus)  depolarises
+#   where         compartment input_node (but step      soma if input_node == 1, else axon
+#                 always into the soma)
+#   area          the soma's for every stimulus but     -
+#                 EPSG/EPSGpair, even at another node
+#   window        start < t <= stop (step, sine,        start <= t < stop (step);
+#                 Synaptic*, EPSG)                      start <= t <= stop (sine, Synaptic*)
+#   ramp          start <= t <= stop, and only while    start <= t <= stop
+#                 5 < t <= stop + 5 (hardcoded 5);
+#                 /1000 then *1e3 round trip
+#   ramp2         rises from start                      rises from t = 5 (hardcoded)
+#   EPSG          cut off at stop                       never cut off
+#   EPSG, pair    driving force at the input node       driving force at the soma, even
+#                                                       with axonal input
+#   Synaptic*     driving force at the soma             driving force at the soma
+#   SynapticPair  -                                     second input zeroed once
+#                                                       t + diff >= t_end
+
+
 def external_current(t, V, stim_type, s, input_node, sa=C.SA):
     """Input current density [pA/um^2] as (0-based compartment, value).
 
