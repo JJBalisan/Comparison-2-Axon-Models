@@ -4,6 +4,23 @@ from dataclasses import dataclass
 
 import numpy as np
 
+EPSG_TAU = (0.1, 0.18)  # (rise, decay) [ms], the Franken et al 2015 waveform used by the MATLAB
+
+
+def epsg_unitary(t, tau=EPSG_TAU):
+    """Unitary EPSG waveform (difference of exponentials) with peak 1.
+
+    The default kinetics keep the MATLAB expression, peak-normalised by 0.21317,
+    so results are unchanged; other (rise, decay) pairs are normalised exactly.
+    """
+    if tau == EPSG_TAU:
+        return (1 / 0.21317) * (t > 0) * (np.exp(-t / 0.18) - np.exp(-t / 0.1))
+    rise, decay = tau
+    t_peak = np.log(decay / rise) * rise * decay / (decay - rise)
+    peak = np.exp(-t_peak / decay) - np.exp(-t_peak / rise)
+    return (1 / peak) * (t > 0) * (np.exp(-t / decay) - np.exp(-t / rise))
+
+
 
 @dataclass
 class SynParams:
@@ -19,7 +36,7 @@ class SynParams:
     random_in: int = 1396  # RNG seed
     diff: float = 1.0  # time offset of the second input for SynapticPair [ms]
     f: float = 200.0  # sine frequency [Hz]
-    epsg_tau: tuple = (0.1, 0.18)  # EPSG/EPSGpair (rise, decay) [ms]; Myoga et al 2014 used decay 0.3
+    epsg_tau: tuple = EPSG_TAU  # EPSG/EPSGpair (rise, decay) [ms]; Myoga et al 2014 used decay 0.3
 
 
 def synaptic(syn: SynParams):

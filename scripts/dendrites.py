@@ -36,6 +36,7 @@ from msoaxon import mso_axon
 from msoaxon.coincidence import half_width, threshold, threshold_curve
 from msoaxon.multi import LUMPED, membrane, with_dendrites
 from msoaxon.somatic import rheobase, spike_amplitude
+from msoaxon.synaptic import EPSG_TAU
 
 V0 = -68.0
 UNITARY = 26.7  # "unitary EPSG" of the MATLAB code
@@ -137,7 +138,7 @@ def run(a, pool):
     delays = np.round(np.arange(0, 0.6001, 0.02), 4)
     bil = dict(stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m, morph=D)
     E, curves = {}, {}
-    for kname, tau in (("model EPSG (0.18 ms)", (0.1, 0.18)), ("Myoga EPSG (0.3 ms)", (0.1, 0.3))):
+    for kname, tau in (("model EPSG (0.18 ms)", EPSG_TAU), ("Myoga EPSG (0.3 ms)", (0.1, 0.3))):
         th = threshold_curve("multi", delays, epsg_tau=tau, model_kw=bil, executor=pool)
         curves[kname] = th
         E[kname] = {f"margin_{m}": float(half_width(delays, th, m) * 1e3) for m in (0.005, 0.03)}

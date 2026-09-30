@@ -23,7 +23,7 @@ import numpy as np
 from ._bisect import smallest_firing
 from ._parallel import map_tasks
 from .multi import mso_axon
-from .synaptic import SynParams
+from .synaptic import EPSG_TAU, SynParams
 from .two import two_cpt
 
 START = 5.0
@@ -43,7 +43,7 @@ def _spikes(model, I, delay, node, v0, epsg_tau, model_kw, start=START):
     return t[-1] < T_END  # stopped at the first spike
 
 
-def threshold(model, delay, node=3, v0=-68.0, epsg_tau=(0.1, 0.18), model_kw=None,
+def threshold(model, delay, node=3, v0=-68.0, epsg_tau=EPSG_TAU, model_kw=None,
               rel_tol=1e-4, guess=50.0, ceiling=2000.0):
     """Smallest EPSG-pair amplitude that spikes at this delay, to rel_tol (bisection).
 
@@ -58,7 +58,7 @@ def _threshold_task(args):
     return threshold(*args)
 
 
-def threshold_curve(model, delays, node=3, v0=-68.0, epsg_tau=(0.1, 0.18), model_kw=None,
+def threshold_curve(model, delays, node=3, v0=-68.0, epsg_tau=EPSG_TAU, model_kw=None,
                     rel_tol=1e-4, workers=None, executor=None):
     """threshold() at each delay, in parallel (needs a __main__ guard in scripts).
 
@@ -96,7 +96,7 @@ def _trial(args):
 
 
 def probability_trials(model, delays, amplitude, n_trials=200, amp_cv=0.03, jitter=0.015,
-                       node=3, v0=-68.0, epsg_tau=(0.1, 0.18), model_kw=None, seed=0,
+                       node=3, v0=-68.0, epsg_tau=EPSG_TAU, model_kw=None, seed=0,
                        workers=None, executor=None):
     """Spike probability per delay from noisy trials, to check half_width's shortcut.
 

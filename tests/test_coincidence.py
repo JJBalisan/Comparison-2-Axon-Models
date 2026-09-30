@@ -5,7 +5,7 @@ import pytest
 
 from msoaxon import SynParams, two_cpt
 from msoaxon import _solve
-from msoaxon._solve import epsg_unitary
+from msoaxon.synaptic import epsg_unitary
 from msoaxon.coincidence import half_width, threshold
 from msoaxon.two import GOLDWYN_2019
 
