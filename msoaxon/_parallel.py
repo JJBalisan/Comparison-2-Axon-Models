@@ -5,6 +5,10 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 
 
+# every module whose functions run in pool workers
+_PRELOAD = ["msoaxon.coincidence", "msoaxon.somatic", "msoaxon.threshold", "msoaxon.measure"]
+
+
 def pool_context(method=None):
     """The multiprocessing context for worker pools: the platform default, except
     that fork is replaced by forkserver.
@@ -15,7 +19,15 @@ def pool_context(method=None):
     Windows already default to spawn. method: the default to assume (for tests).
     """
     method = method or multiprocessing.get_context().get_start_method()
-    return multiprocessing.get_context("forkserver" if method == "fork" else method)
+    if method != "fork":
+        return multiprocessing.get_context(method)
+    ctx = multiprocessing.get_context("forkserver")
+    # the server imports these once, so each worker forks with msoaxon, numpy and
+    # scipy already loaded instead of importing them itself (nearly fork's start-up
+    # cost; the server runs no other threads, so forking it is safe). No effect once
+    # the server is running.
+    ctx.set_forkserver_preload(_PRELOAD)
+    return ctx
 
 
 def process_pool(max_workers=None):
