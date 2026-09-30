@@ -1,10 +1,9 @@
 """Spiking-threshold search (port of BinarySearch.m)."""
 
+from ._dispatch import spikes
 from ._parallel import map_tasks
-from .multi import mso_axon
-from .spiking import count_spikes, matlab_round
+from .spiking import matlab_round
 from .synaptic import SynParams
-from .two import two_cpt
 
 START = 5.0
 T_END = 20.0
@@ -33,16 +32,29 @@ def sweep_setting(stim_type, i, epsg_pair_dt=1 / 25):
     raise ValueError(f"stimType {stim_type!r} is not supported by the threshold search")
 
 
-def _search(run, soma_col, axon_col, stim_type, i, factor, max_I, zoom, epsg_pair_dt):
+def sweep_x(stim_type, i, epsg_pair_dt=1 / 25):
+    """What sweep point i varies, for plotting: the ramp top, the sine frequency, or
+    the delay between the two EPSGs."""
+    stop, syn, _ = sweep_setting(stim_type, i, epsg_pair_dt)
+    if stim_type in ("ramp", "ramp2"):
+        return stop
+    if stim_type == "sine":
+        return syn.f
+    if stim_type == "EPSGpair":
+        return (i - 1) * epsg_pair_dt  # stop - START, without the rounding of the subtraction
+    raise ValueError(f"no x-axis for stimType {stim_type!r}")
+
+
+def _search(spiked_at, stim_type, i, factor, max_I, zoom, epsg_pair_dt):
     """The halving search exactly as BinarySearch.m does it; returns the last tested value."""
     location, previous, distance, first = max_I, 0.0, max_I, 0.0
     while distance > zoom and location <= max_I:
         stop, syn, I_override = sweep_setting(stim_type, i, epsg_pair_dt)
         I = location if I_override is None else I_override
-        t, x = run(stim_type, START, stop, I, syn, factor)
-        # the run stops at the first spike, where axon - soma equals factor exactly,
-        # so an early end counts as a spike alongside the sampled check
-        spiked = t[-1] < T_END or count_spikes(x[:, soma_col], x[:, axon_col], factor) != 0
+        # BinarySearch.m counts spikes in the full trace (count_spikes). The run now
+        # stops at the first spike, so an early end is that count being nonzero: any
+        # sampled crossing is a sign change the terminal event catches
+        spiked = spiked_at(stim_type, START, stop, I, syn, factor)
         tested = location
         first = location
         distance = abs((location - previous) / 2)
@@ -51,20 +63,13 @@ def _search(run, soma_col, axon_col, stim_type, i, factor, max_I, zoom, epsg_pai
     return first
 
 
-def _run(model, stim, start, stop, I, syn, factor, node):
-    """One simulation, stopped at the first spike: the search only needs yes/no."""
-    f = mso_axon if model == "multi" else two_cpt
-    return f(stim, start, stop, I, node, MODEL_TYPE, T_END, V0, INPUT_NODE, syn,
-             stop_on_spike=factor)
-
-
 def _point(task):
     """One sweep point for one model; module-level so worker processes can import it."""
     model, stim_type, i, node, factor, max_I, zoom, epsg_pair_dt = task
-    axon_col = node - 1 if model == "multi" else 1
-    run = lambda stim, start, stop, I, syn, factor: _run(model, stim, start, stop, I, syn,
-                                                         factor, node)
-    return _search(run, 0, axon_col, stim_type, i, factor, max_I, zoom, epsg_pair_dt)
+    def spiked_at(stim, start, stop, I, syn, factor):  # the search only needs yes/no
+        return spikes(model, stim, start, stop, I, node, T_END, V0, INPUT_NODE, syn,
+                      model_type=MODEL_TYPE, factor=factor)
+    return _search(spiked_at, stim_type, i, factor, max_I, zoom, epsg_pair_dt)
 
 
 def binary_search(stim_type, n_points, node, factor, max_I, zoom=1.0,

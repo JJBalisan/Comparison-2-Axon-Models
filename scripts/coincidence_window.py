@@ -20,11 +20,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from msoaxon.coincidence import half_width, probability_trials, threshold_curve
+from msoaxon.synaptic import EPSG_TAU
 from msoaxon.two import GOLDWYN_2019
 
 MYOGA_US = 221  # AP-probability half-width without inhibition (Myoga et al 2014)
 MARGINS = (0.005, 0.03)  # inputs this far above coincident threshold (Myoga: "200 pS (~3%)")
-KINETICS = {"model EPSG (decay 0.18 ms)": (0.1, 0.18), "Myoga EPSG (decay 0.3 ms)": (0.1, 0.3)}
+KINETICS = {"model EPSG (decay 0.18 ms)": EPSG_TAU, "Myoga EPSG (decay 0.3 ms)": (0.1, 0.3)}
 _goldwyn = {k: v for k, v in GOLDWYN_2019.items() if k != "v0"}
 CONFIGS = {
     "45-compartment": ("multi", -68.0, {}),
@@ -71,8 +72,12 @@ def run(a, pool):
                               jitter=0.005, node=a.node, v0=v0, epsg_tau=KINETICS[kname],
                               model_kw=kw, executor=pool)
     p_half = prob.max() / 2
-    j = np.nonzero(prob < p_half)[0][0]
-    mc_width = 2 * np.interp(p_half, [prob[j], prob[j - 1]], [mc_delays[j], mc_delays[j - 1]]) * 1e3
+    below = np.nonzero(prob < p_half)[0]
+    if len(below) == 0 or below[0] == 0:  # never falls to half within mc_delays, or never rises
+        mc_width = np.nan
+    else:
+        j = below[0]
+        mc_width = 2 * np.interp(p_half, [prob[j], prob[j - 1]], [mc_delays[j], mc_delays[j - 1]]) * 1e3
     shortcut = half_width(delays, th, 0.03) * 1e3
     print(f"noisy-trial check ({cname}, {kname}, 3%): peak probability {prob.max():.2f}, "
           f"half-width {mc_width:.0f} us vs threshold shortcut {shortcut:.0f} us", flush=True)
@@ -109,15 +114,15 @@ def run(a, pool):
     fig.tight_layout()
     fig.savefig(out / "coincidence_window.png", dpi=140)
 
-    json.dump({"delays_ms": delays.tolist(), "margins": MARGINS, "myoga_half_width_us": MYOGA_US,
+    summary = {"delays_ms": delays.tolist(), "margins": MARGINS, "myoga_half_width_us": MYOGA_US,
                "curves": {f"{c} | {k}": v.tolist() for (c, k), v in curves.items()},
                "half_widths_us": [{"model": c, "epsg": k, "threshold0": t0,
                                    **{f"margin_{m}": w for m, w in zip(MARGINS, ws)}}
                                   for c, k, t0, ws in rows],
                "noisy_check": {"half_width_us": mc_width, "shortcut_us": shortcut,
                                "peak_probability": float(prob.max()),
-                               "delays_ms": mc_delays.tolist(), "probability": prob.tolist()}},
-              open(out / "coincidence_window.json", "w"), indent=1)
+                               "delays_ms": mc_delays.tolist(), "probability": prob.tolist()}}
+    (out / "coincidence_window.json").write_text(json.dumps(summary, indent=1))
     print(f"saved {out}/coincidence_window.png and .json")
 
 

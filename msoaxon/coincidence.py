@@ -22,51 +22,53 @@ import numpy as np
 
 from ._bisect import smallest_firing
 from ._parallel import map_tasks
-from .multi import mso_axon
-from .spiking import count_spikes
-from .synaptic import SynParams
-from .two import two_cpt
+from ._dispatch import spikes
+from .synaptic import EPSG_TAU, SynParams
 
 START = 5.0
 T_END = 20.0
 FACTOR = 10.0  # spike = axon rises this far above soma (as in the EPSGpair sweeps)
 
 
-def _spikes(model, I, delay, node, v0, epsg_tau, model_kw, start=START):
-    """model_kw may carry stim ("EPSGpair" or, for the 45-compartment model,
-    "EPSGbilateral"), input_node, and model keywords such as morph/input_node2/mem."""
-    f = mso_axon if model == "multi" else two_cpt
+def _spikes(model, I, delay, node, v0, epsg_tau, site, model_kw, start=START):
+    """One EPSG pair, `delay` apart; site = (stim, input_node, input_node2)."""
+    stim, input_node, input_node2 = site
     syn = SynParams(t_end=T_END, epsg_tau=tuple(epsg_tau))
-    kw = dict(model_kw)
-    stim, input_node = kw.pop("stim", "EPSGpair"), kw.pop("input_node", 1)
-    t, x = f(stim, start, start + delay, I, node, "active-full", T_END, v0, input_node, syn,
-             stop_on_spike=FACTOR, **kw)
-    axon = node - 1 if model == "multi" else 1
-    return t[-1] < T_END or count_spikes(x[:, 0], x[:, axon], FACTOR) > 0
+    if input_node2 is not None:
+        model_kw = {**model_kw, "input_node2": input_node2}
+    return spikes(model, stim, start, start + delay, I, node, T_END, v0, input_node, syn,
+                  factor=FACTOR, **model_kw)
 
 
-def threshold(model, delay, node=3, v0=-68.0, epsg_tau=(0.1, 0.18), model_kw=None,
-              rel_tol=1e-4, guess=50.0, ceiling=2000.0):
+def threshold(model, delay, node=3, v0=-68.0, epsg_tau=EPSG_TAU, model_kw=None,
+              rel_tol=1e-4, guess=50.0, ceiling=2000.0, *, stim="EPSGpair", input_node=1,
+              input_node2=None):
     """Smallest EPSG-pair amplitude that spikes at this delay, to rel_tol (bisection).
 
+    stim: "EPSGpair" (both EPSGs at input_node) or, for the multi-compartment
+    model, "EPSGbilateral" (the second at input_node2).
+    model_kw: further model keywords, e.g. morph/mem, or r1/tau_est for "two".
     Returns inf if nothing up to `ceiling` spikes (see _bisect.smallest_firing).
     """
-    model_kw = model_kw or {}
-    return smallest_firing(lambda I: _spikes(model, I, delay, node, v0, epsg_tau, model_kw),
+    site, model_kw = (stim, input_node, input_node2), model_kw or {}
+    return smallest_firing(lambda I: _spikes(model, I, delay, node, v0, epsg_tau, site, model_kw),
                            guess, ceiling, rel_tol)
 
 
-def _threshold_task(args):
-    return threshold(*args)
+def _threshold_task(task):
+    args, kw = task
+    return threshold(*args, **kw)
 
 
-def threshold_curve(model, delays, node=3, v0=-68.0, epsg_tau=(0.1, 0.18), model_kw=None,
-                    rel_tol=1e-4, workers=None, executor=None):
+def threshold_curve(model, delays, node=3, v0=-68.0, epsg_tau=EPSG_TAU, model_kw=None,
+                    rel_tol=1e-4, workers=None, executor=None, *, stim="EPSGpair",
+                    input_node=1, input_node2=None):
     """threshold() at each delay, in parallel (needs a __main__ guard in scripts).
 
     workers / executor: see _parallel.map_tasks.
     """
-    tasks = [(model, float(d), node, v0, tuple(epsg_tau), model_kw or {}, rel_tol)
+    site = dict(stim=stim, input_node=input_node, input_node2=input_node2)
+    tasks = [((model, float(d), node, v0, tuple(epsg_tau), model_kw or {}, rel_tol), site)
              for d in delays]
     return np.array(map_tasks(_threshold_task, tasks, workers, executor))
 
@@ -92,19 +94,22 @@ def half_width(delays, thresholds, margin):
 
 
 def _trial(args):
-    model, amp, t1, t2, node, v0, epsg_tau, model_kw = args
+    model, amp, t1, t2, node, v0, epsg_tau, site, model_kw = args
     first, second = min(t1, t2), max(t1, t2)
-    return _spikes(model, amp, second - first, node, v0, epsg_tau, model_kw, start=first)
+    return _spikes(model, amp, second - first, node, v0, epsg_tau, site, model_kw, start=first)
 
 
 def probability_trials(model, delays, amplitude, n_trials=200, amp_cv=0.03, jitter=0.015,
-                       node=3, v0=-68.0, epsg_tau=(0.1, 0.18), model_kw=None, seed=0,
-                       workers=None, executor=None):
+                       node=3, v0=-68.0, epsg_tau=EPSG_TAU, model_kw=None, seed=0,
+                       workers=None, executor=None, *, stim="EPSGpair", input_node=1,
+                       input_node2=None):
     """Spike probability per delay from noisy trials, to check half_width's shortcut.
 
     Noise per trial: the pair's amplitude scaled by N(1, amp_cv), and each EPSG's
-    onset jittered by N(0, jitter) ms independently.
+    onset jittered by N(0, jitter) ms independently. stim/input_node/input_node2
+    as in threshold(); for EPSGbilateral the earlier EPSG is always at input_node.
     """
+    site = (stim, input_node, input_node2)
     rng = np.random.default_rng(seed)
     tasks = []
     for d in delays:
@@ -112,6 +117,6 @@ def probability_trials(model, delays, amplitude, n_trials=200, amp_cv=0.03, jitt
             amp = amplitude * rng.normal(1, amp_cv)
             t1 = START + rng.normal(0, jitter)
             t2 = START + d + rng.normal(0, jitter)
-            tasks.append((model, amp, t1, t2, node, v0, tuple(epsg_tau), model_kw or {}))
+            tasks.append((model, amp, t1, t2, node, v0, tuple(epsg_tau), site, model_kw or {}))
     hits = map_tasks(_trial, tasks, workers, executor, chunksize=16)
     return np.array(hits, float).reshape(len(delays), n_trials).mean(axis=1)

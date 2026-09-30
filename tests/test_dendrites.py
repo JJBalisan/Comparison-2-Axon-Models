@@ -6,6 +6,7 @@ import pytest
 from msoaxon import _solve, mso_axon
 from msoaxon import constants as C
 from msoaxon.coincidence import threshold
+from msoaxon.measure import soma_on_grid
 from msoaxon.multi import LUMPED, _tree_jac_sparsity, axial_current, membrane, with_dendrites
 
 D = with_dendrites()
@@ -51,8 +52,7 @@ def test_dendritic_epsp_is_attenuated_and_slowed():
     for site in (1, MID_L):
         t, y = mso_axon("EPSG", 5, 10, 26.7, 3, "active-full", 10, -68.0, site, morph=D, mem=mem,
                         max_step=0.01)
-        g = np.arange(5, 10, 0.001)
-        v = np.interp(g, t, y[:, 0]) + 68
+        g, v = soma_on_grid(t, y, -68.0, 5, 10)
         peaks.append(v.max())
         widths.append(np.ptp(g[v >= v.max() / 2]))
     assert peaks[1] < peaks[0] and widths[1] > widths[0]
@@ -60,10 +60,10 @@ def test_dendritic_epsp_is_attenuated_and_slowed():
 
 def test_bilateral_inputs_beat_unilateral():
     # Scott et al 2010: EPSGs on opposite dendrites reach threshold more easily
-    bil = threshold("multi", 0.0, rel_tol=1e-3, model_kw=dict(
-        stim="EPSGbilateral", input_node=MID_L, input_node2=MID_M, morph=D))
-    uni = threshold("multi", 0.0, rel_tol=1e-3, model_kw=dict(
-        stim="EPSGbilateral", input_node=MID_L, input_node2=MID_L, morph=D))
+    bil = threshold("multi", 0.0, rel_tol=1e-3, model_kw=dict(morph=D),
+                    stim="EPSGbilateral", input_node=MID_L, input_node2=MID_M)
+    uni = threshold("multi", 0.0, rel_tol=1e-3, model_kw=dict(morph=D),
+                    stim="EPSGbilateral", input_node=MID_L, input_node2=MID_L)
     assert bil < uni
 
 
@@ -124,3 +124,20 @@ def test_prestimulus_cache_separates_membrane_v0():
     t2, y2 = mso_axon(*args, mem=membrane(-68.0))
     np.testing.assert_array_equal(t1, t2)
     np.testing.assert_array_equal(y1, y2)
+
+
+def test_shared_arrays_are_read_only_and_dendrite_scale_needs_dendrites():
+    with pytest.raises(ValueError, match="read-only"):
+        C.G_KLT[0] = 0.0
+    with pytest.raises(ValueError, match="read-only"):
+        LUMPED.g_ax[0] = 0.0
+    with pytest.raises(ValueError, match="dendrite_klt_scale"):
+        membrane(-68.0, dendrite_klt_scale=0.5)
+
+
+def test_morph_defaults_to_mem_morph():
+    mem = membrane(-68.0, morph=D)
+    t1, y1 = mso_axon(*ARGS, mem=mem)
+    t2, y2 = mso_axon(*ARGS, mem=mem, morph=D)
+    np.testing.assert_array_equal(y1, y2)
+    assert y1.shape[1] == 7 * 55

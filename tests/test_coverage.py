@@ -233,3 +233,12 @@ def test_smallest_firing():
     assert smallest_firing(lambda x: False, 1.0, 100.0, 1e-3) == np.inf
     # the ceiling bounds the doubling: 64 is tested, 128 exceeds 100, so 90 is never reached
     assert smallest_firing(lambda x: x >= 90.0, 1.0, 100.0, 1e-3) == np.inf
+
+
+def test_run_model_rejects_multi_only_keywords_for_two():
+    from msoaxon._dispatch import run_model
+
+    with pytest.raises(ValueError, match="mem only apply"):
+        run_model("two", "step", 5, 10, 100.0, 3, 10, -68.0, 1, mem=object())
+    with pytest.raises(ValueError, match='"multi" or "two"'):
+        run_model("Two", "step", 5, 10, 100.0, 3, 10, -68.0, 1)

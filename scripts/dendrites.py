@@ -34,8 +34,10 @@ import numpy as np
 
 from msoaxon import mso_axon
 from msoaxon.coincidence import half_width, threshold, threshold_curve
+from msoaxon.measure import passive_step, soma_on_grid
 from msoaxon.multi import LUMPED, membrane, with_dendrites
 from msoaxon.somatic import rheobase, spike_amplitude
+from msoaxon.synaptic import EPSG_TAU
 
 V0 = -68.0
 UNITARY = 26.7  # "unitary EPSG" of the MATLAB code
@@ -50,8 +52,7 @@ def epsp(morph, site, mem, amp=UNITARY, site2=None, t_end=12.0):
     else:
         t, y = mso_axon("EPSGbilateral", 5, 5, amp, 3, "active-full", t_end, V0, site,
                         morph=morph, mem=mem, input_node2=site2, max_step=0.01)
-    g = np.arange(4.9, t_end, 0.001)
-    return g, np.interp(g, t, y[:, 0]) - V0
+    return soma_on_grid(t, y, V0, 4.9, t_end)
 
 
 def shape(g, v):
@@ -63,12 +64,9 @@ def shape(g, v):
 
 
 def rin_tau(morph, mem):
-    t, y = mso_axon("step", 5, 45, -2.0, 3, "active-full", 50, V0, 1, morph=morph, mem=mem)
-    g = np.linspace(5, 44.9, 200001)
-    dv = np.interp(g, t, y[:, 0]) - V0
-    tau = g[np.argmax(dv <= dv[-1] * (1 - np.exp(-1)))] - 5
-    return dict(rin_steady=float(dv[-1] / -2 * 1e3), rin_peak=float(dv.min() / -2 * 1e3),
-                t63_us=float(tau * 1e3))
+    r = passive_step("multi", V0, morph=morph, mem=mem)
+    return dict(rin_steady=float(r["rin_steady"]), rin_peak=float(r["rin_peak"]),
+                t63_us=float(r["tau"] * 1e3))
 
 
 def main():
@@ -114,10 +112,10 @@ def run(a, pool):
     res["B_epsp"] = B
 
     # C. bilateral vs unilateral threshold at zero delay (default membranes)
-    C = {"bilateral (one EPSG per dendrite)": threshold("multi", 0.0, model_kw=dict(
-            stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m, morph=D)),
-         "unilateral (both on the lateral dendrite)": threshold("multi", 0.0, model_kw=dict(
-            stim="EPSGbilateral", input_node=mid_l, input_node2=mid_l, morph=D)),
+    C = {"bilateral (one EPSG per dendrite)": threshold("multi", 0.0, model_kw=dict(morph=D),
+            stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m),
+         "unilateral (both on the lateral dendrite)": threshold("multi", 0.0, model_kw=dict(morph=D),
+            stim="EPSGbilateral", input_node=mid_l, input_node2=mid_l),
          "both at the soma, dendritic model": threshold("multi", 0.0, model_kw=dict(morph=D)),
          "both at the soma, lumped model": threshold("multi", 0.0)}
     res["C_threshold"] = C
@@ -135,10 +133,10 @@ def run(a, pool):
 
     # E. coincidence window with bilateral dendritic inputs
     delays = np.round(np.arange(0, 0.6001, 0.02), 4)
-    bil = dict(stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m, morph=D)
+    bil = dict(stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m, model_kw=dict(morph=D))
     E, curves = {}, {}
-    for kname, tau in (("model EPSG (0.18 ms)", (0.1, 0.18)), ("Myoga EPSG (0.3 ms)", (0.1, 0.3))):
-        th = threshold_curve("multi", delays, epsg_tau=tau, model_kw=bil, executor=pool)
+    for kname, tau in (("model EPSG (0.18 ms)", EPSG_TAU), ("Myoga EPSG (0.3 ms)", (0.1, 0.3))):
+        th = threshold_curve("multi", delays, epsg_tau=tau, executor=pool, **bil)
         curves[kname] = th
         E[kname] = {f"margin_{m}": float(half_width(delays, th, m) * 1e3) for m in (0.005, 0.03)}
         print("E", kname, E[kname], flush=True)
@@ -180,7 +178,7 @@ def run(a, pool):
     ax[2].legend(frameon=False)
     fig.tight_layout()
     fig.savefig(out / "dendrites.png", dpi=130)
-    json.dump(res, open(out / "dendrites.json", "w"), indent=1)
+    (out / "dendrites.json").write_text(json.dumps(res, indent=1))
     print(f"saved {out}/dendrites.png and .json")
 
 

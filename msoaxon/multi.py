@@ -18,9 +18,9 @@ import numpy as np
 from scipy.sparse import bmat, coo_matrix, diags, eye
 
 from . import constants as C
-from ._solve import breakpoints, epsg_unitary, integrate, pre_stimulus_is_quiet, spike_event
-from .synaptic import SynParams, interp_g
-from .two import STIM_TYPES, check_args, stimulus
+from ._common import STIM_TYPES, check_args, stimulus
+from ._solve import breakpoints, integrate, pre_stimulus_is_quiet, spike_event
+from .synaptic import SynParams, epsg_unitary, interp_g
 
 N = C.N_CPT
 
@@ -34,8 +34,6 @@ _G_AX = (2 / R_AXIAL) / (C.L_CM[:-1] / C.XA_CM[:-1] + C.L_CM[1:] / C.XA_CM[1:])
 
 MSO_STIM_TYPES = STIM_TYPES + ("EPSGbilateral",)
 
-_P_TEMP = 3 ** ((22 - 35) / 10)
-_A_TEMP = 3 ** ((32 - 35) / 10)
 
 # which gating blocks (m, h, p, w, z, a) evolve for each model type
 ACTIVE_GATES = {
@@ -77,6 +75,8 @@ LUMPED = SimpleNamespace(
     key="lumped", n=N, sa=C.SA, cap=CAP, g_na=C.G_NA, g_kht=C.G_KHT, g_klt=C.G_KLT,
     g_h=C.G_H, g_lk=C.G_LK, parent=np.arange(N - 1), child=np.arange(1, N), g_ax=_G_AX,
     chain=True, jac=_chain_jac_sparsity(), labels=["soma", "AIS", "AIS"] + ["internode", "node"] * 21)
+for _a in (CAP, _G_AX, LUMPED.parent, LUMPED.child):  # read-only, as in constants.py
+    _a.flags.writeable = False
 
 
 def with_dendrites(length=200.0, diameter=5.0, n_seg=5, klt_lambda=74.0, conserve_totals=True,
@@ -168,6 +168,31 @@ def axial_current(V, morph=LUMPED):
     return -I * 1e9 / morph.sa
 
 
+# external_current and two.applied_current look like duplicates but each copies its
+# own MATLAB file (msoAxon.m / TwoCptODE.m), and they differ on purpose. Merging them
+# would change results. The differences:
+#
+#                 multi (this file)                     two (applied_current)
+#   units, sign   density [pA/um^2], negative           current [pA], positive
+#                 depolarises (enters dV with a minus)  depolarises
+#   where         compartment input_node (but step      soma if input_node == 1, else axon
+#                 always into the soma)
+#   area          the soma's for every stimulus but     -
+#                 EPSG/EPSGpair, even at another node
+#   window        start < t <= stop (step, sine,        start <= t < stop (step);
+#                 Synaptic*, EPSG)                      start <= t <= stop (sine, Synaptic*)
+#   ramp          start <= t <= stop, and only while    start <= t <= stop
+#                 5 < t <= stop + 5 (hardcoded 5);
+#                 /1000 then *1e3 round trip
+#   ramp2         rises from start                      rises from t = 5 (hardcoded)
+#   EPSG          cut off at stop                       never cut off
+#   EPSG, pair    driving force at the input node       driving force at the soma, even
+#                                                       with axonal input
+#   Synaptic*     driving force at the soma             driving force at the soma
+#   SynapticPair  -                                     second input zeroed once
+#                                                       t + diff >= t_end
+
+
 def external_current(t, V, stim_type, s, input_node, sa=C.SA):
     """Input current density [pA/um^2] as (0-based compartment, value).
 
@@ -242,6 +267,8 @@ def membrane(v0, soma_klt_scale=1.0, ais_klt_scale=1.0, soma_na_vhalf=-62.5,
       only). Mathews et al 2010 found dendritic Kv1 sharpens EPSPs.
     """
     morph = morph or LUMPED
+    if dendrite_klt_scale != 1.0 and morph.n == N:
+        raise ValueError("dendrite_klt_scale needs a morphology with dendrites (morph=with_dendrites())")
     # v0 is in the key because the leak reversals (vlk) are built from it: without
     # it, membrane(-60) and membrane(-68) would share a pre-stimulus cache entry
     m = SimpleNamespace(key=(float(v0), float(soma_klt_scale), float(ais_klt_scale),
@@ -252,14 +279,14 @@ def membrane(v0, soma_klt_scale=1.0, ais_klt_scale=1.0, soma_na_vhalf=-62.5,
     m.g_klt[0] *= soma_klt_scale
     m.g_klt[1:3] *= ais_klt_scale
     m.g_klt[N:] *= dendrite_klt_scale
-    # stored negated, as the "+ 62.5" in hinf's exp((V + 62.5) / 7.77) expects
+    # stored negated, as C.hinf's vhalf (exp((V + vhalf) / 7.77)) expects
     m.na_vhalf = np.full(morph.n, 62.5)
     m.na_vhalf[0] = -soma_na_vhalf
     m.vlk = np.full(morph.n, float(v0))
     m.y0_gates = None
     if rebalance_rest:
         V = np.full(morph.n, float(v0))
-        gates = (C.minf(V), 1.0 / (1.0 + np.exp((V + m.na_vhalf) / 7.77)), C.pinf(V),
+        gates = (C.minf(V), C.hinf(V, m.na_vhalf), C.pinf(V),
                  C.winf(V), C.zinf(V), C.ainf(V))
         mi, hi, pi, wi, zi, ai = gates
         I_ion = (m.g_na * mi ** 4 * (0.993 * hi + 0.007) * (V - V_NA)
@@ -270,7 +297,7 @@ def membrane(v0, soma_klt_scale=1.0, ais_klt_scale=1.0, soma_na_vhalf=-62.5,
     return m
 
 
-def _rhs(t, x, v0, stim_type, s, input_node, active, mem, morph=LUMPED, input_node2=None):
+def _rhs(t, x, stim_type, s, input_node, active, mem, morph=LUMPED, input_node2=None):
     """Right-hand side. Arithmetic is kept expression-for-expression identical to
     msoAxon.m's order so results are bit-for-bit stable; the speed comes from
     writing into one output array and skipping gates that are switched off."""
@@ -296,20 +323,13 @@ def _rhs(t, x, v0, stim_type, s, input_node, active, mem, morph=LUMPED, input_no
     d[0] = -(total + axial_current(V, morph)) / morph.cap
 
     act_m, act_h, act_p, act_w, act_z, act_a = active
-    # Na: Scott et al 2010, 35 C
-    d[1] = (C.minf(V) - m) / ((0.141 + (-0.0826 / (1 + np.exp((-20.5 - V) / 10.8)))) / 3) if act_m else 0.0
-    hinf = 1.0 / (1.0 + np.exp((V + mem.na_vhalf) / 7.77))  # C.hinf, per-compartment midpoint
-    d[2] = (hinf - h) / ((4 + (-3.74 / (1 + np.exp((-40.6 - V) / 5.05)))) / 3) if act_h else 0.0
-    # KHT: Rothman Manis 2003, 22 C adjusted to 35 C with Q10 of 3
-    d[3] = (C.pinf(V) - p) / (_P_TEMP * (100 / (4 * np.exp((V + 60) / 32)
-                                                 + 5 * np.exp(-(V + 60) / 22)) + 5)) if act_p else 0.0
-    # KLT: Mathews et al 2010, 35 C
-    d[4] = (C.winf(V) - w) / (21.5 / (6 * np.exp((V + 60) / 7)
-                                      + 24 * np.exp(-(V + 60) / 50.6)) + 0.35) if act_w else 0.0
-    d[5] = (C.zinf(V) - z) / (170 / (5 * np.exp((V + 60) / 10)
-                                     + np.exp(-(V + 70) / 8)) + 10.7) if act_z else 0.0
-    # h: Baumann et al 2013, 32 C adjusted to 35 C
-    d[6] = (C.ainf(V) - a) / (_A_TEMP * (79 + 417 * np.exp(-(V + 61.5) ** 2 / 800))) if act_a else 0.0
+    # sources for each time constant are in constants.py
+    d[1] = (C.minf(V) - m) / C.taum(V) if act_m else 0.0
+    d[2] = (C.hinf(V, mem.na_vhalf) - h) / C.tauh(V) if act_h else 0.0  # per-compartment midpoint
+    d[3] = (C.pinf(V) - p) / C.taup(V) if act_p else 0.0
+    d[4] = (C.winf(V) - w) / C.tauw(V) if act_w else 0.0
+    d[5] = (C.zinf(V) - z) / C.tauz(V) if act_z else 0.0
+    d[6] = (C.ainf(V) - a) / C.taua(V) if act_a else 0.0
     return out
 
 
@@ -340,12 +360,12 @@ def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
     stop_on_spike: if given (mV), stop as soon as compartment `node` rises that far
     above the soma; t then ends before t_end.
     mem: channel overrides from membrane() (default: msoAxon.m's own).
-    morph: LUMPED (default, n=45) or with_dendrites().
+    morph: LUMPED or with_dendrites(); defaults to mem's morphology, else LUMPED.
     input_node2: second input site for "EPSGbilateral" (first EPSG at input_node
     at `start`, second at input_node2 at `stop`), e.g. the middle compartment of
     each dendrite.
     """
-    morph = morph or LUMPED
+    morph = morph or (mem.morph if mem is not None else LUMPED)
     check_args(stim_type, model_type, node, input_node, min_node=1,
                stim_types=MSO_STIM_TYPES, n_max=morph.n)
     if stim_type == "EPSGbilateral" and not (input_node2 and 1 <= input_node2 <= morph.n):
@@ -371,10 +391,10 @@ def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
     # t == start are still stimulus-free
     if pre_stimulus_is_quiet(cuts, start, stop):
         quiet = (("mso", model_type, float(v0), mem.key, morph.key),
-                 lambda t, x: _rhs(t, x, v0, "none", s, input_node, active, mem, morph))
+                 lambda t, x: _rhs(t, x, "none", s, input_node, active, mem, morph))
 
     spike_stop = None if stop_on_spike is None else spike_event(node - 1, stop_on_spike)
-    return integrate(lambda t, x: _rhs(t, x, v0, stim_type, s, input_node, active, mem,
+    return integrate(lambda t, x: _rhs(t, x, stim_type, s, input_node, active, mem,
                                        morph, input_node2),
                      y0, t_end, cuts, rtol=1e-8, atol=1e-8,
                      max_step=max_step or 0.1 * t_end, jac_sparsity=morph.jac,

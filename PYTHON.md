@@ -29,6 +29,19 @@ uv run scripts/making_threshold_graphs.py --only EPSGpair --jpg-grid   # the rep
 `y[:, node-1]` is compartment `node` of the 45-CPT model, and its 315 state columns
 keep MATLAB's column-major layout `[V(45), m, h, p, w, z, a]`, so `z1` is `y[:, 225]`.
 
+Code that isn't a port of a MATLAB file:
+
+| Module | What it holds |
+|---|---|
+| `msoaxon/_common.py` | stimulus bundle and argument checks shared by both models |
+| `msoaxon/_solve.py` | the ode15s stand-in: segmented BDF, pre-stimulus cache, spike stop |
+| `msoaxon/_dispatch.py` | `run_model` / `spikes`: one entry point for `model="multi"` or `"two"` |
+| `msoaxon/_parallel.py` | `map_tasks`; pass one `executor=` to reuse a process pool across calls |
+| `msoaxon/_bisect.py` | the bracketing bisection behind `coincidence.threshold` and `somatic.rheobase` |
+| `msoaxon/coincidence.py` | Myoga-style coincidence windows; `stim=`, `input_node=`, `input_node2=` pick the input sites, `model_kw` passes model options such as `morph` |
+| `msoaxon/somatic.py` | rheobase and the Scott et al. 2005 somatic spike amplitude |
+| `msoaxon/measure.py` | input resistance and time constant from a current step; soma trace on a grid |
+
 ## Validation
 
 There is no MATLAB here, so nothing was compared run-for-run. What was checked:
@@ -42,7 +55,7 @@ There is no MATLAB here, so nothing was compared run-for-run. What was checked:
 ## Deliberate differences
 
 - **Solver:** `ode15s` → scipy `solve_ivp(method="BDF")` with the same tolerances (2-CPT 1e-6, `max_step` 0.1; 45-CPT 1e-8, `max_step` 0.1·tEnd, ode15s's default). Integration restarts at stimulus on/off times so the solver can't step over a narrow EPSG. The 45-CPT model gets a sparse Jacobian pattern.
-- **Threshold search stops each run at its first spike** (`stop_on_spike`), since it only needs yes or no. The stop is found on the continuous solution, not the saved solver steps, so in principle it could count a crossing that falls between two steps. Across every production sweep (184 thresholds) the results are identical to running each simulation to `tEnd`. Sweep points also run in parallel (`workers`, default all CPUs).
+- **Threshold search stops each run at its first spike** (`stop_on_spike`), since it only needs yes or no. The stop is found on the continuous solution, not the saved solver steps, so in principle it could count a crossing that falls between two steps. Across every production sweep (184 thresholds) the results are identical to running each simulation to `tEnd`. The search used to also count spikes in the saved steps, as `BinarySearch.m` does; that never decided a result, since a sampled crossing is one the stop already caught, so it was dropped. Sweep points also run in parallel (`workers`, default all CPUs).
 - **Synaptic noise:** numpy's RNG can't reproduce MATLAB's `rng(seed); randn`, so `Synaptic`/`SynapticPair` runs are statistically equivalent, not identical.
 - **`interp1q` out of range** returns 0, not NaN. `TwoCptODE.m` already guarded this for `SynapticPair`. `msoAxon.m` didn't, which is likely the "Problem including Synaptic pair" comment in `Combine_all.m`.
 - **`BinarySearch.m`:** the two-compartment loop tested `location1` in its `while` condition. It now tests its own `location2`.

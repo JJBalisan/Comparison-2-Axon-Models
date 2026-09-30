@@ -17,7 +17,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from msoaxon.multi import membrane
-from msoaxon.somatic import _run, rheobase, spike_amplitude
+from msoaxon.somatic import rheobase, spike_amplitude
 
 MULTS = (1.5, 2.0, 3.0)  # below ~1.5x the somatic trace has no distinct inflection
 CASES = {
@@ -43,8 +43,8 @@ def main():
         rows = []
         for k in MULTS:
             r = spike_amplitude(model, rb * k, mem=mem)
+            t, x = r.pop("trace")  # the run the amplitude was measured on
             rows.append({"multiple": k, **{key: float(v) for key, v in r.items()}})
-            t, x = _run(model, rb * k, 3, -68.0, mem, t_end=r["t_spike"] + 2.0, max_step=0.005)
             keep = t >= 4.8
             ax.plot(t[keep], x[keep, 0], lw=1.5, label=f"{k}x: {r['amplitude']:.1f} mV")
             ax.plot(r["t_inflection"], r["v_inflection"], "k.", ms=7)
@@ -60,7 +60,7 @@ def main():
                  "Mature MSO: 17 ± 2 mV; dendrotoxin: 15 → 37 mV", fontsize=11)
     fig.tight_layout()
     fig.savefig(out / "somatic_spike.png", dpi=130)
-    json.dump(results, open(out / "somatic_spike.json", "w"), indent=1)
+    (out / "somatic_spike.json").write_text(json.dumps(results, indent=1))
     print(f"saved {out}/somatic_spike.png and .json")
 
 

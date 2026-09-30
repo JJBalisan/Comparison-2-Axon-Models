@@ -10,50 +10,9 @@ from types import SimpleNamespace
 import numpy as np
 
 from . import constants as C
-from ._solve import breakpoints, epsg_unitary, integrate, pre_stimulus_is_quiet, spike_event
-from .synaptic import SynParams, interp_g, synaptic
-
-STIM_TYPES = ("step", "ramp", "ramp2", "sine", "Synaptic", "SynapticPair", "EPSG", "EPSGpair")
-MODEL_TYPES = ("passive", "active-KLT", "active-H", "active-KLT+H", "active-sodium",
-               "Active-sodium", "active-KHT", "active-full")
-
-
-def check_args(stim_type, model_type, node, input_node, min_node, stim_types=STIM_TYPES,
-               n_max=C.N_CPT):
-    """Reject inputs that numpy's negative indexing would otherwise accept silently."""
-    if stim_type not in stim_types:
-        raise ValueError(f"unknown stimType {stim_type!r}")
-    if model_type not in MODEL_TYPES:
-        raise ValueError(f"unknown model type {model_type!r}; expected one of {MODEL_TYPES}")
-    if not min_node <= node <= C.N_CPT:
-        raise ValueError(f"node must be {min_node}..{C.N_CPT} (1-indexed), got {node}")
-    if not 1 <= input_node <= n_max:
-        raise ValueError(f"input_node must be 1..{n_max} (1-indexed), got {input_node}")
-
-# Gating kinetics (from getParam in TwoCpt.m)
-_A_TEMP = 3 ** ((32 - 35) / 10)
-_P_TEMP = 3 ** ((22 - 35) / 10)
-
-
-def tauw(V):
-    return 21.5 / (6 * np.exp((V + 60) / 7) + 24 * np.exp(-(V + 60) / 50.6)) + 0.35
-
-
-def taua(V):
-    return _A_TEMP * (79 + 417 * np.exp(-(V + 61.5) ** 2 / 800))
-
-
-def taup(V):
-    return _P_TEMP * (100 / (4 * np.exp((V + 60) / 32) + 5 * np.exp(-(V + 60) / 22)) + 5)
-
-
-def taum(V):  # TwoCpt.m credits Rothman-Manis (35 C); msoAxon.m cites Scott 2010 for the same formula
-    return (0.141 + (-0.0826 / (1 + np.exp((-20.5 - V) / 10.8)))) / 3
-
-
-def tauh(V):
-    return (4 + (-3.74 / (1 + np.exp((-40.6 - V) / 5.05)))) / 3
-
+from ._common import check_args, stimulus
+from ._solve import breakpoints, integrate, pre_stimulus_is_quiet, spike_event
+from .synaptic import SynParams, epsg_unitary, interp_g
 
 # Passive targets of Goldwyn, Remme & Rinzel 2019 (PLoS Comput Biol 15:e1006476), the
 # paper this model's coupling-constant framework comes from. TwoCpt.m still carries
@@ -132,7 +91,11 @@ def get_params(v0, node, input_node, model_type, r1=10.0, tau_est=0.71):
 
 
 def applied_current(t, V1, stim_type, s):
-    """Input current [pA] at time t (the Iapp branch of TwoCptODE). "none" means no stimulus."""
+    """Input current [pA] at time t (the Iapp branch of TwoCptODE). "none" means no stimulus.
+
+    Deliberately not shared with multi.external_current: see the table above that
+    function for how the two MATLAB files differ.
+    """
     if stim_type == "none":
         return 0.0
     if stim_type == "step":
@@ -187,27 +150,16 @@ def _rhs(t, x, P, stim_type, s):
     return [
         (-Ilk1 - IKLT1 - IC + Iapp1 - INa1 - Ih1 - IKHT) / P.cap1,
         (-Ilk2 - IKLT2 + IC + Iapp2 - INa2 - Ih2) / P.cap2,
-        (C.winf(V1) - w1) / tauw(V1),
-        (C.hinf(V1) - h1) / tauh(V1),
-        (C.winf(V2) - w2) / tauw(V2),
-        (C.minf(V1) - m1) / taum(V1),
-        (C.minf(V2) - m2) / taum(V2),
-        (C.hinf(V2) - h2) / tauh(V2),
-        (C.pinf(V1) - p) / taup(V1),
-        (C.ainf(V1) - a1) / taua(V1),
-        (C.ainf(V2) - a2) / taua(V2),
+        (C.winf(V1) - w1) / C.tauw(V1),
+        (C.hinf(V1) - h1) / C.tauh(V1),
+        (C.winf(V2) - w2) / C.tauw(V2),
+        (C.minf(V1) - m1) / C.taum(V1),
+        (C.minf(V2) - m2) / C.taum(V2),
+        (C.hinf(V2) - h2) / C.tauh(V2),
+        (C.pinf(V1) - p) / C.taup(V1),
+        (C.ainf(V1) - a1) / C.taua(V1),
+        (C.ainf(V2) - a2) / C.taua(V2),
     ]
-
-
-def stimulus(stim_type, start, stop, I, t_end, syn):
-    """Bundle stimulus settings (what TwoCpt.m stored on P)."""
-    s = SimpleNamespace(start=start, stop=stop, I=I, t_end=t_end, epsg_tau=tuple(syn.epsg_tau))
-    if stim_type == "sine":
-        s.f = syn.f
-    if stim_type in ("Synaptic", "SynapticPair"):
-        s.t_syn, s.g_syn = synaptic(syn)
-        s.VsynE, s.diff = syn.VsynE, syn.diff
-    return s
 
 
 def two_cpt(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
