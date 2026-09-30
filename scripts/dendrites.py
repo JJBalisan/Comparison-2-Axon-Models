@@ -115,10 +115,10 @@ def run(a, pool):
     res["B_epsp"] = B
 
     # C. bilateral vs unilateral threshold at zero delay (default membranes)
-    C = {"bilateral (one EPSG per dendrite)": threshold("multi", 0.0, model_kw=dict(
-            stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m, morph=D)),
-         "unilateral (both on the lateral dendrite)": threshold("multi", 0.0, model_kw=dict(
-            stim="EPSGbilateral", input_node=mid_l, input_node2=mid_l, morph=D)),
+    C = {"bilateral (one EPSG per dendrite)": threshold("multi", 0.0, model_kw=dict(morph=D),
+            stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m),
+         "unilateral (both on the lateral dendrite)": threshold("multi", 0.0, model_kw=dict(morph=D),
+            stim="EPSGbilateral", input_node=mid_l, input_node2=mid_l),
          "both at the soma, dendritic model": threshold("multi", 0.0, model_kw=dict(morph=D)),
          "both at the soma, lumped model": threshold("multi", 0.0)}
     res["C_threshold"] = C
@@ -136,10 +136,10 @@ def run(a, pool):
 
     # E. coincidence window with bilateral dendritic inputs
     delays = np.round(np.arange(0, 0.6001, 0.02), 4)
-    bil = dict(stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m, morph=D)
+    bil = dict(stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m, model_kw=dict(morph=D))
     E, curves = {}, {}
     for kname, tau in (("model EPSG (0.18 ms)", EPSG_TAU), ("Myoga EPSG (0.3 ms)", (0.1, 0.3))):
-        th = threshold_curve("multi", delays, epsg_tau=tau, model_kw=bil, executor=pool)
+        th = threshold_curve("multi", delays, epsg_tau=tau, executor=pool, **bil)
         curves[kname] = th
         E[kname] = {f"margin_{m}": float(half_width(delays, th, m) * 1e3) for m in (0.005, 0.03)}
         print("E", kname, E[kname], flush=True)

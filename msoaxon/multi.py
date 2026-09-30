@@ -335,12 +335,12 @@ def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
     stop_on_spike: if given (mV), stop as soon as compartment `node` rises that far
     above the soma; t then ends before t_end.
     mem: channel overrides from membrane() (default: msoAxon.m's own).
-    morph: LUMPED (default, n=45) or with_dendrites().
+    morph: LUMPED or with_dendrites(); defaults to mem's morphology, else LUMPED.
     input_node2: second input site for "EPSGbilateral" (first EPSG at input_node
     at `start`, second at input_node2 at `stop`), e.g. the middle compartment of
     each dendrite.
     """
-    morph = morph or LUMPED
+    morph = morph or (mem.morph if mem is not None else LUMPED)
     check_args(stim_type, model_type, node, input_node, min_node=1,
                stim_types=MSO_STIM_TYPES, n_max=morph.n)
     if stim_type == "EPSGbilateral" and not (input_node2 and 1 <= input_node2 <= morph.n):

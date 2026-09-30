@@ -60,10 +60,10 @@ def test_dendritic_epsp_is_attenuated_and_slowed():
 
 def test_bilateral_inputs_beat_unilateral():
     # Scott et al 2010: EPSGs on opposite dendrites reach threshold more easily
-    bil = threshold("multi", 0.0, rel_tol=1e-3, model_kw=dict(
-        stim="EPSGbilateral", input_node=MID_L, input_node2=MID_M, morph=D))
-    uni = threshold("multi", 0.0, rel_tol=1e-3, model_kw=dict(
-        stim="EPSGbilateral", input_node=MID_L, input_node2=MID_L, morph=D))
+    bil = threshold("multi", 0.0, rel_tol=1e-3, model_kw=dict(morph=D),
+                    stim="EPSGbilateral", input_node=MID_L, input_node2=MID_M)
+    uni = threshold("multi", 0.0, rel_tol=1e-3, model_kw=dict(morph=D),
+                    stim="EPSGbilateral", input_node=MID_L, input_node2=MID_L)
     assert bil < uni
 
 
@@ -133,3 +133,11 @@ def test_shared_arrays_are_read_only_and_dendrite_scale_needs_dendrites():
         LUMPED.g_ax[0] = 0.0
     with pytest.raises(ValueError, match="dendrite_klt_scale"):
         membrane(-68.0, dendrite_klt_scale=0.5)
+
+
+def test_morph_defaults_to_mem_morph():
+    mem = membrane(-68.0, morph=D)
+    t1, y1 = mso_axon(*ARGS, mem=mem)
+    t2, y2 = mso_axon(*ARGS, mem=mem, morph=D)
+    np.testing.assert_array_equal(y1, y2)
+    assert y1.shape[1] == 7 * 55
