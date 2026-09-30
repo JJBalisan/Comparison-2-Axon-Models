@@ -7,6 +7,7 @@ from msoaxon import SynParams, two_cpt
 from msoaxon import _solve
 from msoaxon.synaptic import epsg_unitary
 from msoaxon.coincidence import half_width, threshold
+from msoaxon.measure import passive_step
 from msoaxon.two import GOLDWYN_2019
 
 GOLDWYN_KW = {k: v for k, v in GOLDWYN_2019.items() if k != "v0"}
@@ -24,16 +25,9 @@ def test_default_epsg_is_the_matlab_expression():
     np.testing.assert_array_equal(epsg_unitary(t), expected)
 
 
-def _passive_response(**kw):
-    v0 = kw.pop("v0", -68.0)
-    t, x = two_cpt("step", 5, 45, -2.0, 3, "passive", 50, v0, 1, **kw)
-    # stop short of 45 ms: the implicit solver's step ending exactly at the switch-off
-    # is evaluated with the current already off, so that one point has decayed a little
-    tf = np.linspace(5, 44.9, 399001)
-    dv = np.interp(tf, t, x[:, 0]) - v0
-    r_in = dv[-1] / -2.0 * 1e3
-    tau = tf[np.argmax(dv <= dv[-1] * (1 - np.exp(-1)))] - 5
-    return r_in, tau
+def _passive_response(v0=-68.0, **kw):
+    r = passive_step("two", v0, model_type="passive", n_grid=399001, **kw)
+    return r["rin_steady"], r["tau"]
 
 
 def test_goldwyn_calibration_hits_its_passive_targets():

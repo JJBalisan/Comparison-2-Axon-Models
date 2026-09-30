@@ -6,6 +6,7 @@ import pytest
 from msoaxon import _solve, mso_axon
 from msoaxon import constants as C
 from msoaxon.coincidence import threshold
+from msoaxon.measure import soma_on_grid
 from msoaxon.multi import LUMPED, _tree_jac_sparsity, axial_current, membrane, with_dendrites
 
 D = with_dendrites()
@@ -51,8 +52,7 @@ def test_dendritic_epsp_is_attenuated_and_slowed():
     for site in (1, MID_L):
         t, y = mso_axon("EPSG", 5, 10, 26.7, 3, "active-full", 10, -68.0, site, morph=D, mem=mem,
                         max_step=0.01)
-        g = np.arange(5, 10, 0.001)
-        v = np.interp(g, t, y[:, 0]) + 68
+        g, v = soma_on_grid(t, y, -68.0, 5, 10)
         peaks.append(v.max())
         widths.append(np.ptp(g[v >= v.max() / 2]))
     assert peaks[1] < peaks[0] and widths[1] > widths[0]

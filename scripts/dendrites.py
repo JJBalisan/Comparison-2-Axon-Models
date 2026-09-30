@@ -34,6 +34,7 @@ import numpy as np
 
 from msoaxon import mso_axon
 from msoaxon.coincidence import half_width, threshold, threshold_curve
+from msoaxon.measure import passive_step, soma_on_grid
 from msoaxon.multi import LUMPED, membrane, with_dendrites
 from msoaxon.somatic import rheobase, spike_amplitude
 from msoaxon.synaptic import EPSG_TAU
@@ -51,8 +52,7 @@ def epsp(morph, site, mem, amp=UNITARY, site2=None, t_end=12.0):
     else:
         t, y = mso_axon("EPSGbilateral", 5, 5, amp, 3, "active-full", t_end, V0, site,
                         morph=morph, mem=mem, input_node2=site2, max_step=0.01)
-    g = np.arange(4.9, t_end, 0.001)
-    return g, np.interp(g, t, y[:, 0]) - V0
+    return soma_on_grid(t, y, V0, 4.9, t_end)
 
 
 def shape(g, v):
@@ -64,12 +64,9 @@ def shape(g, v):
 
 
 def rin_tau(morph, mem):
-    t, y = mso_axon("step", 5, 45, -2.0, 3, "active-full", 50, V0, 1, morph=morph, mem=mem)
-    g = np.linspace(5, 44.9, 200001)
-    dv = np.interp(g, t, y[:, 0]) - V0
-    tau = g[np.argmax(dv <= dv[-1] * (1 - np.exp(-1)))] - 5
-    return dict(rin_steady=float(dv[-1] / -2 * 1e3), rin_peak=float(dv.min() / -2 * 1e3),
-                t63_us=float(tau * 1e3))
+    r = passive_step("multi", V0, morph=morph, mem=mem)
+    return dict(rin_steady=float(r["rin_steady"]), rin_peak=float(r["rin_peak"]),
+                t63_us=float(r["tau"] * 1e3))
 
 
 def main():
