@@ -51,7 +51,8 @@ def rheobase(model, node=3, v0=-68.0, mem=None, rel_tol=1e-4, guess=2000.0):
 def spike_amplitude(model, I, node=3, v0=-68.0, mem=None):
     """Somatic spike amplitude from the inflection point [mV], plus details.
 
-    Returns dict(amplitude, peak_above_rest, t_spike, t_inflection, v_inflection).
+    Returns dict(amplitude, peak_above_rest, t_spike, t_inflection, v_inflection),
+    or None if the step doesn't fire.
     """
     t0, _ = _run(model, I, node, v0, mem, stop_on_spike=FACTOR)
     ts = t0[-1]

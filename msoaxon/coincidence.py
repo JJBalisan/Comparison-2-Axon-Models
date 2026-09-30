@@ -85,8 +85,9 @@ def half_width(delays, thresholds, margin):
 
     Inputs are set `margin` (fraction) above the coincident threshold; probability
     is 50% where the threshold curve crosses that level. The EPSGs are identical
-    and share one input site, so the curve is symmetric in the delay and the
-    width is twice the crossing delay. Returns nan if the crossing lies beyond
+    and either share one input site or sit at mirror-image sites (EPSGbilateral
+    on the two identical dendrites), so the curve is symmetric in the delay and
+    the width is twice the crossing delay. Returns nan if the crossing lies beyond
     the delays given.
     """
     delays, thresholds = np.asarray(delays, float), np.asarray(thresholds, float)

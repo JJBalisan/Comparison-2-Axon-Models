@@ -99,3 +99,28 @@ def test_total_klt_and_h_conserved_by_default():
     assert alt.g_klt[0] == C.G_KLT[0]
     assert np.sum(alt.g_klt[region] * alt.sa[region]) < 0.6 * C.G_KLT[0] * C.SA[0]
     assert alt.key != D.key
+
+
+def test_dendrite_ra_changes_only_dendritic_edges():
+    hi = with_dendrites(dendrite_ra=200)
+    assert hi.key != D.key
+    into = D.child >= 45
+    assert into.sum() == 10
+    np.testing.assert_array_equal(hi.g_ax[~into], D.g_ax[~into])  # soma and axon untouched
+    distal = into & (D.parent >= 45)  # dendrite-to-dendrite edges: both halves at 200
+    np.testing.assert_allclose(hi.g_ax[distal], D.g_ax[distal] / 2, rtol=1e-12)
+    root = into & (D.parent < 45)  # soma-to-dendrite: only the dendritic half doubles
+    assert np.all((hi.g_ax[root] < D.g_ax[root]) & (hi.g_ax[root] > D.g_ax[root] / 2))
+
+
+def test_prestimulus_cache_separates_membrane_v0():
+    # the leak reversals come from membrane()'s v0, so it must be part of the cache key
+    assert membrane(-60.0).key != membrane(-68.0).key
+    args = ("EPSG", 5, 10, 26.7, 3, "active-full", 8, -68.0, 1)
+    _solve._QUIET_CACHE.clear()
+    mso_axon(*args, mem=membrane(-60.0))
+    t1, y1 = mso_axon(*args, mem=membrane(-68.0))
+    _solve._QUIET_CACHE.clear()
+    t2, y2 = mso_axon(*args, mem=membrane(-68.0))
+    np.testing.assert_array_equal(t1, t2)
+    np.testing.assert_array_equal(y1, y2)

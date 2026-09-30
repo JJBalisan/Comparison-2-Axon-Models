@@ -58,6 +58,8 @@ These are in the MATLAB and are reproduced unchanged, because changing them woul
 - `TwoCpt.m` enables sodium for `'Active-sodium'` (capital A), so `active-sodium` means *no* Na in the 2-CPT model but Na-only in the 45-CPT model.
 - The 2-CPT model holds KLT inactivation `z` fixed at its resting value.
 - In `msoAxon.m`, `step` always injects into the soma whatever `inputNode` is; `ramp` only applies for `t > 5` (hardcoded); `EPSG`/`EPSGpair` scale by the input compartment's area while the other stimuli use the soma's.
+- `TwoCptODE.m` starts `ramp2` at t = 5 whatever `start` is; `msoAxon.m` starts it at `start`.
+- `TwoCpt.m` has calibrated axonal Na (`gNa2`) only for nodes 3 (119) and 5 (25.5). Every other node gets the placeholder 140, so 2-CPT runs at those nodes use an uncalibrated value.
 - `Spiking.m` doesn't clear `reset` between columns.
 - `SA(2)` uses `1.66/3` where `0.66/2` was probably meant. The stored `Area.mat` was built with it.
 - `BinarySearch.m` reports the ceiling (`max`) when nothing fires, so a returned 15000 means "no threshold found", not "threshold ≈ 15000". It also assumes spiking gets easier as input grows. That fails for `EPSG` with factor 30: a very large conductance holds the soma near 0 mV, so the axon never gets 30 mV above it. The `ramp` sweep's first point (stop = 5.1) returns the ceiling in both models for the same reason.
@@ -167,7 +169,7 @@ How to use it:
 - `uv run scripts/dendrites.py` runs every check below.
 
 Two things the paper doesn't state:
-- **Axial resistivity.** The model's 100 Ω·cm is kept; Mathews used 200, which would attenuate dendritic EPSPs more.
+- **Axial resistivity.** The model's 100 Ω·cm is kept by default; Mathews used 200. `with_dendrites(dendrite_ra=200)` (script: `--dendrite-ra 200`) changes it for the dendrites only, and the results are in the section after this one.
 - **Whether total KLT and h were conserved.** `conserve_totals=True` (default) keeps soma + dendrite totals equal to the lumped model's. `False` starts the gradient at the soma's Table 2 density, halving total KLT.
 
 | | Lumped | Dendrites, totals conserved (default) | Dendrites, KLT from soma density | Literature |
@@ -189,3 +191,27 @@ Neither variant matches everything:
 - **The soma-density gradient** matches the input resistance and the window, but leaves the spike too large.
 
 Both reproduce the qualitative dendritic results: attenuation along the cable, EPSP sharpening by dendritic KLT, and the bilateral advantage.
+
+### Dendritic axial resistivity 200 Ω·cm
+
+`with_dendrites(dendrite_ra=200)` uses Mathews et al.'s 200 Ω·cm in the dendrites. The soma and axon keep 100, so their conductances stay bit-identical. Values below are for Ra = 100 → 200.
+
+| | Totals conserved, 100 → 200 | KLT from soma density, 100 → 200 |
+|---|---|---|
+| Soma input resistance, steady / peak | 2.6 / 4.8 → 2.8 / 5.0 MΩ | 4.9 / 7.7 → 5.0 / 7.8 MΩ |
+| Unitary EPSG at soma: size, half-width | 5.1 mV, 527 µs → 5.8 mV, 476 µs | 6.2 mV, 691 µs → 7.0 mV, 624 µs |
+| Same EPSG at mid-dendrite: size, half-width | 4.1 mV, 536 µs → 3.5 mV, 529 µs | 5.3 mV, 697 µs → 4.7 mV, 687 µs |
+| Mid / soma EPSP size | 0.79 → 0.60 | 0.84 → 0.67 |
+| Threshold at 0 delay: bilateral vs unilateral | 58.5 vs 82.2 → 76.6 vs 206.7 | 37.1 vs 44.0 → 41.5 vs 63.5 |
+| Bilateral / summed unilateral EPSP | 0.98 → 1.00 | 1.00 → 1.02 |
+| Coincidence window at 3%, model / Myoga EPSG | 165 / 179 → 137 / 148 µs | 222 / 248 → 208 / 229 µs |
+| Pair threshold curve at the soma vs lumped (max difference) | 12% → 24% | 50% → 54% |
+| Somatic spike at 1.5 / 2 / 3× rheobase | 16.3 / 19.5 / 26.6 → 19.3 / 24.5 / 29.9 mV | 21.4 / 26.1 / 29.6 → 25.5 / 29.7 / 35.8 mV |
+
+What the higher resistivity does:
+- **It isolates the soma from the dendrites.** Somatic EPSPs get larger and narrower, dendritic EPSPs are attenuated more, and the soma sees less of the dendritic membrane.
+- **It makes the bilateral advantage much stronger.** With conserved totals, two EPSGs on one dendrite need 2.7× the bilateral threshold, up from 1.4×. The local depolarisation saturates the synaptic driving force, and dendritic KLT shunts it (Scott et al. 2010's argument).
+- **Summation stays linear**, within 2%.
+- **It moves each variant away from what it already matched.** With conserved totals the window narrows further from Myoga's 221 µs, and the curve drifts from Lehnert's "almost identical". With the soma-density gradient the window is still close (229 µs with the Myoga EPSG), but the spike grows further past 17 mV.
+
+So 200 Ω·cm doesn't reconcile the two variants. 100 stays the default.

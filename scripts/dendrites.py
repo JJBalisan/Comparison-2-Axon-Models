@@ -2,6 +2,7 @@
 
     uv run scripts/dendrites.py --out-dir figures/dendrites
     uv run scripts/dendrites.py --klt-from-soma --out-dir figures/dendrites-klt-from-soma
+    uv run scripts/dendrites.py --dendrite-ra 200 --out-dir figures/dendrites-ra200
 
 Uses with_dendrites() (Lehnert et al 2014, Fig. 8 variant: two 200 x 5 um dendrites,
 5 compartments each, soma reduced to 2467 um^2). Checks, in order:
@@ -75,10 +76,12 @@ def main():
     ap.add_argument("--klt-from-soma", action="store_true",
                     help="start the KLT/h gradient at the soma's density instead of conserving "
                          "the lumped totals (halves total KLT)")
+    ap.add_argument("--dendrite-ra", type=float, default=100.0,
+                    help="axial resistivity of the dendrites [Ohm cm] (Mathews et al 2010: 200)")
     a = ap.parse_args()
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    D = with_dendrites(conserve_totals=not a.klt_from_soma)
+    D = with_dendrites(conserve_totals=not a.klt_from_soma, dendrite_ra=a.dendrite_ra)
     mid_l, mid_m, dist_l = int(D.lateral[2]), int(D.medial[2]), int(D.lateral[-1])
     res = {}
 
