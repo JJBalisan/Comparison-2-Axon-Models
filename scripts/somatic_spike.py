@@ -31,6 +31,8 @@ CASES = {
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out-dir", default="figures/somatic")
+    ap.add_argument("--quick", action="store_true",
+                    help="1%% rheobase tolerance, 1.5x and 3x only: a smoke test, not results")
     a = ap.parse_args()
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -39,9 +41,9 @@ def main():
     results = {}
     for ax, (name, (model, knobs)) in zip(axes, CASES.items()):
         mem = membrane(-68.0, **knobs) if knobs else None
-        rb = rheobase(model, mem=mem)
+        rb = rheobase(model, mem=mem, rel_tol=1e-2 if a.quick else 1e-4)
         rows = []
-        for k in MULTS:
+        for k in ((1.5, 3.0) if a.quick else MULTS):
             r = spike_amplitude(model, rb * k, mem=mem)
             t, x = r.pop("trace")  # the run the amplitude was measured on
             rows.append({"multiple": k, **{key: float(v) for key, v in r.items()}})

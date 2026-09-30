@@ -5,12 +5,19 @@ remain the reference.
 
 ```bash
 uv sync
-uv run pytest                                              # constants + sanity checks
+uv run pytest                                              # the tests, in parallel (-n 0: serially)
 uv run pytest --cov                                        # plus line + branch coverage (as CI)
 uv run scripts/combine_all.py --stim EPSGpair --node 3     # Combine_all.m
 uv run scripts/making_threshold_graphs.py --node 3         # Making_Threshold_graphs.m
 uv run scripts/making_threshold_graphs.py --only EPSGpair --jpg-grid   # the repo's jpgs
 ```
+
+`dendrites.py`, `coincidence_window.py` and `somatic_spike.py` take `--quick` (coarse
+delay grids, 1% threshold tolerance, fewer multiples), and `making_threshold_graphs.py`
+takes `--points N`. The same code runs in seconds instead of minutes; the numbers are
+for smoke tests, not results. `tests/test_scripts.py` runs every script this way; those
+tests are marked `slow` (`uv run pytest -m "not slow"` skips them), and CI runs them on
+Python 3.12 only.
 
 | MATLAB | Python |
 |---|---|

@@ -43,12 +43,12 @@ def test_prestimulus_cache_separates_membranes():
 
 
 def test_somatic_spike_is_mature_and_klt_sets_it():
-    rb = rheobase("multi", rel_tol=1e-3)
+    rb = rheobase("multi", rel_tol=1e-2)  # the margins below are far wider than 1%
     control = spike_amplitude("multi", 2 * rb)["amplitude"]
     assert 10 < control < 19  # Scott et al 2005: 17 +/- 2 mV mature, 5-15 near threshold
 
     mem = membrane(-68.0, **DTX)
-    rb_dtx = rheobase("multi", mem=mem, rel_tol=1e-3)
+    rb_dtx = rheobase("multi", mem=mem, rel_tol=1e-2)
     blocked = spike_amplitude("multi", 2 * rb_dtx, mem=mem)["amplitude"]
     assert blocked > 1.8 * control  # dendrotoxin: 15 -> 37 mV
     assert rb_dtx < rb / 5

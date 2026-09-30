@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 dependencies = ["numpy", "scipy", "matplotlib"]
 
 [dependency-groups]
-dev = ["pytest", "h5py", "pytest-cov>=7.1.0"]
+dev = ["pytest", "h5py", "pytest-cov>=7.1.0", "pytest-xdist>=3.8.0"]
 
 [build-system]
 requires = ["hatchling"]
@@ -14,6 +14,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["msoaxon"]
+
+[tool.pytest.ini_options]
+addopts = "-n auto"  # pytest-xdist: one worker per CPU; -n 0 runs serially (e.g. for --pdb)
+markers = ["slow: end-to-end script runs (CI runs them on one Python version only)"]
 
 [tool.coverage.run]
 source = ["msoaxon"]

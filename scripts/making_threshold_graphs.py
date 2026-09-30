@@ -34,6 +34,7 @@ def main():
                     help="EPSGpair on the grid the repo's jpgs used: 11 points 0.1 ms apart, unrounded")
     ap.add_argument("--out-dir", help="save PNGs here instead of showing them")
     ap.add_argument("--workers", type=int, help="processes for sweep points (default: all CPUs)")
+    ap.add_argument("--points", type=int, help="run only the first N points of each sweep")
     a = ap.parse_args()
     if a.workers == 1:  # in-process, as binary_search(workers=1) does
         run(a, None)
@@ -51,6 +52,7 @@ def run(a, pool):
             dt = 0.1 if a.jpg_grid else dt
             n = 11 if a.jpg_grid else n
             kw = dict(epsg_pair_dt=dt, rounded=not a.jpg_grid)
+        n = min(n, a.points) if a.points else n
         x_values = np.array([sweep_x(stim, i, dt) for i in range(1, n + 1)])
         multi, two = binary_search(stim, n, a.node, factor, max_I, workers=a.workers,
                                    executor=pool, **kw)
