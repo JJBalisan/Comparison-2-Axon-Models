@@ -114,14 +114,17 @@ Measured the way Myoga et al. 2014 did in adult gerbil MSO at 35 °C ([doi](http
 |---|---|---|
 | 45-compartment | 201 µs | 219 µs |
 | 2-compartment, `TwoCpt.m` | 199 µs | 217 µs |
-| 2-compartment, Goldwyn 2019 calibration | 167 µs | 183 µs |
+| 2-compartment, Goldwyn 2019 calibration | 167 µs | 182 µs |
 
 These widths use inputs 3% above threshold. At 0.5% they shrink to 70–91 µs. The margin matters a lot, and the paper's "200 pS (~3%)" is ambiguous: 200 pS is closer to 0.5% of their 43 nS EPSGs.
 
 How the widths are computed:
-- `coincidence.window()` does what the experiment does: it fixes the input at (1 + margin) × the coincident threshold (resolved to 1e-4) and bisects over delay, to 0.1 µs, for where that input stops spiking. Probability is 50% there. About 30 simulations per window, within 0.5 µs of the same search at 1e-7.
+- `coincidence.window()` does what the experiment does: it fixes the input at (1 + margin) × the coincident threshold (resolved to 1e-4) and searches over delay, to 0.1 µs, for where that input stops spiking. Probability is 50% there. About 20 simulations per window, within 0.5 µs of the same search at 1e-7.
+- Both searches predict rather than halve. At the 10 mV criterion the peak of axon − soma rises smoothly through 10 mV (7.7, 9.7, 10.0, 10.3, 17.8 mV at −1%, −0.1%, 0, +0.1%, +1% of threshold), so each run that doesn't spike says how close it came. That takes 8–12 simulations per threshold instead of 15.
 - Earlier versions read the crossing off a threshold curve on a 20 µs grid. Linear interpolation across a curve that bends upward read 0.1–4 µs low, most at the 0.5% margin.
 - Noisy trials check this: 1% amplitude jitter plus 5 µs onset jitter give 200 µs against `window()`'s 199 µs. If the noise is large enough to keep peak probability near 85%, the half-maximum width comes out about 10% wider.
+
+The spike criterion (axon − soma, 10 mV here, as in the MATLAB EPSG-pair sweeps) sits below where the spike takes off, 1–3% above that threshold. It barely affects the windows. Set as a fraction of each model's own spike height instead (about 38.5 mV of axon − soma in the 45-compartment and `TwoCpt.m` models, 20 mV with Goldwyn's calibration), anywhere from 25% to 75% of it, the 3% windows change by at most 1.7% (201 → 198 µs for the 45-compartment model) and 3.5% for Goldwyn. The coincident thresholds move more: up to 3%, and 13% for Goldwyn at 25%, where the criterion is below its takeoff. A fixed 20 or 30 mV criterion is out of reach for Goldwyn's calibration altogether.
 
 Findings:
 - With matched methods, the original calibration reproduces the measured window closely.
