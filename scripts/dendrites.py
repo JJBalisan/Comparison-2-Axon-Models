@@ -75,6 +75,8 @@ def main():
     ap.add_argument("--klt-from-soma", action="store_true",
                     help="start the KLT/h gradient at the soma's density instead of conserving "
                          "the lumped totals (halves total KLT)")
+    ap.add_argument("--quick", action="store_true",
+                    help="coarse grids and 1%% threshold tolerance: a smoke test, not results")
     ap.add_argument("--dendrite-ra", type=float, default=100.0,
                     help="axial resistivity of the dendrites [Ohm cm] (Mathews et al 2010: 200)")
     a = ap.parse_args()
@@ -87,6 +89,7 @@ def run(a, pool):
     out.mkdir(parents=True, exist_ok=True)
     D = with_dendrites(conserve_totals=not a.klt_from_soma, dendrite_ra=a.dendrite_ra)
     mid_l, mid_m, dist_l = int(D.lateral[2]), int(D.medial[2]), int(D.lateral[-1])
+    tol = 1e-2 if a.quick else 1e-4  # threshold / rheobase tolerance
     res = {}
 
     # A. passive
@@ -113,11 +116,11 @@ def run(a, pool):
 
     # C. bilateral vs unilateral threshold at zero delay (default membranes)
     C = {"bilateral (one EPSG per dendrite)": threshold("multi", 0.0, model_kw=dict(morph=D),
-            stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m),
+            rel_tol=tol, stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m),
          "unilateral (both on the lateral dendrite)": threshold("multi", 0.0, model_kw=dict(morph=D),
-            stim="EPSGbilateral", input_node=mid_l, input_node2=mid_l),
-         "both at the soma, dendritic model": threshold("multi", 0.0, model_kw=dict(morph=D)),
-         "both at the soma, lumped model": threshold("multi", 0.0)}
+            rel_tol=tol, stim="EPSGbilateral", input_node=mid_l, input_node2=mid_l),
+         "both at the soma, dendritic model": threshold("multi", 0.0, model_kw=dict(morph=D), rel_tol=tol),
+         "both at the soma, lumped model": threshold("multi", 0.0, rel_tol=tol)}
     res["C_threshold"] = C
     print("C", C, flush=True)
 
@@ -132,29 +135,30 @@ def run(a, pool):
     print("D", res["D_summation"], flush=True)
 
     # E. coincidence window with bilateral dendritic inputs
-    delays = np.round(np.arange(0, 0.6001, 0.02), 4)
+    delays = np.round(np.arange(0, 0.6001, 0.1 if a.quick else 0.02), 4)
     bil = dict(stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m, model_kw=dict(morph=D))
     E, curves = {}, {}
     for kname, tau in (("model EPSG (0.18 ms)", EPSG_TAU), ("Myoga EPSG (0.3 ms)", (0.1, 0.3))):
-        th = threshold_curve("multi", delays, epsg_tau=tau, executor=pool, **bil)
+        th = threshold_curve("multi", delays, epsg_tau=tau, rel_tol=tol, executor=pool, **bil)
         curves[kname] = th
         E[kname] = {f"margin_{m}": float(half_width(delays, th, m) * 1e3) for m in (0.005, 0.03)}
         print("E", kname, E[kname], flush=True)
     res["E_window_bilateral_dendritic_us"] = E
 
     # F. EPSG-pair threshold vs delay at the soma, lumped vs dendritic
-    fd = np.round(np.arange(0, 1.0001, 0.04), 4)
-    F = {"lumped": threshold_curve("multi", fd, executor=pool),
-         "dendritic": threshold_curve("multi", fd, model_kw=dict(morph=D), executor=pool)}
+    fd = np.round(np.arange(0, 1.0001, 0.2 if a.quick else 0.04), 4)
+    F = {"lumped": threshold_curve("multi", fd, rel_tol=tol, executor=pool),
+         "dendritic": threshold_curve("multi", fd, model_kw=dict(morph=D), rel_tol=tol, executor=pool)}
     res["F_soma_pair_curve"] = {"delays_ms": fd.tolist(), **{k: v.tolist() for k, v in F.items()},
                                 "max_rel_diff": float(np.max(np.abs(F["dendritic"] / F["lumped"] - 1)))}
     print("F max relative difference", res["F_soma_pair_curve"]["max_rel_diff"], flush=True)
 
     # G. somatic spike (Scott protocol), dendritic model
     mem_d = membrane(V0, morph=D)
-    rb = rheobase("multi", mem=mem_d)
+    rb = rheobase("multi", mem=mem_d, rel_tol=tol)
+    mults = (1.5, 3.0) if a.quick else (1.5, 2.0, 3.0)
     res["G_somatic_spike"] = dict(rheobase_pA=float(rb), amplitudes_mV={
-        str(k): float(spike_amplitude("multi", rb * k, mem=mem_d)["amplitude"]) for k in (1.5, 2.0, 3.0)})
+        str(k): float(spike_amplitude("multi", rb * k, mem=mem_d)["amplitude"]) for k in mults})
     print("G", res["G_somatic_spike"], flush=True)
 
     # figure

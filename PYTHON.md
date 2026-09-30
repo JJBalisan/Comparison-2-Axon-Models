@@ -12,6 +12,11 @@ uv run scripts/making_threshold_graphs.py --node 3         # Making_Threshold_gr
 uv run scripts/making_threshold_graphs.py --only EPSGpair --jpg-grid   # the repo's jpgs
 ```
 
+`dendrites.py`, `coincidence_window.py` and `somatic_spike.py` take `--quick` (coarse
+delay grids, 1% threshold tolerance, fewer multiples), and `making_threshold_graphs.py`
+takes `--points N`. The same code runs in seconds instead of minutes; the numbers are
+for smoke tests, not results. `tests/test_scripts.py` runs every script this way.
+
 | MATLAB | Python |
 |---|---|
 | `Constants.m` → `Area.mat`, `Fractions.mat` | `msoaxon/constants.py` (computed on import) |
