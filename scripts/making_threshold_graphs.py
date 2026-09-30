@@ -10,11 +10,9 @@ across all CPUs unless --workers says otherwise.
 import argparse
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from msoaxon._parallel import process_pool
-from msoaxon.plotting import threshold_figure
 from msoaxon.threshold import binary_search, sweep_x
 
 # stimType: (n_points, factor, max, title, xlabel); x-values come from threshold.sweep_x
@@ -44,6 +42,11 @@ def main():
 
 
 def run(a, pool):
+    # imported here rather than at the top: pool workers re-import this script,
+    # and only the main process draws (msoaxon.plotting imports matplotlib)
+    import matplotlib.pyplot as plt
+
+    from msoaxon.plotting import threshold_figure
 
     for stim in a.only or SWEEPS:
         n, factor, max_I, title, xlabel = SWEEPS[stim]

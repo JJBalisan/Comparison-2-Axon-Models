@@ -12,10 +12,6 @@ import argparse
 import json
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 
 from msoaxon._parallel import process_pool
@@ -86,6 +82,12 @@ def run(a, pool):
           f"half-width {mc_width:.0f} us vs threshold shortcut {shortcut:.0f} us", flush=True)
 
     # figure: normalised threshold curves, and probability curves
+    # imported here rather than at the top: pool workers re-import this script,
+    # and only the main process draws
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(14, 6.2))
     colours = ["#1f5fa8", "#d2691e", "#2e8b57"]
     for c, cname in zip(colours, CONFIGS):
