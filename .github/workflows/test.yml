@@ -37,3 +37,17 @@ jobs:
         run: |
           echo "## Coverage (Python ${{ matrix.python-version }})" >> "$GITHUB_STEP_SUMMARY"
           uv run coverage report --format=markdown --no-skip-covered >> "$GITHUB_STEP_SUMMARY"
+
+  # the goldens hold on any hardware: prove it on arm64 too. One job only:
+  # macOS minutes bill at 10x on private repos
+  pytest-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run pytest -q -m "not slow"
+        env:
+          MPLBACKEND: Agg
