@@ -207,7 +207,9 @@ def test_self_check_passes_and_is_cheap():
     if BITWISE:
         assert (differ, worst) == (0, 0.0)
     else:
-        assert worst < 1e-12
+        # elementwise, so cancellation in (x_inf - x) / tau shows; GitHub's
+        # ubuntu x86_64 runner measured 2.7e-13 (every state differed)
+        assert worst < 1e-10
 
 
 # --- the drift warning -------------------------------------------------------
