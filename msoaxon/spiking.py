@@ -4,11 +4,12 @@ Ports Spiking.m and the inline counters in BinarySearch.m.
 """
 
 import math
+from collections.abc import Sequence
 
 import numpy as np
 
 
-def spiking(x, factor, model):
+def spiking(x: np.ndarray, factor: float, model: str) -> np.ndarray:
     """Marks where each compartment first exceeds the soma by `factor`.
 
     Marks the first sample of each excursion. Faithful to Spiking.m,
@@ -38,7 +39,7 @@ def spiking(x, factor, model):
     return spikes
 
 
-def count_rising_edges(col):
+def count_rising_edges(col: np.ndarray | Sequence[float]) -> int:
     """Counts 0 -> 1 transitions in a spike-marker column (Combine_all.m).
 
     Args:
@@ -51,7 +52,7 @@ def count_rising_edges(col):
     return int(np.sum((col[1:] > 0) & (col[:-1] <= 0)))
 
 
-def count_spikes(soma, axon, factor):
+def count_spikes(soma: np.ndarray, axon: np.ndarray, factor: float) -> int:
     """Counts spikes the way BinarySearch.m does.
 
     A spike is the axon above the soma by `factor`; the counter re-arms
@@ -66,7 +67,7 @@ def count_spikes(soma, axon, factor):
         The number of spikes.
     """
     count, armed = 0, True
-    for u1, u2 in zip(soma, axon):
+    for u1, u2 in zip(soma, axon, strict=False):
         if u2 - u1 > factor and armed:
             count += 1
             armed = False
@@ -75,7 +76,7 @@ def count_spikes(soma, axon, factor):
     return count
 
 
-def matlab_round(x, digits=0):
+def matlab_round(x: float, digits: int = 0) -> float:
     """Rounds like MATLAB's round(x, n): half away from zero.
 
     Python's round is half-to-even.

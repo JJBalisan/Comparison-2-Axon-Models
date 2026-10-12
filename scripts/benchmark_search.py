@@ -18,6 +18,10 @@ import collections
 import json
 import pathlib
 import time
+from collections.abc import Callable
+from typing import Any
+
+import numpy as np
 
 from msoaxon import (
     _dispatch,
@@ -31,7 +35,7 @@ D = multi.with_dendrites()
 MID_L, MID_M = int(D.lateral[2]), int(D.medial[2])
 
 
-def cases():
+def cases() -> list[tuple[str, str, Callable[[float], Any]]]:
     """Returns the benchmark's searches.
 
     Returns:
@@ -60,7 +64,7 @@ def cases():
                     "multi",
                     d,
                     rel_tol=tol,
-                    model_kw=dict(morph=D),
+                    model_kw={"morph": D},
                     stim="EPSGbilateral",
                     input_node=MID_L,
                     input_node2=MID_M,
@@ -85,7 +89,7 @@ def cases():
             )
         )
     for stim, n, factor, max_I, kw in (
-        ("EPSGpair", 3, 10, 150, dict(epsg_pair_dt=0.1)),
+        ("EPSGpair", 3, 10, 150, {"epsg_pair_dt": 0.1}),
         ("step", 1, 30, 15000, {}),
         ("sine", 1, 30, 15000, {}),
         ("ramp", 2, 30, 15000, {}),
@@ -95,7 +99,7 @@ def cases():
             (
                 f"BinarySearch.m {stim}",
                 stim,
-                lambda tol, s=stim, n=n, f=factor, M=max_I, kw=kw: (
+                lambda _tol, s=stim, n=n, f=factor, M=max_I, kw=kw: (
                     threshold_mod.binary_search(
                         s, n, 3, f, M, workers=1, rounded=False, **kw
                     )
@@ -105,18 +109,18 @@ def cases():
     return out
 
 
-def instrument(stats, check):
+def instrument(stats: dict[str, float], check: bool) -> None:
     """Count runs and simulated time; with check, compare both stop settings."""
     run_model, spikes = _dispatch.run_model, _dispatch.spikes
     response = _dispatch.response
 
-    def counted(*a, **kw):
+    def counted(*a: Any, **kw: Any) -> tuple[np.ndarray, np.ndarray]:
         t, x = run_model(*a, **kw)
         stats["runs"] += 1
         stats["sim_ms"] += t[-1]
         return t, x
 
-    def checked(*a, **kw):
+    def checked(*a: Any, **kw: Any) -> bool:
         answer = spikes(*a, **kw)
         if check:
             saved, _dispatch.STOP_WHEN_SETTLED = (
@@ -159,12 +163,12 @@ def instrument(stats, check):
     _dispatch.response = checked_response
 
 
-def as_list(v):
+def as_list(v: float | tuple[list[float], list[float]]) -> list[float]:
     """Flattens a search result (one value or a (multi, two) pair)."""
     return [float(x) for x in (v[0] + v[1] if isinstance(v, tuple) else [v])]
 
 
-def main():
+def main() -> None:
     """Parses the command line and runs the benchmark and saves its JSON."""
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -214,18 +218,20 @@ def main():
         wall = time.perf_counter() - t0
         err = max(
             abs(v - r) / abs(r)
-            for v, r in zip(value, ref[name])
+            for v, r in zip(value, ref[name], strict=False)
             if r not in (0, float("inf"))
         )
-        row = dict(
-            case=name,
-            stimulus=stim,
-            runs=int(stats["runs"] - before.get("runs", 0)),
-            sim_ms=stats["sim_ms"] - before.get("sim_ms", 0),
-            wall_s=wall,
-            max_rel_err=err,
-            mismatches=int(stats["mismatches"] - before.get("mismatches", 0)),
-        )
+        row = {
+            "case": name,
+            "stimulus": stim,
+            "runs": int(stats["runs"] - before.get("runs", 0)),
+            "sim_ms": stats["sim_ms"] - before.get("sim_ms", 0),
+            "wall_s": wall,
+            "max_rel_err": err,
+            "mismatches": int(
+                stats["mismatches"] - before.get("mismatches", 0)
+            ),
+        }
         rows.append(row)
         for k in ("runs", "sim_ms", "wall_s", "mismatches"):
             by_stim[stim][k] += row[k]
@@ -258,7 +264,12 @@ def main():
     tag = method.replace(" ", "-") + f"_tol{a.rel_tol:g}"
     (out / f"{tag}.json").write_text(
         json.dumps(
-            dict(method=method, rel_tol=a.rel_tol, rows=rows, total=total),
+            {
+                "method": method,
+                "rel_tol": a.rel_tol,
+                "rows": rows,
+                "total": total,
+            },
             indent=1,
         )
     )

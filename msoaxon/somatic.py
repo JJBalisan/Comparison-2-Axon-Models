@@ -11,6 +11,9 @@ inflection is taken instead as the peak of d2V/dt2 on the soma, searched after
 the charging transient and shortly before the axonal spike.
 """
 
+import types
+from typing import Any
+
 import numpy as np
 
 from msoaxon import _bisect, _dispatch
@@ -21,7 +24,13 @@ CHARGING = 0.15  # ms after step onset excluded from the inflection search
 LOOKBACK = 0.5  # ms before the spike-detection time searched for the takeoff
 
 
-def fires(model, I, node=3, v0=-68.0, mem=None):
+def fires(
+    model: str,
+    I: float,
+    node: int = 3,
+    v0: float = -68.0,
+    mem: types.SimpleNamespace | None = None,
+) -> bool:
     """Returns whether a 100 ms somatic step makes compartment `node` spike.
 
     Args:
@@ -49,7 +58,14 @@ def fires(model, I, node=3, v0=-68.0, mem=None):
     )
 
 
-def rheobase(model, node=3, v0=-68.0, mem=None, rel_tol=1e-4, guess=2000.0):
+def rheobase(
+    model: str,
+    node: int = 3,
+    v0: float = -68.0,
+    mem: types.SimpleNamespace | None = None,
+    rel_tol: float = 1e-4,
+    guess: float = 2000.0,
+) -> float:
     """Finds the smallest 100 ms somatic step that fires, by bisection.
 
     Args:
@@ -68,7 +84,13 @@ def rheobase(model, node=3, v0=-68.0, mem=None, rel_tol=1e-4, guess=2000.0):
     )
 
 
-def spike_amplitude(model, I, node=3, v0=-68.0, mem=None):
+def spike_amplitude(
+    model: str,
+    I: float,
+    node: int = 3,
+    v0: float = -68.0,
+    mem: types.SimpleNamespace | None = None,
+) -> dict[str, Any] | None:
     """Measures the somatic spike amplitude from the inflection point.
 
     Args:
@@ -120,11 +142,11 @@ def spike_amplitude(model, I, node=3, v0=-68.0, mem=None):
     lo = max(START + CHARGING, ts - LOOKBACK)
     win = np.flatnonzero((grid >= lo) & (np.arange(len(grid)) < i_pk))
     i_inf = win[np.argmax(d2[win])]
-    return dict(
-        amplitude=V[i_pk] - V[i_inf],
-        peak_above_rest=V[i_pk] - v0,
-        t_spike=ts,
-        t_inflection=grid[i_inf],
-        v_inflection=V[i_inf],
-        trace=(t, x),
-    )
+    return {
+        "amplitude": V[i_pk] - V[i_inf],
+        "peak_above_rest": V[i_pk] - v0,
+        "t_spike": ts,
+        "t_inflection": grid[i_inf],
+        "v_inflection": V[i_inf],
+        "trace": (t, x),
+    }

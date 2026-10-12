@@ -11,9 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v7
-      # same ruff as .pre-commit-config.yaml; `ruff check` joins once its
-      # remaining findings (annotations, mostly) are cleared
+      # same ruff as .pre-commit-config.yaml
       - run: uvx ruff@0.16.10 format --check .
+      - run: uvx ruff@0.16.10 check .
 
   pytest:
     runs-on: ubuntu-latest

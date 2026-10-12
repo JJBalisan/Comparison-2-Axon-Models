@@ -12,6 +12,7 @@ against noisy trials. Threshold curves are drawn on a 50 us grid.
 import argparse
 import json
 import pathlib
+from concurrent import futures
 
 import numpy as np
 
@@ -40,7 +41,7 @@ CONFIGS = {
 }
 
 
-def main():
+def main() -> None:
     """Parses the command line and runs the coincidence-window comparison."""
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -66,7 +67,7 @@ def main():
         run(a, pool)
 
 
-def run(a, pool):
+def run(a: argparse.Namespace, pool: futures.ProcessPoolExecutor) -> None:
     """Runs the coincidence-window comparison and saves the figure and JSON.
 
     Args:
@@ -112,14 +113,14 @@ def run(a, pool):
         )
         res = [win_jobs[cname, kname, m].result() for m in MARGINS]
         th0, widths = res[0][1], [w * 1e3 for w, _ in res]
-        direct[cname, kname] = dict(zip(MARGINS, widths))
+        direct[cname, kname] = dict(zip(MARGINS, widths, strict=True))
         rows.append((cname, kname, th0, widths))
         print(
             f"{cname} | {kname}: threshold(0) {th0:.2f}, "
             f"plateau/zero-delay {th[-1] / th0:.2f}, "
             + ", ".join(
                 f"half-width @{m:.1%} {w:.1f} us"
-                for m, w in zip(MARGINS, widths)
+                for m, w in zip(MARGINS, widths, strict=True)
             ),
             flush=True,
         )
@@ -172,15 +173,15 @@ def run(a, pool):
     # figure: normalised threshold curves, and probability curves
     # imported here rather than at the top: pool workers re-import this script,
     # and only the main process draws
-    import matplotlib
+    import matplotlib as mpl
 
-    matplotlib.use("Agg")
+    mpl.use("Agg")
     import matplotlib.pyplot as plt
 
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(14, 6.2))
     colours = ["#1f5fa8", "#d2691e", "#2e8b57"]
-    for c, cname in zip(colours, CONFIGS):
-        for kname, ls in zip(KINETICS, ("-", "--")):
+    for c, cname in zip(colours, CONFIGS, strict=True):
+        for kname, ls in zip(KINETICS, ("-", "--"), strict=True):
             th = curves[(cname, kname)]
             a1.plot(
                 delays * 1e3,
@@ -211,7 +212,7 @@ def run(a, pool):
         label=f"2-cpt TwoCpt.m, noisy trials (FWHM {mc_width:.0f} us)",
     )
     for c, cname, y in zip(
-        colours, CONFIGS, (0.56, 0.5, 0.44)
+        colours, CONFIGS, (0.56, 0.5, 0.44), strict=True
     ):  # offset so all show
         w = direct[cname, list(KINETICS)[0]][0.03]
         a2.plot(
@@ -262,7 +263,7 @@ def run(a, pool):
                 "model": c,
                 "epsg": k,
                 "threshold0": t0,
-                **{f"margin_{m}": w for m, w in zip(MARGINS, ws)},
+                **{f"margin_{m}": w for m, w in zip(MARGINS, ws, strict=True)},
             }
             for c, k, t0, ws in rows
         ],

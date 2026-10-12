@@ -1,7 +1,11 @@
 # Python port
 
-A numpy/scipy port of the MATLAB model comparison. The `.m` files are untouched and
-remain the reference.
+A numpy/scipy port of the MATLAB model comparison. The Python package is the
+reference: its results, pinned by `tests/test_golden.py`, are the ones the analyses
+below use, on any hardware. The `.m` files are the historical original it was ported
+from. They stay in the repo, untouched, but the Python no longer has to match them:
+where this page says the port reproduces the MATLAB, that describes how it was built,
+not a promise for future changes.
 
 ```bash
 uv sync
@@ -62,6 +66,9 @@ There is no MATLAB here, so nothing was compared run-for-run. What was checked:
 
 ## Deliberate differences
 
+Where the port departs from the MATLAB, and why. Now that the Python is the reference
+these are history; they are not reverted.
+
 - **Solver:** `ode15s` → scipy `solve_ivp(method="BDF")` with the same tolerances (2-CPT 1e-6, `max_step` 0.1; 45-CPT 1e-8, `max_step` 0.1·tEnd, ode15s's default). Integration restarts at stimulus on/off times so the solver can't step over a narrow EPSG. The 45-CPT model gets a sparse Jacobian pattern.
 - **Threshold search stops each run at its first spike** (`stop_on_spike`), since it only needs yes or no. The stop is found on the continuous solution, not the saved solver steps, so in principle it could count a crossing that falls between two steps. Across every production sweep (184 thresholds) the results are identical to running each simulation to `tEnd`. The search used to also count spikes in the saved steps, as `BinarySearch.m` does; that never decided a result, since a sampled crossing is one the stop already caught, so it was dropped. Sweep points also run in parallel (`workers`, default all CPUs).
 - **Synaptic noise:** numpy's RNG can't reproduce MATLAB's `rng(seed); randn`, so `Synaptic`/`SynapticPair` runs are statistically equivalent, not identical.
@@ -70,11 +77,13 @@ There is no MATLAB here, so nothing was compared run-for-run. What was checked:
 - **`Combine_all.m`:** the 2-CPT spike count read column 1 (soma minus soma, always 0); it now reads the axon column. The second `TwoCpt` run used identical arguments; it now uses node 5 so the "Node 5" panels mean what they say. The default `ramp` stop was equal to start, a zero-length ramp; it's now 5.5.
 - **`Graphing.m`:** the `Input` panel reuses the model's own stimulus function instead of a hand-copied version that indexed 2-CPT voltages with multi-compartment time steps. The `z1`/`a` line fits (broken: `graph.graph.tEnd`, length mismatch) were not ported.
 - **EPSGpair threshold x-axis** shows the delay between the two EPSGs, like the jpgs do, rather than the second EPSG's absolute time (`5 + (i-1)/25`) that `Making_Threshold_graphs.m` plots.
-- **`fitExp.m`** was not ported. It contains an unresolved merge conflict and fits 301 samples against a 49-point x-axis.
+- **Thresholds and coincidence windows** come from the predictive search in `msoaxon/_bisect.py`, not a MATLAB-style bisection. Full reruns against plain bisection move windows by under 0.4 µs and thresholds by under 1e-4 (relative); one rounded value changed (Goldwyn, Myoga EPSG: 183 → 182 µs). These values are the reference. Single runs, rheobase and the somatic amplitudes never depended on the search.
+- **Settled stop:** searches end a non-spiking run once the input is over and no spike can follow (`STOP_WHEN_SETTLED` in `msoaxon/_dispatch.py`; the single-run models leave it off). It stays: in the search benchmark it changed 0 of 365 spike decisions, for about 6% less solver time.
+- **`fitExp.m`** was not ported and won't be. It contains an unresolved merge conflict and fits 301 samples against a 49-point x-axis, and with MATLAB compatibility no longer a goal nothing here needs the fit. The `.m` file stays as part of the historical record.
 
 ## Quirks kept on purpose
 
-These are in the MATLAB and are reproduced unchanged, because changing them would change results:
+These are in the MATLAB and are reproduced unchanged. They were kept so that the port matched the MATLAB; they are now kept for continuity with the results on this page. Any of them could be changed by a deliberate decision, which would move the golden traces (`tests/golden_traces.json`) and the numbers here:
 
 - `TwoCpt.m` enables sodium for `'Active-sodium'` (capital A), so `active-sodium` means *no* Na in the 2-CPT model but Na-only in the 45-CPT model.
 - The 2-CPT model holds KLT inactivation `z` fixed at its resting value.
@@ -176,7 +185,7 @@ Scott et al. 2005 ([doi](https://doi.org/10.1523/JNEUROSCI.1016-05.2005)) evoked
 - `soma_na_vhalf`: Scott et al. 2010 measured −77 mV for somatic Na inactivation; the model uses −62.5.
 - `rebalance_rest`: sets each leak reversal so rest stays at `v0`. Without it, removing KLT makes the cell fire with no input.
 
-The defaults reproduce `msoAxon.m` exactly.
+The defaults are `msoAxon.m`'s membrane, unchanged.
 
 ## Dendrites
 

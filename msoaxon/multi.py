@@ -47,7 +47,7 @@ ACTIVE_GATES = {
 _GATE0 = (0.12, 0.67, 0.0, 0.28, 0.67, 0.22)
 
 
-def _chain_jac_sparsity():
+def _chain_jac_sparsity() -> sparse.csc_matrix:
     """Returns the Jacobian pattern of msoAxon.m's unbranched chain.
 
     dV couples to neighbouring V and its own gates; each gate to its own V.
@@ -60,7 +60,9 @@ def _chain_jac_sparsity():
     return sparse.bmat(blocks).tocsc()
 
 
-def _tree_jac_sparsity(n, parent, child):
+def _tree_jac_sparsity(
+    n: int, parent: np.ndarray, child: np.ndarray
+) -> sparse.csc_matrix:
     """Returns _chain_jac_sparsity's pattern for any tree.
 
     dV couples to its own V, to each V it shares an edge
@@ -135,13 +137,13 @@ for _a in (
 
 
 def with_dendrites(
-    length=200.0,
-    diameter=5.0,
-    n_seg=5,
-    klt_lambda=74.0,
-    conserve_totals=True,
-    dendrite_ra=R_AXIAL,
-):
+    length: float = 200.0,
+    diameter: float = 5.0,
+    n_seg: int = 5,
+    klt_lambda: float = 74.0,
+    conserve_totals: bool = True,
+    dendrite_ra: float = R_AXIAL,
+) -> types.SimpleNamespace:
     """Builds Lehnert et al 2014's dendritic variant (their Fig. 8).
 
     Two identical unbranched dendrites (lateral = ipsilateral input,
@@ -272,7 +274,9 @@ def with_dendrites(
     )  # 1-indexed compartment numbers
 
 
-def axial_current(V, morph=LUMPED):
+def axial_current(
+    V: np.ndarray, morph: types.SimpleNamespace = LUMPED
+) -> np.ndarray:
     """Returns the axial current density, sign convention as in msoAxon.m.
 
     Args:
@@ -324,7 +328,16 @@ def axial_current(V, morph=LUMPED):
 #                                                t + diff >= t_end
 
 
-def external_current(t, V, stim_type, s, input_node, sa=C.SA):
+# One return per stimulus, in msoAxon.m's if/elseif order, so each branch
+# can be checked against the table above.
+def external_current(  # noqa: PLR0911, PLR0912
+    t: float,
+    V: np.ndarray,
+    stim_type: str,
+    s: types.SimpleNamespace,
+    input_node: int,
+    sa: np.ndarray = C.SA,
+) -> tuple[int, float]:
     """Returns the input current density as (0-based compartment, value).
 
     Only one compartment ever receives input. Negative is depolarising
@@ -391,7 +404,14 @@ def external_current(t, V, stim_type, s, input_node, sa=C.SA):
     return 0, 0.0
 
 
-def bilateral_current(t, V, s, a, b, sa):
+def bilateral_current(
+    t: float,
+    V: np.ndarray,
+    s: types.SimpleNamespace,
+    a: int,
+    b: int,
+    sa: np.ndarray,
+) -> tuple[tuple[int, float], tuple[int, float]]:
     """Returns the EPSGbilateral input currents.
 
     The first EPSG is at compartment a (0-based) at s.start, the second
@@ -428,14 +448,14 @@ def bilateral_current(t, V, s, a, b, sa):
 
 
 def membrane(
-    v0,
-    soma_klt_scale=1.0,
-    ais_klt_scale=1.0,
-    soma_na_vhalf=-62.5,
-    rebalance_rest=False,
-    morph=None,
-    dendrite_klt_scale=1.0,
-):
+    v0: float,
+    soma_klt_scale: float = 1.0,
+    ais_klt_scale: float = 1.0,
+    soma_na_vhalf: float = -62.5,
+    rebalance_rest: bool = False,
+    morph: types.SimpleNamespace | None = None,
+    dendrite_klt_scale: float = 1.0,
+) -> types.SimpleNamespace:
     """Builds per-compartment channel overrides for the multi model.
 
     Defaults reproduce msoAxon.m exactly. The knobs are the ones the
@@ -523,8 +543,16 @@ def membrane(
 
 
 def _rhs(
-    t, x, stim_type, s, input_node, active, mem, morph=LUMPED, input_node2=None
-):
+    t: float,
+    x: np.ndarray,
+    stim_type: str,
+    s: types.SimpleNamespace,
+    input_node: int,
+    active: tuple[bool, ...],
+    mem: types.SimpleNamespace,
+    morph: types.SimpleNamespace = LUMPED,
+    input_node2: int | None = None,
+) -> np.ndarray:
     """Computes the right-hand side.
 
     Arithmetic is kept expression-for-expression identical to
@@ -571,23 +599,23 @@ def _rhs(
 
 
 def mso_axon(
-    stim_type,
-    start,
-    stop,
-    I,
-    node,
-    model_type,
-    t_end,
-    v0,
-    input_node,
+    stim_type: str,
+    start: float,
+    stop: float,
+    I: float,
+    node: int,
+    model_type: str,
+    t_end: float,
+    v0: float,
+    input_node: int,
     syn: synaptic.SynParams | None = None,
-    max_step=None,
-    stop_on_spike=None,
-    mem=None,
-    morph=None,
-    input_node2=None,
-    stop_when_settled=False,
-):
+    max_step: float | None = None,
+    stop_on_spike: float | None = None,
+    mem: types.SimpleNamespace | None = None,
+    morph: types.SimpleNamespace | None = None,
+    input_node2: int | None = None,
+    stop_when_settled: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
     """Runs the multi-compartment model.
 
     Compartments are 1-indexed and times in ms, as in msoAxon.m.

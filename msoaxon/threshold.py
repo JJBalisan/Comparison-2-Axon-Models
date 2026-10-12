@@ -1,5 +1,8 @@
 """Spiking-threshold search (port of BinarySearch.m)."""
 
+from collections.abc import Callable
+from concurrent import futures
+
 from msoaxon import _dispatch, _parallel, spiking, synaptic
 
 START = 5.0
@@ -9,7 +12,9 @@ MODEL_TYPE = "active-full"
 INPUT_NODE = 1
 
 
-def sweep_setting(stim_type, i, epsg_pair_dt=1 / 25):
+def sweep_setting(
+    stim_type: str, i: int, epsg_pair_dt: float = 1 / 25
+) -> tuple[float, synaptic.SynParams, float | None]:
     """Returns the settings of sweep point i, as BinarySearch.m sets them.
 
     Args:
@@ -48,7 +53,7 @@ def sweep_setting(stim_type, i, epsg_pair_dt=1 / 25):
     )
 
 
-def sweep_x(stim_type, i, epsg_pair_dt=1 / 25):
+def sweep_x(stim_type: str, i: int, epsg_pair_dt: float = 1 / 25) -> float:
     """Returns what sweep point i varies, for plotting.
 
     Args:
@@ -75,7 +80,15 @@ def sweep_x(stim_type, i, epsg_pair_dt=1 / 25):
     raise ValueError(f"no x-axis for stimType {stim_type!r}")
 
 
-def _search(spiked_at, stim_type, i, factor, max_I, zoom, epsg_pair_dt):
+def _search(
+    spiked_at: Callable[..., bool],
+    stim_type: str,
+    i: int,
+    factor: float,
+    max_I: float,
+    zoom: float,
+    epsg_pair_dt: float,
+) -> float:
     """Runs the halving search exactly as BinarySearch.m does it.
 
     Returns the last tested value.
@@ -97,7 +110,9 @@ def _search(spiked_at, stim_type, i, factor, max_I, zoom, epsg_pair_dt):
     return first
 
 
-def _point(task):
+def _point(
+    task: tuple[str, str, int, int, float, float, float, float],
+) -> float:
     """Searches one sweep point for one model.
 
     Module-level so worker processes can import it.
@@ -105,8 +120,13 @@ def _point(task):
     model, stim_type, i, node, factor, max_I, zoom, epsg_pair_dt = task
 
     def spiked_at(
-        stim, start, stop, I, syn, factor
-    ):  # the search only needs yes/no
+        stim: str,
+        start: float,
+        stop: float,
+        I: float,
+        syn: synaptic.SynParams,
+        factor: float,
+    ) -> bool:  # the search only needs yes/no
         return _dispatch.spikes(
             model,
             stim,
@@ -126,17 +146,17 @@ def _point(task):
 
 
 def binary_search(
-    stim_type,
-    n_points,
-    node,
-    factor,
-    max_I,
-    zoom=1.0,
-    epsg_pair_dt=1 / 25,
-    rounded=True,
-    workers=None,
-    executor=None,
-):
+    stim_type: str,
+    n_points: int,
+    node: int,
+    factor: float,
+    max_I: float,
+    zoom: float = 1.0,
+    epsg_pair_dt: float = 1 / 25,
+    rounded: bool = True,
+    workers: int | None = None,
+    executor: futures.Executor | None = None,
+) -> tuple[list[float], list[float]]:
     """Runs BinarySearch.m's threshold search for both models.
 
     BinarySearch.m tests location1 (the multi-compartment variable) in

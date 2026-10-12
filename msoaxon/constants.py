@@ -17,7 +17,7 @@ N_CPT = 45  # 1 soma, 2 AIS, 21 internodes, 21 nodes
 V_REST_REF = -68.0  # resting potential used to compute the fractions [mV]
 
 
-def _alternating(internode, node):
+def _alternating(internode: float, node: float) -> np.ndarray:
     """Returns the 42 axon compartments after soma + 2 AIS.
 
     They alternate: internode, node, internode, ...
@@ -39,7 +39,7 @@ G_LK = np.concatenate([[0.0005, 0.0005, 0.0005], _alternating(0.0002, 0.05)])
 # gives them (Lehnert et al 2014 used the same channel models).
 
 
-def minf(V):
+def minf(V: np.ndarray | float) -> np.ndarray | float:
     """Na activation: Scott et al 2010.
 
     Args:
@@ -51,7 +51,7 @@ def minf(V):
     return 1.0 / (1.0 + np.exp((V + 46.0) / -11.0))
 
 
-def hinf(V, vhalf=62.5):
+def hinf(V: np.ndarray | float, vhalf: float = 62.5) -> np.ndarray | float:
     """Na inactivation: Scott et al 2010.
 
     Args:
@@ -64,7 +64,7 @@ def hinf(V, vhalf=62.5):
     return 1.0 / (1.0 + np.exp((V + vhalf) / 7.77))
 
 
-def pinf(V):
+def pinf(V: np.ndarray | float) -> np.ndarray | float:
     """KHT activation: Rothman & Manis 2003, without their slow gate.
 
     Args:
@@ -76,7 +76,7 @@ def pinf(V):
     return 1.0 / (1.0 + np.exp(-(V + 23.0) / 6.0))
 
 
-def winf(V):
+def winf(V: np.ndarray | float) -> np.ndarray | float:
     """KLT activation: Mathews et al 2010.
 
     Args:
@@ -88,7 +88,7 @@ def winf(V):
     return 1.0 / (1.0 + np.exp((V + 57.34) / -11.7))
 
 
-def zinf(V):
+def zinf(V: np.ndarray | float) -> np.ndarray | float:
     """KLT inactivation: Mathews et al 2010.
 
     Args:
@@ -101,7 +101,7 @@ def zinf(V):
     return (1 - 0.27) / (1.0 + np.exp((V + 67.0) / 6.16)) + 0.27
 
 
-def ainf(V):
+def ainf(V: np.ndarray | float) -> np.ndarray | float:
     """Activation of the h current: Baumann et al 2013.
 
     Args:
@@ -120,7 +120,7 @@ _P_TEMP = 3 ** ((22 - 35) / 10)  # Q10 of 3 from 22 C
 _A_TEMP = 3 ** ((32 - 35) / 10)  # Q10 of 3 from 32 C
 
 
-def taum(V):
+def taum(V: np.ndarray | float) -> np.ndarray | float:
     """Na activation: Scott et al 2010 in msoAxon.m.
 
     TwoCpt.m credits Rothman-Manis.
@@ -134,7 +134,7 @@ def taum(V):
     return (0.141 + (-0.0826 / (1 + np.exp((-20.5 - V) / 10.8)))) / 3
 
 
-def tauh(V):
+def tauh(V: np.ndarray | float) -> np.ndarray | float:
     """Na inactivation: Scott et al 2010.
 
     Args:
@@ -146,7 +146,7 @@ def tauh(V):
     return (4 + (-3.74 / (1 + np.exp((-40.6 - V) / 5.05)))) / 3
 
 
-def taup(V):
+def taup(V: np.ndarray | float) -> np.ndarray | float:
     """KHT activation: Rothman & Manis 2003, 22 C adjusted to 35 C.
 
     Args:
@@ -160,7 +160,7 @@ def taup(V):
     )
 
 
-def tauw(V):
+def tauw(V: np.ndarray | float) -> np.ndarray | float:
     """KLT activation: Mathews et al 2010.
 
     Args:
@@ -174,7 +174,7 @@ def tauw(V):
     )
 
 
-def tauz(V):
+def tauz(V: np.ndarray | float) -> np.ndarray | float:
     """KLT inactivation: Mathews et al 2010.
 
     Args:
@@ -186,7 +186,7 @@ def tauz(V):
     return 170 / (5 * np.exp((V + 60) / 10) + np.exp(-(V + 70) / 8)) + 10.7
 
 
-def taua(V):
+def taua(V: np.ndarray | float) -> np.ndarray | float:
     """Activation of the h current: Baumann et al 2013.
 
     Measured at 32 C, adjusted to 35 C.
@@ -201,7 +201,9 @@ def taua(V):
 
 
 # --- Conductance fractions at rest -------------------------------------------
-def _fractions(v_rest=V_REST_REF):
+def _fractions(
+    v_rest: float = V_REST_REF,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Returns the KLT, h and Na fractions of the resting conductance."""
     h = G_H * ainf(v_rest)
     na = G_NA * minf(v_rest) ** 4 * (0.993 * hinf(v_rest) + 0.007)
@@ -209,7 +211,10 @@ def _fractions(v_rest=V_REST_REF):
     klt = G_KLT * winf(v_rest) ** 4 * zinf(v_rest)
     total = klt + kht + na + h + G_LK
     safe = np.where(total != 0, total, 1.0)
-    frac = lambda g: np.where(total != 0, g / safe, 0.0)
+
+    def frac(g: np.ndarray) -> np.ndarray:
+        return np.where(total != 0, g / safe, 0.0)
+
     return frac(klt), frac(h), frac(na)
 
 

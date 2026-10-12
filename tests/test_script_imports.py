@@ -33,6 +33,7 @@ def test_analysis_scripts_import_without_matplotlib(script):
         [sys.executable, "-c", PROBE, str(REPO / "scripts" / script)],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == "False"

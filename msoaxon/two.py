@@ -15,10 +15,17 @@ from msoaxon import _common, _solve, constants as C, synaptic
 # 15:e1006476), the paper this model's coupling-constant framework comes from.
 # TwoCpt.m still carries them as comments (%8.5, %-58) beside the values it
 # replaced them with.
-GOLDWYN_2019 = dict(r1=8.5, tau_est=0.34, v0=-58.0)
+GOLDWYN_2019 = {"r1": 8.5, "tau_est": 0.34, "v0": -58.0}
 
 
-def get_params(v0, node, input_node, model_type, r1=10.0, tau_est=0.71):
+def get_params(
+    v0: float,
+    node: int,
+    input_node: int,
+    model_type: str,
+    r1: float = 10.0,
+    tau_est: float = 0.71,
+) -> types.SimpleNamespace:
     """Ports getParam: the two-compartment parameters.
 
     Args:
@@ -105,7 +112,11 @@ def get_params(v0, node, input_node, model_type, r1=10.0, tau_est=0.71):
     return P
 
 
-def applied_current(t, V1, stim_type, s):
+# One return per stimulus, in TwoCptODE.m's if/elseif order, so each branch
+# can be checked against the table above multi.external_current.
+def applied_current(  # noqa: PLR0911
+    t: float, V1: float, stim_type: str, s: types.SimpleNamespace
+) -> float:
     """Returns the input current at time t (the Iapp branch of TwoCptODE).
 
     Deliberately not shared with multi.external_current: see the table
@@ -172,7 +183,13 @@ def applied_current(t, V1, stim_type, s):
     raise ValueError(f"unknown stimType {stim_type!r}")
 
 
-def _rhs(t, x, P, stim_type, s):
+def _rhs(
+    t: float,
+    x: np.ndarray,
+    P: types.SimpleNamespace,
+    stim_type: str,
+    s: types.SimpleNamespace,
+) -> list[float]:
     """Computes TwoCptODE.m's right-hand side.
 
     Compartment 1 is the soma, 2 the axon node; currents in pA.
@@ -216,22 +233,22 @@ def _rhs(t, x, P, stim_type, s):
 
 
 def two_cpt(
-    stim_type,
-    start,
-    stop,
-    I,
-    node,
-    model_type,
-    t_end,
-    v0,
-    input_node,
+    stim_type: str,
+    start: float,
+    stop: float,
+    I: float,
+    node: int,
+    model_type: str,
+    t_end: float,
+    v0: float,
+    input_node: int,
     syn: synaptic.SynParams | None = None,
-    stop_on_spike=None,
-    r1=10.0,
-    tau_est=0.71,
-    max_step=0.1,
-    stop_when_settled=False,
-):
+    stop_on_spike: float | None = None,
+    r1: float = 10.0,
+    tau_est: float = 0.71,
+    max_step: float = 0.1,
+    stop_when_settled: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
     """Runs the two-compartment model.
 
     Arguments are as in mso_axon (see its docstring for what start, stop

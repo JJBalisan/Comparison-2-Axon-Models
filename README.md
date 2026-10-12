@@ -1,6 +1,8 @@
 # Comparison-of-2-compartment-and-muti-compartment-MSO-Axon-Models
 
-**Python port:** see [PYTHON.md](PYTHON.md).
+**Python:** the `msoaxon` package is the reference implementation; see
+[PYTHON.md](PYTHON.md). The MATLAB files described below are the historical original
+it was ported from, kept unchanged; the Python no longer has to match them.
 
 Combine_all Inputs
 
@@ -34,7 +36,8 @@ Synaptic.m creates the Synpatic input type
 
 Spiking.m spike testing code
 
-fitExp.m is used to calculate the inverse of our tau constant.
+fitExp.m is used to calculate the inverse of our tau constant. (Not ported to Python;
+see PYTHON.md.)
 
 
 

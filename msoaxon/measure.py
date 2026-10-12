@@ -3,12 +3,21 @@
 Shared by the scripts and the tests.
 """
 
+from typing import Any
+
 import numpy as np
 
 from msoaxon import _dispatch
 
 
-def soma_on_grid(t, x, v0, t0, t1, dt=0.001):
+def soma_on_grid(
+    t: np.ndarray,
+    x: np.ndarray,
+    v0: float,
+    t0: float,
+    t1: float,
+    dt: float = 0.001,
+) -> tuple[np.ndarray, np.ndarray]:
     """Interpolates the soma voltage onto a uniform grid.
 
     Args:
@@ -27,8 +36,13 @@ def soma_on_grid(t, x, v0, t0, t1, dt=0.001):
 
 
 def passive_step(
-    model, v0=-68.0, model_type="active-full", I=-2.0, n_grid=200001, **model_kw
-):
+    model: str,
+    v0: float = -68.0,
+    model_type: str = "active-full",
+    I: float = -2.0,
+    n_grid: int = 200001,
+    **model_kw: Any,
+) -> dict[str, float]:
     """Measures soma input resistance and time constant from a current step.
 
     The step lasts 40 ms (5 to 45 ms). The grid stops at 44.9 ms: the
@@ -54,6 +68,8 @@ def passive_step(
     g = np.linspace(5, 44.9, n_grid)
     dv = np.interp(g, t, x[:, 0]) - v0
     tau = g[np.argmax(dv <= dv[-1] * (1 - np.exp(-1)))] - 5
-    return dict(
-        rin_steady=dv[-1] / I * 1e3, rin_peak=dv.min() / I * 1e3, tau=tau
-    )
+    return {
+        "rin_steady": dv[-1] / I * 1e3,
+        "rin_peak": dv.min() / I * 1e3,
+        "tau": tau,
+    }

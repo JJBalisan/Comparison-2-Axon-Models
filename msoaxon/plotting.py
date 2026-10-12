@@ -4,13 +4,26 @@
 stimType, inputNode, start, stop, I, Syn.
 """
 
+from collections.abc import Sequence
+from typing import Any
+
+import matplotlib.axes
+import matplotlib.figure
 import matplotlib.pyplot as plt
 import numpy as np
 
 from msoaxon import _common, two
 
 
-def _panel(ax, t, V, title, labels, t_end, ylabel="Voltage (mV)"):
+def _panel(
+    ax: matplotlib.axes.Axes,
+    t: np.ndarray,
+    V: np.ndarray,
+    title: str,
+    labels: list[str],
+    t_end: float,
+    ylabel: str = "Voltage (mV)",
+) -> None:
     ax.plot(t, V, linewidth=2)
     ax.set_title(title)
     ax.legend(labels, fontsize=8, frameon=False)
@@ -19,7 +32,9 @@ def _panel(ax, t, V, title, labels, t_end, ylabel="Voltage (mV)"):
     ax.set_xlim(0, t_end)
 
 
-def input_trace(graph, t2, x):
+def input_trace(
+    graph: dict[str, Any], t2: np.ndarray, x: np.ndarray
+) -> np.ndarray:
     """Computes the applied current along the two-compartment solution.
 
     Graphing.m recomputes this with its own copy of the stimulus code
@@ -46,12 +61,20 @@ def input_trace(graph, t2, x):
     return np.array(
         [
             two.applied_current(t, V1, graph["stimType"], s)
-            for t, V1 in zip(t2, x[:, 0])
+            for t, V1 in zip(t2, x[:, 0], strict=True)
         ]
     )
 
 
-def graphing(graph, t1, y, t2=None, x=None, t3=None, z=None):
+def graphing(
+    graph: dict[str, Any],
+    t1: np.ndarray,
+    y: np.ndarray,
+    t2: np.ndarray | None = None,
+    x: np.ndarray | None = None,
+    t3: np.ndarray | None = None,
+    z: np.ndarray | None = None,
+) -> matplotlib.figure.Figure:
     """Draws graph["Type"] and returns the figure (Graphing.m).
 
     What each Type uses:
@@ -216,7 +239,13 @@ def graphing(graph, t1, y, t2=None, x=None, t3=None, z=None):
     return fig
 
 
-def threshold_figure(x_values, multi, two, title, xlabel):
+def threshold_figure(
+    x_values: np.ndarray | Sequence[float],
+    multi: np.ndarray | Sequence[float],
+    two: np.ndarray | Sequence[float],
+    title: str,
+    xlabel: str,
+) -> matplotlib.figure.Figure:
     """Draws one panel of Making_Threshold_graphs.m.
 
     Args:
