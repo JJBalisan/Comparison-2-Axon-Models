@@ -1,0 +1,33 @@
+# Google-style gate (from the shared repo-audit toolchain), trimmed to what
+# this repo has: Python, Markdown, YAML and JSON. Install once per clone:
+# `uvx pre-commit install`.
+# The MATLAB files (*.m, *.mat) are the frozen reference for the port and are
+# never touched by a hook.
+exclude: '\.(m|mat)~?$'
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.10
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.45.0
+    hooks:
+      - id: markdownlint
+        args: [--disable, MD013, --]   # line length handled by editorconfig
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+      - id: detect-private-key
+      - id: check-yaml
+      - id: check-json
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        exclude: (golden_traces\.json|msoaxon/data/|uv\.lock)

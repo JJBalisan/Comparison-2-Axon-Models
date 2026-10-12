@@ -1,0 +1,84 @@
+# Ruff config approximating the Google Python Style Guide, from the shared
+# repo-audit toolchain (2026-10-05), adjusted for this repo.
+# https://google.github.io/styleguide/pyguide.html
+#
+# This repo's Python port must stay bit-identical to the MATLAB: format and
+# apply safe fixes only (never --unsafe-fixes), and never reorder floating-point
+# arithmetic. tests/test_golden.py pins the traces.
+line-length = 80          # pyguide 3.2
+indent-width = 4          # pyguide 3.4
+target-version = "py311"  # matches requires-python in pyproject.toml
+extend-exclude = [".venv", "figures"]
+
+[format]
+quote-style = "preserve"  # pyguide 3.10 lets you pick; stay consistent per file
+docstring-code-format = true
+
+[lint]
+select = [
+  "E", "W",   # pycodestyle
+  "F",        # pyflakes
+  "I",        # isort            (pyguide 3.13 import grouping/order)
+  "N",        # pep8-naming      (pyguide 3.16)
+  "D",        # pydocstyle       (pyguide 3.8, Google convention below)
+  "B",        # bugbear          (mutable defaults 2.12, etc.)
+  "UP",       # pyupgrade
+  "ANN",      # annotations      (pyguide 2.21 / 3.19, public APIs)
+  "S",        # bandit           (security smell)
+  "A",        # builtins shadowing
+  "C4",       # comprehensions   (pyguide 2.7)
+  "SIM",      # simplify
+  "RET",      # returns
+  "ARG",      # unused args
+  "PL",       # pylint subset    (function length etc.)
+  "T20",      # print found (use logging in libraries)
+  "BLE",      # blind except     (pyguide 2.4)
+  "G",        # logging format   (pyguide 3.10.1)
+  "ICN",      # import conventions
+  "TID",      # tidy imports (bans relative imports; pyguide 2.2)
+]
+ignore = [
+  "D105", "D107",       # magic methods / __init__ docstrings not required
+  "ANN401",             # Any is sometimes unavoidable
+  "PLR0913", "PLR2004", # arg-count and magic-number are judgment calls
+  "PLR0917",            # the models keep TwoCpt.m / msoAxon.m's positional API
+  "S101",               # assert is fine in tests (see per-file-ignores)
+  "E501",               # let the formatter own line length, re-enable later
+]
+
+[lint.pydocstyle]
+convention = "google"
+
+[lint.isort]
+known-first-party = ["msoaxon"]
+combine-as-imports = true
+
+[lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[lint.pylint]
+max-statements = 50      # ~ pyguide 3.18 "about 40 lines"
+
+[lint.per-file-ignores]
+# Modules that mirror the MATLAB code keep its names (I, V, C, P.gTot1, gE,
+# VsynE, ...) so each line can be checked against the .m file it ports:
+# N803/N806/N815 (mixed-case names), E741 (I), N812 (constants imported as C).
+"msoaxon/multi.py" = ["N803", "N806", "N812", "E741"]
+"msoaxon/two.py" = ["N803", "N806", "N812", "E741"]
+"msoaxon/constants.py" = ["N803"]
+"msoaxon/_common.py" = ["N803", "N812", "E741"]
+"msoaxon/_dispatch.py" = ["N803", "E741"]
+"msoaxon/synaptic.py" = ["N815"]
+"msoaxon/threshold.py" = ["N803", "N806", "E741"]
+"msoaxon/somatic.py" = ["N803", "N806", "E741"]
+"msoaxon/measure.py" = ["N803", "E741"]
+"msoaxon/coincidence.py" = ["N803", "E741"]
+"msoaxon/plotting.py" = ["N803", "N806"]
+# Scripts: the same MATLAB names, plus dendrites.py's per-check results named
+# after the docstring's checks A-G. They import matplotlib inside run(): pool
+# workers re-import the script, and only the main process draws
+# (tests/test_script_imports.py).
+"scripts/**" = ["T20", "N803", "N806", "E741", "PLC0415"]
+# Tests use the models' names too, and import inside tests on purpose in a few
+# places.
+"tests/**" = ["D", "ANN", "S101", "PLR", "ARG", "N806", "N812", "E741"]
