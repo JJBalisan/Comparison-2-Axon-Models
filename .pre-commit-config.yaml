@@ -1,8 +1,8 @@
 # Google-style gate (from the shared repo-audit toolchain), trimmed to what
 # this repo has: Python, Markdown, YAML and JSON. Install once per clone:
 # `uvx pre-commit install`.
-# The MATLAB files (*.m, *.mat) are the frozen reference for the port and are
-# never touched by a hook.
+# The MATLAB files (*.m, *.mat) are the historical original of the port, kept
+# unchanged, and are never touched by a hook.
 exclude: '\.(m|mat)~?$'
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
