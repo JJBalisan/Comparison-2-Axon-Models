@@ -32,8 +32,12 @@ MID_L, MID_M = int(D.lateral[2]), int(D.medial[2])
 
 
 def cases():
-    """(name, stimulus, search(rel_tol) -> value). rel_tol is ignored by the
-    BinarySearch.m port, which has its own fixed grid.
+    """Returns the benchmark's searches.
+
+    Returns:
+        A list of (name, stimulus, search), where search(rel_tol) runs
+        the search and returns its value(s). rel_tol is ignored by the
+        BinarySearch.m port, which has its own fixed grid.
     """
     out = []
     for model in ("multi", "two"):
@@ -156,10 +160,12 @@ def instrument(stats, check):
 
 
 def as_list(v):
+    """Flattens a search result (one value or a (multi, two) pair)."""
     return [float(x) for x in (v[0] + v[1] if isinstance(v, tuple) else [v])]
 
 
 def main():
+    """Parses the command line and runs the benchmark and saves its JSON."""
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,

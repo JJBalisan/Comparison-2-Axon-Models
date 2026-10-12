@@ -72,6 +72,15 @@ def epsp(morph, site, mem, amp=UNITARY, site2=None, t_end=12.0):
 
 
 def shape(g, v):
+    """Measures an EPSP: peak, 10-90% rise time and half width.
+
+    Args:
+        g: The time grid [ms].
+        v: The somatic EPSP on it [mV].
+
+    Returns:
+        dict(amp [mV], rise_us, half_width_us).
+    """
     pk = v.max()
     r10, r90 = g[np.argmax(v >= 0.1 * pk)], g[np.argmax(v >= 0.9 * pk)]
     above = g[v >= pk / 2]
@@ -83,6 +92,15 @@ def shape(g, v):
 
 
 def rin_tau(morph, mem):
+    """Measures input resistance and time constant (see passive_step).
+
+    Args:
+        morph: The morphology.
+        mem: The membrane overrides.
+
+    Returns:
+        dict(rin_steady, rin_peak [MOhm], t63_us).
+    """
     r = measure.passive_step("multi", V0, morph=morph, mem=mem)
     return dict(
         rin_steady=float(r["rin_steady"]),
@@ -92,6 +110,7 @@ def rin_tau(morph, mem):
 
 
 def main():
+    """Parses the command line and runs the dendritic checks on one process pool."""
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -122,6 +141,12 @@ def main():
 
 
 def run(a, pool):
+    """Runs the dendritic checks A-G on a worker pool and saves the figure and JSON.
+
+    Args:
+        a: The parsed command-line arguments.
+        pool: The process pool every parallel call shares.
+    """
     out = pathlib.Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     D = multi.with_dendrites(

@@ -18,10 +18,21 @@ GOLDWYN_2019 = dict(r1=8.5, tau_est=0.34, v0=-58.0)
 
 
 def get_params(v0, node, input_node, model_type, r1=10.0, tau_est=0.71):
-    """Port of getParam. `node` and `input_node` are 1-indexed like the MATLAB code.
+    """Ports getParam: the two-compartment parameters.
 
-    r1: soma input resistance of the passive model [MOhm]; tau_est: its soma
-    voltage decay time constant [ms]. Defaults are TwoCpt.m's values.
+    Args:
+        v0: Resting (and leak reversal) potential [mV].
+        node: The axon compartment, 1-indexed like the MATLAB code,
+            whose coupling constants and channel fractions set the
+            second compartment.
+        input_node: Where the stimulus enters, 1-indexed.
+        model_type: Which channels are active.
+        r1: Soma input resistance of the passive model [MOhm].
+        tau_est: The passive model's soma voltage decay time constant
+            [ms]. Defaults are TwoCpt.m's values.
+
+    Returns:
+        A SimpleNamespace P with TwoCpt.m's field names.
     """
     P = types.SimpleNamespace()
     P.couple12 = C.COUPLING1[node - 2]  # forward coupling
@@ -92,10 +103,22 @@ def get_params(v0, node, input_node, model_type, r1=10.0, tau_est=0.71):
 
 
 def applied_current(t, V1, stim_type, s):
-    """Input current [pA] at time t (the Iapp branch of TwoCptODE). "none" means no stimulus.
+    """Returns the input current at time t (the Iapp branch of TwoCptODE).
 
-    Deliberately not shared with multi.external_current: see the table above that
-    function for how the two MATLAB files differ.
+    Deliberately not shared with multi.external_current: see the table
+    above that function for how the two MATLAB files differ.
+
+    Args:
+        t: Time [ms].
+        V1: Soma voltage [mV].
+        stim_type: The stimulus name; "none" means no stimulus.
+        s: The stimulus settings (_common.stimulus).
+
+    Returns:
+        The current [pA]; positive depolarises.
+
+    Raises:
+        ValueError: For an unknown stim_type.
     """
     if stim_type == "none":
         return 0.0
@@ -147,7 +170,10 @@ def applied_current(t, V1, stim_type, s):
 
 
 def _rhs(t, x, P, stim_type, s):
-    """TwoCptODE.m. Compartment 1 is the soma, 2 the axon node; currents in pA."""
+    """Computes TwoCptODE.m's right-hand side.
+
+    Compartment 1 is the soma, 2 the axon node; currents in pA.
+    """
     V1, V2, w1, h1, w2, m1, m2, h2, p, a1, a2 = x
     z = P.z_rest  # KLT inactivation is frozen at rest in this model
 
@@ -203,25 +229,49 @@ def two_cpt(
     max_step=0.1,
     stop_when_settled=False,
 ):
-    """Run the two-compartment model. Returns (t, x) with x shaped (n_times, 11).
+    """Runs the two-compartment model.
 
-    Arguments are as in mso_axon (see its docstring for what start, stop and I
-    mean for each stim_type), with these differences, all from TwoCptODE.m:
-    - currents enter compartment 1 if input_node == 1, else compartment 2 (the
-      axon); step, ramp and sine are on for start <= t < stop (or <= stop)
-      rather than start < t <= stop;
+    Arguments are as in mso_axon (see its docstring for what start, stop
+    and I mean for each stim_type), with these differences, all from
+    TwoCptODE.m:
+
+    - currents enter compartment 1 if input_node == 1, else compartment
+      2 (the axon); step, ramp and sine are on for start <= t < stop (or
+      <= stop) rather than start < t <= stop;
     - ramp2 always starts at t = 5, whatever `start` is;
     - EPSG is not cut off at stop.
-    - node (2..45) picks the axon compartment whose coupling constants and
-      channel fractions set the second compartment; only nodes 3 and 5 have a
-      calibrated axonal Na density (see get_params).
-    - max_step is a fixed 0.1 ms, not a fraction of t_end.
 
-    r1 [MOhm] and tau_est [ms] set the passive calibration (TwoCpt.m: 10 and 0.71;
-    Goldwyn et al 2019: 8.5 and 0.34, with v0 = -58, see GOLDWYN_2019).
+    Args:
+        stim_type: One of _common.STIM_TYPES.
+        start: Stimulus start [ms].
+        stop: Stimulus stop [ms].
+        I: Stimulus amplitude.
+        node: The axon compartment (2..45) whose coupling constants and
+            channel fractions set the second compartment; only nodes 3
+            and 5 have a calibrated axonal Na density (see get_params).
+        model_type: Which channels are active.
+        t_end: End time [ms].
+        v0: Initial and leak reversal potential [mV].
+        input_node: 1 for the soma; anything else means the axon.
+        syn: Synaptic waveform settings (SynParams).
+        stop_on_spike: If given (mV), stop as soon as the axon
+            compartment rises that far above the soma; t then ends before
+            t_end.
+        r1: Passive calibration: soma input resistance [MOhm] (TwoCpt.m:
+            10; Goldwyn et al 2019: 8.5, with v0 = -58, see GOLDWYN_2019).
+        tau_est: Passive calibration: soma time constant [ms] (TwoCpt.m:
+            0.71; Goldwyn et al 2019: 0.34).
+        max_step: Largest solver step: a fixed 0.1 ms, not a fraction of
+            t_end.
+        stop_when_settled: With stop_on_spike, also stop once no spike
+            can follow (see mso_axon).
 
-    stop_on_spike: if given (mV), stop as soon as the axon compartment rises that
-    far above the soma; t then ends before t_end.
+    Returns:
+        (t, x) with x shaped (n_times, 11); see the module docstring for
+        the state layout.
+
+    Raises:
+        ValueError: For unknown names or out-of-range compartments.
     """
     _common.check_args(
         stim_type, model_type, node, input_node, min_node=2

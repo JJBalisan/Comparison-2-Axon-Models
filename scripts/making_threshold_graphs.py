@@ -24,6 +24,7 @@ SWEEPS = {
 
 
 def main():
+    """Parses the command line and runs the threshold sweeps."""
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -57,6 +58,13 @@ def main():
 def run(a, pool):
     # imported here rather than at the top: pool workers re-import this script,
     # and only the main process draws (msoaxon.plotting imports matplotlib)
+    """Runs the threshold sweeps and draws or saves one figure per sweep.
+
+    Args:
+        a: The parsed command-line arguments.
+        pool: The process pool every sweep shares, or None to run
+            in-process.
+    """
     import matplotlib.pyplot as plt
 
     from msoaxon import plotting

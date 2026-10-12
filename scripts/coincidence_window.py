@@ -41,6 +41,7 @@ CONFIGS = {
 
 
 def main():
+    """Parses the command line and runs the coincidence-window comparison."""
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -66,6 +67,12 @@ def main():
 
 
 def run(a, pool):
+    """Runs the coincidence-window comparison on a worker pool and saves the figure and JSON.
+
+    Args:
+        a: The parsed command-line arguments.
+        pool: The process pool every parallel call shares.
+    """
     out = pathlib.Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 

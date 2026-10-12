@@ -30,8 +30,10 @@ FACTOR = (
 
 
 def _respond(model, I, delay, node, v0, epsg_tau, site, model_kw, start=START):
-    """One EPSG pair, `delay` apart: (spiked, peak axon - soma); site = (stim,
-    input_node, input_node2).
+    """Runs one EPSG pair, `delay` apart.
+
+    Returns (spiked, peak axon - soma); site = (stim, input_node,
+    input_node2).
     """
     stim, input_node, input_node2 = site
     syn = synaptic.SynParams(t_end=T_END, epsg_tau=tuple(epsg_tau))
@@ -74,15 +76,32 @@ def threshold(
     input_node=1,
     input_node2=None,
 ):
-    """Smallest EPSG-pair amplitude that spikes at this delay, to rel_tol.
+    """Finds the smallest EPSG-pair amplitude that spikes at this delay.
 
-    Bisection helped by interpolating the peak axon - soma of the runs that don't
-    spike (_bisect.smallest_crossing): ~10 runs instead of ~15, same guarantee.
+    Bisection helped by interpolating the peak axon - soma of the runs
+    that don't spike (_bisect.smallest_crossing): ~10 runs instead of
+    ~15, same guarantee.
 
-    stim: "EPSGpair" (both EPSGs at input_node) or, for the multi-compartment
-    model, "EPSGbilateral" (the second at input_node2).
-    model_kw: further model keywords, e.g. morph/mem, or r1/tau_est for "two".
-    Returns inf if nothing up to `ceiling` spikes.
+    Args:
+        model: "multi" or "two".
+        delay: Time from the first EPSG onset to the second [ms].
+        node: The compartment compared with the soma, 1-indexed.
+        v0: Initial potential [mV].
+        epsg_tau: The EPSG (rise, decay) time constants [ms].
+        model_kw: Further model keywords, e.g. morph/mem, or r1/tau_est
+            for "two".
+        rel_tol: The relative tolerance of the threshold.
+        guess: The first amplitude tried.
+        ceiling: The largest amplitude worth trying.
+        stim: "EPSGpair" (both EPSGs at input_node) or, for the
+            multi-compartment model, "EPSGbilateral" (the second at
+            input_node2).
+        input_node: Where the (first) EPSG enters, 1-indexed.
+        input_node2: Where the second EPSG enters, for "EPSGbilateral".
+
+    Returns:
+        The threshold amplitude, to rel_tol, or inf if nothing up to
+        `ceiling` spikes.
     """
     site, model_kw = (stim, input_node, input_node2), model_kw or {}
     return _bisect.smallest_crossing(
@@ -114,9 +133,28 @@ def threshold_curve(
     input_node=1,
     input_node2=None,
 ):
-    """threshold() at each delay, in parallel (needs a __main__ guard in scripts).
+    """Computes threshold() at each delay, in parallel.
 
-    workers / executor: see _parallel.map_tasks.
+    Scripts that call this in parallel need a __main__ guard.
+
+    Args:
+        model: "multi" or "two".
+        delays: The delays [ms].
+        node: The compartment compared with the soma, 1-indexed.
+        v0: Initial potential [mV].
+        epsg_tau: The EPSG (rise, decay) time constants [ms].
+        model_kw: Further model keywords (see threshold()).
+        rel_tol: The relative tolerance of each threshold.
+        workers: See _parallel.map_tasks.
+        executor: See _parallel.map_tasks.
+        stim: "EPSGpair" (both EPSGs at input_node) or, for the
+            multi-compartment model, "EPSGbilateral" (the second at
+            input_node2).
+        input_node: Where the (first) EPSG enters, 1-indexed.
+        input_node2: Where the second EPSG enters, for "EPSGbilateral".
+
+    Returns:
+        An array of thresholds, one per delay.
     """
     site = dict(stim=stim, input_node=input_node, input_node2=input_node2)
     tasks = [
@@ -140,14 +178,24 @@ def threshold_curve(
 
 
 def half_width(delays, thresholds, margin):
-    """Full width at half maximum of the spike-probability curve.
+    """Returns the full width at half maximum of the spike-probability curve.
 
-    Inputs are set `margin` (fraction) above the coincident threshold; probability
-    is 50% where the threshold curve crosses that level. The EPSGs are identical
-    and either share one input site or sit at mirror-image sites (EPSGbilateral
-    on the two identical dendrites), so the curve is symmetric in the delay and
-    the width is twice the crossing delay. Returns nan if the crossing lies beyond
-    the delays given.
+    Inputs are set `margin` (fraction) above the coincident threshold;
+    probability is 50% where the threshold curve crosses that level. The
+    EPSGs are identical and either share one input site or sit at
+    mirror-image sites (EPSGbilateral on the two identical dendrites),
+    so the curve is symmetric in the delay and the width is twice the
+    crossing delay.
+
+    Args:
+        delays: The delays of the threshold curve, from 0 [ms].
+        thresholds: The threshold at each delay.
+        margin: How far above the coincident threshold the input is, as
+            a fraction.
+
+    Returns:
+        The width [ms], or nan if the crossing lies beyond the delays
+        given.
     """
     delays, thresholds = (
         np.asarray(delays, float),
@@ -178,19 +226,42 @@ def window(
     input_node=1,
     input_node2=None,
 ):
-    """Coincidence-window width [ms] at `margin`, found directly. Returns (width, th0).
+    """Finds the coincidence-window width at `margin` directly.
 
-    Myoga et al held the input size fixed and varied the delay, and this does the
-    same: find the coincident threshold th0 (one bisection, skipped if threshold0 is
-    given), fix the amplitude at (1 + margin) * th0, and bisect over delay, to
-    delay_tol, for where that input stops spiking. The width is twice that delay.
+    Myoga et al held the input size fixed and varied the delay, and this
+    does the same: find the coincident threshold th0 (one bisection,
+    skipped if threshold0 is given), fix the amplitude at
+    (1 + margin) * th0, and bisect over delay, to delay_tol, for where
+    that input stops spiking. The width is twice that delay.
 
-    It measures the same thing as half_width(delays, threshold_curve(...), margin),
-    but needs ~15 + ~14 runs instead of ~15 per delay of the curve, and has no
-    linear interpolation between grid points. It assumes a single boundary: once
-    the threshold curve rises above (1 + margin) * th0 it stays above. Every saved
-    curve does (their only dips are <0.1% of th0, on the plateau at about twice
-    th0). width is nan if the input still spikes at max_delay.
+    It measures the same thing as
+    half_width(delays, threshold_curve(...), margin), but needs ~15 +
+    ~14 runs instead of ~15 per delay of the curve, and has no linear
+    interpolation between grid points. It assumes a single boundary:
+    once the threshold curve rises above (1 + margin) * th0 it stays
+    above. Every saved curve does (their only dips are <0.1% of th0, on
+    the plateau at about twice th0).
+
+    Args:
+        model: "multi" or "two".
+        margin: How far above th0 the input is, as a fraction.
+        node: The compartment compared with the soma, 1-indexed.
+        v0: Initial potential [mV].
+        epsg_tau: The EPSG (rise, decay) time constants [ms].
+        model_kw: Further model keywords (see threshold()).
+        rel_tol: The relative tolerance of th0.
+        delay_tol: The tolerance of the boundary delay [ms].
+        max_delay: The largest delay tried [ms].
+        threshold0: th0 if already known, to skip its search.
+        stim: "EPSGpair" (both EPSGs at input_node) or, for the
+            multi-compartment model, "EPSGbilateral" (the second at
+            input_node2).
+        input_node: Where the (first) EPSG enters, 1-indexed.
+        input_node2: Where the second EPSG enters, for "EPSGbilateral".
+
+    Returns:
+        (width, th0): the width [ms], nan if the input still spikes at
+        max_delay, and the coincident threshold.
     """
     site, model_kw = (stim, input_node, input_node2), model_kw or {}
     th0 = (
@@ -265,11 +336,35 @@ def probability_trials(
     input_node=1,
     input_node2=None,
 ):
-    """Spike probability per delay from noisy trials, to check half_width's shortcut.
+    """Measures spike probability per delay from noisy trials.
 
-    Noise per trial: the pair's amplitude scaled by N(1, amp_cv), and each EPSG's
-    onset jittered by N(0, jitter) ms independently. stim/input_node/input_node2
-    as in threshold(); for EPSGbilateral the earlier EPSG is always at input_node.
+    This checks half_width's shortcut. Noise per trial: the pair's
+    amplitude scaled by N(1, amp_cv), and each EPSG's onset jittered by
+    N(0, jitter) ms independently. For EPSGbilateral the earlier EPSG is
+    always at input_node.
+
+    Args:
+        model: "multi" or "two".
+        delays: The delays [ms].
+        amplitude: The mean EPSG-pair amplitude.
+        n_trials: Trials per delay.
+        amp_cv: Coefficient of variation of the amplitude.
+        jitter: Standard deviation of each onset [ms].
+        node: The compartment compared with the soma, 1-indexed.
+        v0: Initial potential [mV].
+        epsg_tau: The EPSG (rise, decay) time constants [ms].
+        model_kw: Further model keywords (see threshold()).
+        seed: Seed of the noise generator.
+        workers: See _parallel.map_tasks.
+        executor: See _parallel.map_tasks.
+        stim: "EPSGpair" (both EPSGs at input_node) or, for the
+            multi-compartment model, "EPSGbilateral" (the second at
+            input_node2).
+        input_node: Where the (first) EPSG enters, 1-indexed.
+        input_node2: Where the second EPSG enters, for "EPSGbilateral".
+
+    Returns:
+        An array with the fraction of trials that spiked, per delay.
     """
     site = (stim, input_node, input_node2)
     rng = np.random.default_rng(seed)

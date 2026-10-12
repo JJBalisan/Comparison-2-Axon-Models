@@ -20,11 +20,20 @@ def _panel(ax, t, V, title, labels, t_end, ylabel="Voltage (mV)"):
 
 
 def input_trace(graph, t2, x):
-    """Applied current along the two-compartment solution.
+    """Computes the applied current along the two-compartment solution.
 
-    Graphing.m recomputes this with its own copy of the stimulus code (and indexes
-    the 2-CPT voltage with the multi-compartment time index); here it reuses the
-    model's own stimulus function evaluated on the 2-CPT run instead.
+    Graphing.m recomputes this with its own copy of the stimulus code
+    (and indexes the 2-CPT voltage with the multi-compartment time
+    index); here it reuses the model's own stimulus function evaluated
+    on the 2-CPT run instead.
+
+    Args:
+        graph: The graph settings (see the module docstring).
+        t2: Times of the two-compartment run [ms].
+        x: The two-compartment run's state.
+
+    Returns:
+        The applied current [pA] at each time.
     """
     s = _common.stimulus(
         graph["stimType"],
@@ -43,17 +52,34 @@ def input_trace(graph, t2, x):
 
 
 def graphing(graph, t1, y, t2=None, x=None, t3=None, z=None):
-    """Draw graph["Type"] and return the figure (Graphing.m).
+    """Draws graph["Type"] and returns the figure (Graphing.m).
 
-    (t1, y) is the multi-compartment run, (t2, x) the two-compartment run at
-    graph["node"] and (t3, z) a second two-compartment run (node 5 in
-    Combine_all.m). What each Type uses:
-      Contour, MultiCompartment        t1, y
-      TwoCompartment                   t1, y, where y is a *two-compartment* run
-      ModelComparison, NodeComparison  t1, y, t2, x
-      ModelComparison2                 t2, x, t3, z
-      Input                            t2, x (the current is recomputed on it)
-      Multigraph                       all six
+    What each Type uses:
+
+        Contour, MultiCompartment        t1, y
+        TwoCompartment                   t1, y, where y is a
+                                         *two-compartment* run
+        ModelComparison, NodeComparison  t1, y, t2, x
+        ModelComparison2                 t2, x, t3, z
+        Input                            t2, x (the current is
+                                         recomputed on it)
+        Multigraph                       all six
+
+    Args:
+        graph: The graph settings (see the module docstring).
+        t1: Times of the multi-compartment run [ms].
+        y: The multi-compartment run's state.
+        t2: Times of the two-compartment run at graph["node"].
+        x: That run's state.
+        t3: Times of a second two-compartment run (node 5 in
+            Combine_all.m).
+        z: That run's state.
+
+    Returns:
+        The matplotlib figure.
+
+    Raises:
+        ValueError: For an unknown graph Type.
     """
     node, t_end, kind = graph["node"], graph["tEnd"], graph["Type"]
     fig = plt.figure(figsize=(9, 7))
@@ -190,7 +216,18 @@ def graphing(graph, t1, y, t2=None, x=None, t3=None, z=None):
 
 
 def threshold_figure(x_values, multi, two, title, xlabel):
-    """One panel of Making_Threshold_graphs.m."""
+    """Draws one panel of Making_Threshold_graphs.m.
+
+    Args:
+        x_values: What the sweep varies, per point.
+        multi: The multi-compartment thresholds.
+        two: The two-compartment thresholds.
+        title: The panel title.
+        xlabel: The x-axis label.
+
+    Returns:
+        The matplotlib figure.
+    """
     fig, ax = plt.subplots()
     ax.plot(x_values, multi, linewidth=2, label="Multi-Compartment")
     ax.plot(x_values, two, linewidth=2, label="Two-Compartment")

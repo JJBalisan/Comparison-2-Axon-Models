@@ -14,13 +14,21 @@ _PRELOAD = [
 
 
 def pool_context(method=None):
-    """The multiprocessing context for worker pools: the platform default, except
-    that fork is replaced by forkserver.
+    """Returns the multiprocessing context for worker pools.
 
-    Forking a process that runs threads (a pytest-xdist worker, a numerical library's
-    thread pool) can deadlock the child, and Python 3.12+ warns when it happens;
-    Python 3.14 makes forkserver the Linux default for this reason. macOS and
-    Windows already default to spawn. method: the default to assume (for tests).
+    That is the platform default, except that fork is replaced by
+    forkserver. Forking a process that runs threads (a pytest-xdist
+    worker, a numerical library's thread pool) can deadlock the child,
+    and Python 3.12+ warns when it happens; Python 3.14 makes forkserver
+    the Linux default for this reason. macOS and Windows already default
+    to spawn.
+
+    Args:
+        method: The default start method to assume (for tests); None
+            reads the platform's.
+
+    Returns:
+        A multiprocessing context.
     """
     method = method or multiprocessing.get_context().get_start_method()
     if method != "fork":
@@ -35,20 +43,39 @@ def pool_context(method=None):
 
 
 def process_pool(max_workers=None):
-    """A ProcessPoolExecutor using pool_context(). Use this for every worker pool."""
+    """Returns a ProcessPoolExecutor using pool_context().
+
+    Use this for every worker pool.
+
+    Args:
+        max_workers: The number of processes (default: all CPUs).
+
+    Returns:
+        A concurrent.futures.ProcessPoolExecutor.
+    """
     return futures.ProcessPoolExecutor(
         max_workers=max_workers, mp_context=pool_context()
     )
 
 
 def map_tasks(fn, tasks, workers=None, executor=None, chunksize=1):
-    """[fn(t) for t in tasks], in parallel unless workers == 1.
+    """Computes [fn(t) for t in tasks], in parallel unless workers == 1.
 
-    executor: an existing pool to run on. Scripts that make several parallel calls
-    should open one process_pool() and pass it to each: a fresh pool per call
-    re-imports msoaxon in every worker and starts with an empty pre-stimulus cache.
-    Otherwise a pool of `workers` processes (default: all CPUs) is made for this call.
-    fn must be a module-level function so the workers can import it.
+    Args:
+        fn: The function to apply; it must be a module-level function
+            so the workers can import it.
+        tasks: The arguments, one per call.
+        workers: Without an executor, the size of a pool made for this
+            call (default: all CPUs); 1 (or a single task) runs
+            in-process.
+        executor: An existing pool to run on. Scripts that make several
+            parallel calls should open one process_pool() and pass it to
+            each: a fresh pool per call re-imports msoaxon in every
+            worker and starts with an empty pre-stimulus cache.
+        chunksize: Tasks sent to a worker at a time.
+
+    Returns:
+        The results, in the order of `tasks`.
     """
     if executor is not None:
         return list(executor.map(fn, tasks, chunksize=chunksize))

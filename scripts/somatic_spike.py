@@ -29,6 +29,7 @@ CASES = {
 
 
 def main():
+    """Parses the command line and runs the somatic-spike protocol and saves the figure and JSON."""
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,

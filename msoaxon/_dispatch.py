@@ -20,11 +20,34 @@ def run_model(
     input_node2=None,
     **kw,
 ):
-    """mso_axon (model="multi") or two_cpt (model="two") with the shared arguments.
+    """Runs mso_axon (model="multi") or two_cpt (model="two").
 
-    mem, morph and input_node2 exist only in the multi-compartment model, so passing
-    them with model="two" raises instead of being dropped. Other keywords (max_step,
-    stop_on_spike, r1, tau_est, ...) go to the model unchanged.
+    Args:
+        model: "multi" or "two".
+        stim: The stimulus name (see mso_axon).
+        start: Stimulus start [ms].
+        stop: Stimulus stop [ms].
+        I: Stimulus amplitude.
+        node: The compared compartment, 1-indexed.
+        t_end: End of the run [ms].
+        v0: Initial (and default leak reversal) potential [mV].
+        input_node: Where the stimulus enters, 1-indexed.
+        syn: Synaptic waveform settings (SynParams), or None.
+        model_type: Which channels are active.
+        mem: Channel overrides from multi.membrane(); multi only.
+        morph: A multi-compartment morphology; multi only.
+        input_node2: Second input site for "EPSGbilateral"; multi only.
+        **kw: Further model keywords (max_step, stop_on_spike, r1,
+            tau_est, ...), passed on unchanged.
+
+    Returns:
+        The model's (t, x).
+
+    Raises:
+        ValueError: If model is neither "multi" nor "two", or if mem,
+            morph or input_node2 is given with model="two" (they exist
+            only in the multi-compartment model, so they are not
+            silently dropped).
     """
     if model == "multi":
         return multi.mso_axon(
@@ -83,13 +106,32 @@ def response(
     factor,
     **kw,
 ):
-    """(spiked, peak): whether compartment `node` rose `factor` mV above the soma
-    before t_end (see spikes()), and the largest axon - soma of the run [mV].
+    """Runs one stimulus and reports whether it spiked and how close it came.
 
-    For a run that didn't spike the peak says how close it came, which lets a
-    search interpolate towards the threshold instead of halving (_bisect.crossing);
-    for one that did, the run stopped at the crossing, so the peak is ~factor.
-    The settled stop keeps the peak: it only ends runs whose response has peaked.
+    For a run that didn't spike the peak says how close it came, which
+    lets a search interpolate towards the threshold instead of halving
+    (_bisect.crossing); for one that did, the run stopped at the
+    crossing, so the peak is ~factor. The settled stop keeps the peak:
+    it only ends runs whose response has peaked.
+
+    Args:
+        model: "multi" or "two".
+        stim: The stimulus name.
+        start: Stimulus start [ms].
+        stop: Stimulus stop [ms].
+        I: Stimulus amplitude.
+        node: The compartment compared with the soma, 1-indexed.
+        t_end: End of the run [ms].
+        v0: Initial potential [mV].
+        input_node: Where the stimulus enters, 1-indexed.
+        syn: Synaptic waveform settings (SynParams), or None.
+        factor: The spike criterion: axon - soma [mV].
+        **kw: Further run_model keywords.
+
+    Returns:
+        (spiked, peak): whether compartment `node` rose `factor` mV
+        above the soma before t_end (as in spikes()), and the largest
+        axon - soma of the run [mV].
     """
     t, x = run_model(
         model,
@@ -128,15 +170,33 @@ def spikes(
     factor,
     **kw,
 ):
-    """True if compartment `node` rises `factor` mV above the soma before t_end.
+    """Returns whether compartment `node` rises `factor` mV above the soma.
 
-    The run stops at that first spike (stop_on_spike) or, once the input is over,
-    as soon as no spike can follow (stop_when_settled). Both end before t_end, so
-    the final state tells them apart: a spike stop ends with axon - soma at
-    `factor`, a settled stop at or below factor / 2 (see _solve.settled_event).
-    The test sits at 0.75 * factor, away from both: the settled event can fire
-    exactly as axon - soma falls through factor / 2, so testing at factor / 2
+    The run stops at that first spike (stop_on_spike) or, once the input
+    is over, as soon as no spike can follow (stop_when_settled). Both
+    end before t_end, so the final state tells them apart: a spike stop
+    ends with axon - soma at `factor`, a settled stop at or below
+    factor / 2 (see _solve.settled_event). The test sits at
+    0.75 * factor, away from both: the settled event can fire exactly as
+    axon - soma falls through factor / 2, so testing at factor / 2
     itself misread three near-threshold ramp runs as spikes.
+
+    Args:
+        model: "multi" or "two".
+        stim: The stimulus name.
+        start: Stimulus start [ms].
+        stop: Stimulus stop [ms].
+        I: Stimulus amplitude.
+        node: The compartment compared with the soma, 1-indexed.
+        t_end: End of the run [ms].
+        v0: Initial potential [mV].
+        input_node: Where the stimulus enters, 1-indexed.
+        syn: Synaptic waveform settings (SynParams), or None.
+        factor: The spike criterion: axon - soma [mV].
+        **kw: Further run_model keywords.
+
+    Returns:
+        True if the run spiked before t_end.
     """
     t, x = run_model(
         model,

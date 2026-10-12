@@ -27,6 +27,7 @@ DEFAULTS = {
 
 
 def main():
+    """Parses the command line and runs the two models and draws or saves the figure."""
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,

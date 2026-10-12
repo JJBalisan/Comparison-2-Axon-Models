@@ -11,10 +11,18 @@ EPSG_TAU = (
 
 
 def epsg_unitary(t, tau=EPSG_TAU):
-    """Unitary EPSG waveform (difference of exponentials) with peak 1.
+    """Returns the unitary EPSG waveform (difference of exponentials).
 
-    The default kinetics keep the MATLAB expression, peak-normalised by 0.21317,
-    so results are unchanged; other (rise, decay) pairs are normalised exactly.
+    The peak is 1. The default kinetics keep the MATLAB expression,
+    peak-normalised by 0.21317, so results are unchanged; other
+    (rise, decay) pairs are normalised exactly.
+
+    Args:
+        t: Time since onset [ms]; zero for t <= 0.
+        tau: The (rise, decay) time constants [ms].
+
+    Returns:
+        The waveform at t.
     """
     if tau == EPSG_TAU:
         return (1 / 0.21317) * (t > 0) * (np.exp(-t / 0.18) - np.exp(-t / 0.1))
@@ -29,6 +37,17 @@ class SynParams:
     """Stand-in for the MATLAB `Syn` struct.
 
     Only the fields the chosen stimulus uses need to be meaningful.
+
+    Attributes:
+        t_end: End of the conductance table [ms].
+        freq: Input frequency [Hz].
+        gE: EPSG conductance (non-meaningful units).
+        VsynE: Excitatory reversal potential [mV].
+        random_in: RNG seed.
+        diff: Time offset of the second input for SynapticPair [ms].
+        f: Sine frequency [Hz].
+        epsg_tau: EPSG/EPSGpair (rise, decay) [ms]; Myoga et al 2014
+            used decay 0.3.
     """
 
     t_end: float = 20.0
@@ -42,10 +61,17 @@ class SynParams:
 
 
 def synaptic(syn: SynParams):
-    """Return (tSyn, gSyn): gammatone-filtered, rectified noise convolved with an EPSG.
+    """Makes the synaptic conductance: filtered noise convolved with an EPSG.
 
-    numpy's RNG differs from MATLAB's rng/randn, so the same seed gives a
-    different (statistically equivalent) noise realisation.
+    The noise is gammatone-filtered and rectified. numpy's RNG differs
+    from MATLAB's rng/randn, so the same seed gives a different
+    (statistically equivalent) noise realisation.
+
+    Args:
+        syn: The settings (t_end, freq, gE, random_in).
+
+    Returns:
+        (tSyn, gSyn): the time grid [ms] and the conductance on it.
     """
     dt = 0.01
     t = np.arange(0, syn.t_end + dt / 2, dt)
@@ -71,5 +97,17 @@ def synaptic(syn: SynParams):
 
 
 def interp_g(t_syn, g_syn, t):
-    """interp1q, but 0 instead of NaN outside the table (TwoCptODE's guard, applied everywhere)."""
+    """Interpolates the conductance table like interp1q, but 0 outside it.
+
+    MATLAB's interp1q gives NaN outside the table; TwoCptODE's guard
+    against that is applied everywhere.
+
+    Args:
+        t_syn: The table's times [ms].
+        g_syn: The table's conductances.
+        t: The time [ms].
+
+    Returns:
+        The conductance at t as a float.
+    """
     return float(np.interp(t, t_syn, g_syn, left=0.0, right=0.0))

@@ -58,8 +58,11 @@ def _chain_jac_sparsity():
 
 
 def _tree_jac_sparsity(n, parent, child):
-    """_chain_jac_sparsity for any tree: dV couples to its own V, to each V it shares
-    an edge (parent[k], child[k]) with, and to its own gates; each gate to its own V.
+    """Returns _chain_jac_sparsity's pattern for any tree.
+
+    dV couples to its own V, to each V it shares an edge
+    (parent[k], child[k]) with, and to its own gates; each gate to its
+    own V.
     """
     I = sparse.eye(n, format="csr")
     adj = sparse.coo_matrix(
@@ -129,29 +132,48 @@ def with_dendrites(
     conserve_totals=True,
     dendrite_ra=R_AXIAL,
 ):
-    """Lehnert et al 2014's dendritic variant (their Fig. 8), appended to the axon.
+    """Builds Lehnert et al 2014's dendritic variant (their Fig. 8).
 
-    Two identical unbranched dendrites (lateral = ipsilateral input, medial =
-    contralateral) of `length` um and `diameter` um, `n_seg` compartments each,
-    attached to the soma. The soma shrinks so total membrane stays 8750 um^2
-    ("the somatic surface was reduced to 2467 um^2"); its Na density is scaled up
-    so total Na is unchanged. Dendrites have no Na or KHT; KLT and h decay
-    exponentially with distance from the soma (length constant 74 um, Mathews et
-    al 2010), starting from the soma's densities; leak and capacitance as at the
-    soma. The paper doesn't give axial resistivity, so the model's 100 Ohm cm is the
-    default; dendrite_ra sets it for the dendrite compartments only (Mathews et al
-    2010 used 200 Ohm cm for soma and dendrites). The soma and axon keep 100.
+    Two identical unbranched dendrites (lateral = ipsilateral input,
+    medial = contralateral) of `length` um and `diameter` um, `n_seg`
+    compartments each, attached to the soma and appended after the
+    axon. The soma shrinks so total membrane stays 8750 um^2 ("the
+    somatic surface was reduced to 2467 um^2"); its Na density is scaled
+    up so total Na is unchanged. Dendrites have no Na or KHT; KLT and h
+    decay exponentially with distance from the soma (length constant
+    74 um, Mathews et al 2010), starting from the soma's densities; leak
+    and capacitance as at the soma. The paper doesn't give axial
+    resistivity, so the model's 100 Ohm cm is the default.
 
-    The paper doesn't say whether total KLT and h were kept when they were spread
-    along the dendrites; it does say so for Na. conserve_totals=True (default)
-    scales soma + dendrite KLT and h so their totals equal the lumped model's; it
-    reproduces the paper's finding that this variant tunes "almost identically" to
-    the lumped model (EPSG-pair thresholds within 12%). conserve_totals=False starts
-    the gradient at the soma's Table 2 density, which halves total KLT (thresholds
-    up to 50% lower, somatic spike 21-30 mV).
+    The paper doesn't say whether total KLT and h were kept when they
+    were spread along the dendrites; it does say so for Na.
 
-    Compartments (1-indexed, as for input_node): 46..45+n_seg lateral dendrite,
-    proximal to distal; the next n_seg the medial dendrite.
+    Compartments (1-indexed, as for input_node): 46..45+n_seg lateral
+    dendrite, proximal to distal; the next n_seg the medial dendrite.
+
+    Args:
+        length: Dendrite length [um].
+        diameter: Dendrite diameter [um].
+        n_seg: Compartments per dendrite.
+        klt_lambda: Length constant of the KLT and h decay [um].
+        conserve_totals: True (default) scales soma + dendrite KLT and h
+            so their totals equal the lumped model's; it reproduces the
+            paper's finding that this variant tunes "almost identically"
+            to the lumped model (EPSG-pair thresholds within 12%). False
+            starts the gradient at the soma's Table 2 density, which
+            halves total KLT (thresholds up to 50% lower, somatic spike
+            21-30 mV).
+        dendrite_ra: Axial resistivity of the dendrite compartments only
+            [Ohm cm] (Mathews et al 2010 used 200 Ohm cm for soma and
+            dendrites). The soma and axon keep 100.
+
+    Returns:
+        A morphology (see the comment above LUMPED), with `lateral` and
+        `medial` holding each dendrite's 1-indexed compartment numbers.
+
+    Raises:
+        ValueError: If the dendrites need more membrane than the lumped
+            soma has.
     """
     n_d = 2 * n_seg
     n = N + n_d
@@ -240,7 +262,15 @@ def with_dendrites(
 
 
 def axial_current(V, morph=LUMPED):
-    """Axial current density [pA/um^2], sign convention as in msoAxon.m."""
+    """Returns the axial current density, sign convention as in msoAxon.m.
+
+    Args:
+        V: Voltage per compartment [mV].
+        morph: The morphology.
+
+    Returns:
+        The axial current density per compartment [pA/um^2].
+    """
     if morph.chain:  # msoAxon.m's own float order
         flow = morph.g_ax * (V[:-1] - V[1:])  # from i to i+1 [mA]
         I = np.zeros_like(V)
@@ -280,10 +310,24 @@ def axial_current(V, morph=LUMPED):
 
 
 def external_current(t, V, stim_type, s, input_node, sa=C.SA):
-    """Input current density [pA/um^2] as (0-based compartment, value).
+    """Returns the input current density as (0-based compartment, value).
 
-    Only one compartment ever receives input. Negative is depolarising (it
-    enters dV with a minus). "none" means no stimulus.
+    Only one compartment ever receives input. Negative is depolarising
+    (it enters dV with a minus). "none" means no stimulus. See the table
+    above for how this differs from two.applied_current.
+
+    Args:
+        t: Time [ms].
+        V: Voltage per compartment [mV].
+        stim_type: The stimulus name, or "none".
+        s: The stimulus settings (_common.stimulus).
+        input_node: Where the stimulus enters, 1-indexed (step always
+            enters the soma).
+        sa: Membrane area per compartment [um^2].
+
+    Returns:
+        (k, current density [pA/um^2]); (0, 0.0) when the stimulus is
+        off.
     """
     k = input_node - 1
     if stim_type == "ramp":
@@ -333,7 +377,22 @@ def external_current(t, V, stim_type, s, input_node, sa=C.SA):
 
 
 def bilateral_current(t, V, s, a, b, sa):
-    """EPSGbilateral: first EPSG at compartment a (0-based) at s.start, second at b at s.stop."""
+    """Returns the EPSGbilateral input currents.
+
+    The first EPSG is at compartment a (0-based) at s.start, the second
+    at b at s.stop.
+
+    Args:
+        t: Time [ms].
+        V: Voltage per compartment [mV].
+        s: The stimulus settings (_common.stimulus).
+        a: The first input's compartment, 0-based.
+        b: The second input's compartment, 0-based.
+        sa: Membrane area per compartment [um^2].
+
+    Returns:
+        ((a, density), (b, density)), densities in pA/um^2.
+    """
     te = t - s.start
     td = s.stop - s.start
     ia = (
@@ -362,21 +421,38 @@ def membrane(
     morph=None,
     dendrite_klt_scale=1.0,
 ):
-    """Per-compartment channel overrides for the multi-compartment model.
+    """Builds per-compartment channel overrides for the multi model.
 
-    Defaults reproduce msoAxon.m exactly. The knobs are the ones the mature-MSO
-    literature points to:
-    - soma_klt_scale / ais_klt_scale: multiply gKLT at the soma / the two AIS
-      compartments. Kv1 channels rise ~4x from P14 to P23 and set the small mature
-      somatic spike (Scott et al 2005, J Neurosci 25:7887).
-    - soma_na_vhalf: somatic Na steady-state inactivation midpoint [mV]; Scott et
-      al 2010 (J Neurosci 30:2039) measured -77 at the soma.
-    - rebalance_rest: set each compartment's leak reversal so the net current at
-      v0 is zero with gating at steady state, and start from that steady state.
-      msoAxon.m does neither, so stronger KLT would otherwise shift rest.
-    - morph: the morphology these arrays are for (default: msoAxon.m's chain).
-    - dendrite_klt_scale: multiply gKLT in the dendrite compartments (with_dendrites
-      only). Mathews et al 2010 found dendritic Kv1 sharpens EPSPs.
+    Defaults reproduce msoAxon.m exactly. The knobs are the ones the
+    mature-MSO literature points to.
+
+    Args:
+        v0: The resting potential the leak reversals are built from
+            [mV].
+        soma_klt_scale: Multiplies gKLT at the soma. Kv1 channels rise
+            ~4x from P14 to P23 and set the small mature somatic spike
+            (Scott et al 2005, J Neurosci 25:7887).
+        ais_klt_scale: Multiplies gKLT at the two AIS compartments.
+        soma_na_vhalf: Somatic Na steady-state inactivation midpoint
+            [mV]; Scott et al 2010 (J Neurosci 30:2039) measured -77 at
+            the soma.
+        rebalance_rest: Set each compartment's leak reversal so the net
+            current at v0 is zero with gating at steady state, and start
+            from that steady state. msoAxon.m does neither, so stronger
+            KLT would otherwise shift rest.
+        morph: The morphology these arrays are for (default: msoAxon.m's
+            chain).
+        dendrite_klt_scale: Multiplies gKLT in the dendrite compartments
+            (with_dendrites only). Mathews et al 2010 found dendritic Kv1
+            sharpens EPSPs.
+
+    Returns:
+        A SimpleNamespace with key, morph_key, morph, g_na, g_klt,
+        na_vhalf, vlk and y0_gates (None unless rebalance_rest).
+
+    Raises:
+        ValueError: If dendrite_klt_scale is set for a morphology
+            without dendrites.
     """
     morph = morph or LUMPED
     if dendrite_klt_scale != 1.0 and morph.n == N:
@@ -432,9 +508,12 @@ def membrane(
 def _rhs(
     t, x, stim_type, s, input_node, active, mem, morph=LUMPED, input_node2=None
 ):
-    """Right-hand side. Arithmetic is kept expression-for-expression identical to
-    msoAxon.m's order so results are bit-for-bit stable; the speed comes from
-    writing into one output array and skipping gates that are switched off.
+    """Computes the right-hand side.
+
+    Arithmetic is kept expression-for-expression identical to
+    msoAxon.m's order so results are bit-for-bit stable; the speed comes
+    from writing into one output array and skipping gates that are
+    switched off.
     """
     n = morph.n
     V, m, h, p, w, z, a = x.reshape(7, n)
@@ -492,36 +571,61 @@ def mso_axon(
     input_node2=None,
     stop_when_settled=False,
 ):
-    """Run the multi-compartment model. Returns (t, y) with y shaped (n_times, 7*n).
+    """Runs the multi-compartment model.
 
-    Arguments shared with two_cpt (compartments are 1-indexed, times in ms):
-    - stim_type: one of MSO_STIM_TYPES. What `start`, `stop` and `I` mean depends
-      on it:
-        step, sine: current [pA] on from start to stop (step always into the soma)
-        ramp: rises from 0 at start to I [pA] at stop, then off
-        ramp2: rises with slope I/(stop - start) from start, then holds at I [pA]
-        EPSG: peak conductance [nS] of the unitary EPSG waveform, onset at start
-          (in this model it is also cut off at stop)
-        EPSGpair: two EPSGs at input_node, onsets at start and stop
-        EPSGbilateral: first EPSG at input_node at start, second at input_node2 at stop
-        Synaptic, SynapticPair: I is ignored; the conductance comes from `syn`,
-          applied from start to stop
-    - node: the compartment stop_on_spike compares with the soma (msoAxon.m
-      itself ignores it). node=1 is the soma, so stop_on_spike would never fire.
-    - model_type: which channels are active (ACTIVE_GATES).
-    - t_end: end time [ms]; v0: initial and (unless mem says otherwise) leak
-      reversal potential [mV]; input_node: where the stimulus enters.
-    - syn: synaptic waveform settings (SynParams), also the EPSG time constants.
-    max_step defaults to 0.1*t_end, ode15s's default MaxStep.
-    stop_on_spike: if given (mV), stop as soon as compartment `node` rises that far
-    above the soma; t then ends before t_end.
-    stop_when_settled: with stop_on_spike, also stop once the input is over and no
-    spike can follow (_solve.settled_event), for callers that only need yes/no.
-    mem: channel overrides from membrane() (default: msoAxon.m's own).
-    morph: LUMPED or with_dendrites(); defaults to mem's morphology, else LUMPED.
-    input_node2: second input site for "EPSGbilateral" (first EPSG at input_node
-    at `start`, second at input_node2 at `stop`), e.g. the middle compartment of
-    each dendrite.
+    Compartments are 1-indexed and times in ms, as in msoAxon.m.
+
+    Args:
+        stim_type: One of MSO_STIM_TYPES. What `start`, `stop` and `I`
+            mean depends on it:
+            step, sine: current [pA] on from start to stop (step always
+                into the soma);
+            ramp: rises from 0 at start to I [pA] at stop, then off;
+            ramp2: rises with slope I/(stop - start) from start, then
+                holds at I [pA];
+            EPSG: peak conductance [nS] of the unitary EPSG waveform,
+                onset at start (in this model it is also cut off at
+                stop);
+            EPSGpair: two EPSGs at input_node, onsets at start and stop;
+            EPSGbilateral: first EPSG at input_node at start, second at
+                input_node2 at stop;
+            Synaptic, SynapticPair: I is ignored; the conductance comes
+                from `syn`, applied from start to stop.
+        start: See stim_type [ms].
+        stop: See stim_type [ms].
+        I: See stim_type.
+        node: The compartment stop_on_spike compares with the soma
+            (msoAxon.m itself ignores it). node=1 is the soma, so
+            stop_on_spike would never fire.
+        model_type: Which channels are active (ACTIVE_GATES).
+        t_end: End time [ms].
+        v0: Initial and (unless mem says otherwise) leak reversal
+            potential [mV].
+        input_node: Where the stimulus enters.
+        syn: Synaptic waveform settings (SynParams), also the EPSG time
+            constants.
+        max_step: Largest solver step; defaults to 0.1 * t_end, ode15s's
+            default MaxStep.
+        stop_on_spike: If given (mV), stop as soon as compartment `node`
+            rises that far above the soma; t then ends before t_end.
+        mem: Channel overrides from membrane() (default: msoAxon.m's
+            own).
+        morph: LUMPED or with_dendrites(); defaults to mem's morphology,
+            else LUMPED.
+        input_node2: Second input site for "EPSGbilateral" (first EPSG
+            at input_node at `start`, second at input_node2 at `stop`),
+            e.g. the middle compartment of each dendrite.
+        stop_when_settled: With stop_on_spike, also stop once the input
+            is over and no spike can follow (_solve.settled_event), for
+            callers that only need yes/no.
+
+    Returns:
+        (t, y) with y shaped (n_times, 7 * n); see the module docstring
+        for the state layout.
+
+    Raises:
+        ValueError: For unknown names, out-of-range compartments, a
+            missing input_node2, or a mem built for another morphology.
     """
     morph = morph or (mem.morph if mem is not None else LUMPED)
     _common.check_args(

@@ -37,32 +37,76 @@ G_LK = np.concatenate([[0.0005, 0.0005, 0.0005], _alternating(0.0002, 0.05)])
 
 
 def minf(V):
-    """Na activation: Scott et al 2010."""
+    """Na activation: Scott et al 2010.
+
+    Args:
+        V: Membrane potential [mV].
+
+    Returns:
+        The steady-state open fraction.
+    """
     return 1.0 / (1.0 + np.exp((V + 46.0) / -11.0))
 
 
 def hinf(V, vhalf=62.5):
-    """Na inactivation: Scott et al 2010. vhalf is the negated midpoint (default -62.5 mV)."""
+    """Na inactivation: Scott et al 2010.
+
+    Args:
+        V: Membrane potential [mV].
+        vhalf: The negated midpoint [mV] (default: -62.5 mV).
+
+    Returns:
+        The steady-state open fraction.
+    """
     return 1.0 / (1.0 + np.exp((V + vhalf) / 7.77))
 
 
 def pinf(V):
-    """KHT activation: Rothman & Manis 2003, without their slow activation gate."""
+    """KHT activation: Rothman & Manis 2003, without their slow gate.
+
+    Args:
+        V: Membrane potential [mV].
+
+    Returns:
+        The steady-state open fraction.
+    """
     return 1.0 / (1.0 + np.exp(-(V + 23.0) / 6.0))
 
 
 def winf(V):
-    """KLT activation: Mathews et al 2010."""
+    """KLT activation: Mathews et al 2010.
+
+    Args:
+        V: Membrane potential [mV].
+
+    Returns:
+        The steady-state open fraction.
+    """
     return 1.0 / (1.0 + np.exp((V + 57.34) / -11.7))
 
 
 def zinf(V):
-    """KLT inactivation: Mathews et al 2010; never below 0.27 (non-inactivating part)."""
+    """KLT inactivation: Mathews et al 2010.
+
+    Args:
+        V: Membrane potential [mV].
+
+    Returns:
+        The steady-state open fraction; never below 0.27 (the
+        non-inactivating part).
+    """
     return (1 - 0.27) / (1.0 + np.exp((V + 67.0) / 6.16)) + 0.27
 
 
 def ainf(V):
-    """Activation of the h current: Baumann et al 2013."""
+    """Activation of the h current: Baumann et al 2013.
+
+    Args:
+        V: Membrane potential [mV].
+
+    Returns:
+        The steady-state open fraction.
+    """
     return 1.0 / (1.0 + np.exp(0.1 * (V + 80.4)))
 
 
@@ -74,41 +118,88 @@ _A_TEMP = 3 ** ((32 - 35) / 10)  # Q10 of 3 from 32 C
 
 
 def taum(V):
-    """Na activation: Scott et al 2010 in msoAxon.m (TwoCpt.m credits Rothman-Manis)."""
+    """Na activation: Scott et al 2010 in msoAxon.m.
+
+    TwoCpt.m credits Rothman-Manis.
+
+    Args:
+        V: Membrane potential [mV].
+
+    Returns:
+        The time constant [ms].
+    """
     return (0.141 + (-0.0826 / (1 + np.exp((-20.5 - V) / 10.8)))) / 3
 
 
 def tauh(V):
-    """Na inactivation: Scott et al 2010."""
+    """Na inactivation: Scott et al 2010.
+
+    Args:
+        V: Membrane potential [mV].
+
+    Returns:
+        The time constant [ms].
+    """
     return (4 + (-3.74 / (1 + np.exp((-40.6 - V) / 5.05)))) / 3
 
 
 def taup(V):
-    """KHT activation: Rothman & Manis 2003, 22 C adjusted to 35 C."""
+    """KHT activation: Rothman & Manis 2003, 22 C adjusted to 35 C.
+
+    Args:
+        V: Membrane potential [mV].
+
+    Returns:
+        The time constant [ms].
+    """
     return _P_TEMP * (
         100 / (4 * np.exp((V + 60) / 32) + 5 * np.exp(-(V + 60) / 22)) + 5
     )
 
 
 def tauw(V):
-    """KLT activation: Mathews et al 2010."""
+    """KLT activation: Mathews et al 2010.
+
+    Args:
+        V: Membrane potential [mV].
+
+    Returns:
+        The time constant [ms].
+    """
     return (
         21.5 / (6 * np.exp((V + 60) / 7) + 24 * np.exp(-(V + 60) / 50.6)) + 0.35
     )
 
 
 def tauz(V):
-    """KLT inactivation: Mathews et al 2010."""
+    """KLT inactivation: Mathews et al 2010.
+
+    Args:
+        V: Membrane potential [mV].
+
+    Returns:
+        The time constant [ms].
+    """
     return 170 / (5 * np.exp((V + 60) / 10) + np.exp(-(V + 70) / 8)) + 10.7
 
 
 def taua(V):
-    """Activation of the h current: Baumann et al 2013, 32 C adjusted to 35 C."""
+    """Activation of the h current: Baumann et al 2013.
+
+    Measured at 32 C, adjusted to 35 C.
+
+    Args:
+        V: Membrane potential [mV].
+
+    Returns:
+        The time constant [ms].
+    """
     return _A_TEMP * (79 + 417 * np.exp(-((V + 61.5) ** 2) / 800))
 
 
 # --- Conductance fractions at rest -----------------------------------------------
 def _fractions(v_rest=V_REST_REF):
+    """Returns the KLT, h and Na fractions of the resting conductance."""
     h = G_H * ainf(v_rest)
     na = G_NA * minf(v_rest) ** 4 * (0.993 * hinf(v_rest) + 0.007)
     kht = G_KHT * pinf(v_rest)

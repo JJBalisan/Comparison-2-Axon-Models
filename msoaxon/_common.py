@@ -35,7 +35,21 @@ def check_args(
     stim_types=STIM_TYPES,
     n_max=C.N_CPT,
 ):
-    """Reject inputs that numpy's negative indexing would otherwise accept silently."""
+    """Rejects inputs that numpy's negative indexing would accept silently.
+
+    Args:
+        stim_type: The stimulus name; must be one of `stim_types`.
+        model_type: The channel set; must be one of MODEL_TYPES.
+        node: The compared compartment, 1-indexed, min_node..N_CPT.
+        input_node: Where the stimulus enters, 1-indexed, 1..n_max.
+        min_node: The smallest allowed `node` (2 in two_cpt, where node
+            1 would be the soma itself).
+        stim_types: The stimulus names the calling model accepts.
+        n_max: The number of compartments an input may enter.
+
+    Raises:
+        ValueError: If any argument is out of range or unknown.
+    """
     if stim_type not in stim_types:
         raise ValueError(f"unknown stimType {stim_type!r}")
     if model_type not in MODEL_TYPES:
@@ -53,7 +67,22 @@ def check_args(
 
 
 def stimulus(stim_type, start, stop, I, t_end, syn):
-    """Bundle stimulus settings (what TwoCpt.m stored on P)."""
+    """Bundles the stimulus settings (what TwoCpt.m stored on P).
+
+    Args:
+        stim_type: The stimulus name; "sine" and the synaptic inputs
+            take extra settings from `syn`.
+        start: Stimulus start [ms].
+        stop: Stimulus stop [ms] (its meaning depends on stim_type).
+        I: Stimulus amplitude (pA or nS, depending on stim_type).
+        t_end: End of the run [ms].
+        syn: A SynParams with the waveform settings.
+
+    Returns:
+        A SimpleNamespace with start, stop, I, t_end and epsg_tau, plus
+        f for "sine", and t_syn, g_syn, VsynE and diff for the
+        synaptic inputs.
+    """
     s = types.SimpleNamespace(
         start=start, stop=stop, I=I, t_end=t_end, epsg_tau=tuple(syn.epsg_tau)
     )
@@ -66,9 +95,10 @@ def stimulus(stim_type, start, stop, I, t_end, syn):
 
 
 def _stops(rhs, axon_col, stop_on_spike, stop_when_settled, stim_type, s, n_v):
-    """The terminal events for a run: none, the spike stop, or both stops.
+    """Returns the terminal events for a run: none, the spike stop, or both.
 
-    n_v: how many leading state entries are voltages (2 for two_cpt, n for mso_axon).
+    n_v: how many leading state entries are voltages (2 for two_cpt, n
+    for mso_axon).
     """
     if stop_on_spike is None:
         if stop_when_settled:
