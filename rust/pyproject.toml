@@ -1,0 +1,26 @@
+# The optional Rust right-hand side for msoaxon's 45-compartment model.
+# msoaxon itself stays pure Python (hatchling); this package is its `fast`
+# extra. Metadata is static, so uv can lock it without building it.
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "msoaxon-fast"
+version = "0.1.0"
+description = "Rust right-hand side for msoaxon's 45-compartment model"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.maturin]
+module-name = "msoaxon_fast"
+features = ["pyo3/extension-module"]
+
+# rebuild the extension whenever its sources change (`uv sync --extra fast`)
+[tool.uv]
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "Cargo.toml" },
+  { file = "Cargo.lock" },
+  { file = "src/**/*.rs" },
+]

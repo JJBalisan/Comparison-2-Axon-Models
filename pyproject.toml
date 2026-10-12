@@ -5,6 +5,14 @@ description = "Python port of the 2-compartment vs 45-compartment MSO axon model
 requires-python = ">=3.11"
 dependencies = ["numpy", "scipy", "matplotlib"]
 
+[project.optional-dependencies]
+# the Rust right-hand side of the 45-compartment model (rust/, built with
+# maturin; needs cargo). Without it msoaxon runs the numpy reference.
+fast = ["msoaxon-fast"]
+
+[tool.uv.sources]
+msoaxon-fast = { path = "rust" }
+
 [dependency-groups]
 dev = ["pytest", "h5py", "pytest-cov>=7.1.0", "pytest-xdist>=3.8.0"]
 
@@ -20,7 +28,13 @@ addopts = "-n auto"  # pytest-xdist: one worker per CPU; -n 0 runs serially (e.g
 markers = ["slow: end-to-end script runs (CI runs them on one Python version only)"]
 # forking a multi-threaded process can deadlock; _parallel.pool_context avoids it,
 # so a pool that still forks from a threaded process fails the test
-filterwarnings = ['error:This process .* is multi-threaded:DeprecationWarning']
+# the first fast run's DriftWarning is noise here, except in tests/test_fast.py,
+# whose pytest.warns still sees it. Matched by message: naming the class would
+# import msoaxon before coverage starts
+filterwarnings = [
+  'error:This process .* is multi-threaded:DeprecationWarning',
+  'ignore:msoaxon is running its Rust right-hand side:UserWarning',
+]
 
 [tool.coverage.run]
 source = ["msoaxon"]

@@ -26,6 +26,7 @@ def run_model(
     mem: types.SimpleNamespace | None = None,
     morph: types.SimpleNamespace | None = None,
     input_node2: int | None = None,
+    mode: str | None = None,
     **kw: Any,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Runs mso_axon (model="multi") or two_cpt (model="two").
@@ -45,6 +46,9 @@ def run_model(
         mem: Channel overrides from multi.membrane(); multi only.
         morph: A multi-compartment morphology; multi only.
         input_node2: Second input site for "EPSGbilateral"; multi only.
+        mode: "fast", "exact" or None, as in mso_axon; multi only (the
+            two-compartment model has only its numpy path, so it ignores
+            mode, and a search over both models can pass it in model_kw).
         **kw: Further model keywords (max_step, stop_on_spike, r1,
             tau_est, ...), passed on unchanged.
 
@@ -72,6 +76,7 @@ def run_model(
             mem=mem,
             morph=morph,
             input_node2=input_node2,
+            mode=mode,
             **kw,
         )
     if model != "two":

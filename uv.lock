@@ -661,6 +661,11 @@ dependencies = [
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 
+[package.optional-dependencies]
+fast = [
+    { name = "msoaxon-fast" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "h5py" },
@@ -672,9 +677,11 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "matplotlib" },
+    { name = "msoaxon-fast", marker = "extra == 'fast'", directory = "rust" },
     { name = "numpy" },
     { name = "scipy" },
 ]
+provides-extras = ["fast"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -683,6 +690,11 @@ dev = [
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
 ]
+
+[[package]]
+name = "msoaxon-fast"
+version = "0.1.0"
+source = { directory = "rust" }
 
 [[package]]
 name = "numpy"

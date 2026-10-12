@@ -28,7 +28,11 @@ caught here, by design.
 t_end (t_last) is compared exactly: every case runs to t_end (none stops on a
 spike), and the solver lands on it exactly on every platform.
 
-Regenerate only when a change in results is intended:
+Every multi case runs in both modes: "exact" (multi._rhs, which the traces
+come from) and "fast" (its Rust port; skipped without the fast extra), to the
+same tolerance.
+
+Regenerate only when a change in results is intended (always from "exact"):
 
     uv run python tests/test_golden.py
 """
@@ -40,7 +44,7 @@ import numpy as np
 import pytest
 
 import msoaxon
-from msoaxon import multi, two
+from msoaxon import _fast, multi, two
 
 HERE = pathlib.Path(__file__).resolve().parent
 GOLDEN = HERE / "golden_traces.json"
@@ -260,9 +264,11 @@ def cases():
 CASES = cases()
 
 
-def sample(name):
+def sample(name, mode="exact"):
     """[t_end reached, soma samples, axon samples] for one case."""
     model, kw, axon = CASES[name]
+    if model == "multi":
+        kw = {**kw, "mode": mode}
     t, x = _run(model, **kw)
     times = [s for s in TIMES if s <= t[-1]]
     return {
@@ -281,9 +287,19 @@ def test_golden_covers_every_case(golden):
     assert sorted(golden) == sorted(CASES)
 
 
-@pytest.mark.parametrize("name", sorted(CASES))
-def test_golden_trace(golden, name):
-    got, want = sample(name), golden[name]
+NEEDS_EXT = pytest.mark.skipif(
+    not _fast.available(), reason="needs the fast extra (msoaxon_fast)"
+)
+RUNS = [(name, "exact") for name in sorted(CASES)] + [
+    pytest.param(name, "fast", marks=NEEDS_EXT)
+    for name in sorted(CASES)
+    if CASES[name][0] == "multi"
+]
+
+
+@pytest.mark.parametrize(("name", "mode"), RUNS)
+def test_golden_trace(golden, name, mode):
+    got, want = sample(name, mode), golden[name]
     assert got["t_last"] == want["t_last"]
     np.testing.assert_allclose(got["soma"], want["soma"], **TOLERANCE)
     np.testing.assert_allclose(got["axon"], want["axon"], **TOLERANCE)
