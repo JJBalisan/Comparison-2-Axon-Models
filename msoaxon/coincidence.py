@@ -31,7 +31,7 @@ from typing import Any
 
 import numpy as np
 
-from msoaxon import _bisect, _dispatch, _parallel, synaptic
+from msoaxon import _bisect, _dispatch, _fast, _parallel, synaptic
 
 START = 5.0
 T_END = 20.0
@@ -595,6 +595,8 @@ def _height_key(
     input_node2: int | None = None,
 ) -> tuple[Any, ...]:
     """Names everything that shapes spike_height()'s runs, hashably."""
+    if model == "multi":  # the mode the runs will use, not the one asked for
+        model_kw = {**model_kw, "mode": _fast.effective(model_kw.get("mode"))}
     return (
         model,
         int(node),

@@ -93,8 +93,11 @@ def covers(stim_type: str, start: float, stop: float) -> bool:
     return not (stim_type in ("ramp", "ramp2") and stop == start)
 
 
-def resolve(mode: str | None, covered: bool) -> str:
-    """Returns the mode one run uses: "fast" or "exact".
+def effective(mode: str | None, covered: bool = True) -> str:
+    """Returns the mode a run will use, without warning.
+
+    For cache keys: what mso_axon will run, not what was asked for, so a
+    result cached under one MSOAXON_MODE never serves another.
 
     Args:
         mode: The mode passed to mso_axon, or None.
@@ -104,11 +107,24 @@ def resolve(mode: str | None, covered: bool) -> str:
         "fast" or "exact".
     """
     want = requested(mode)
-    if want == "exact":
-        return "exact"
-    if _ext is not None and covered:
+    return (
+        "fast" if want != "exact" and _ext is not None and covered else "exact"
+    )
+
+
+def resolve(mode: str | None, covered: bool) -> str:
+    """Returns the mode one run uses, warning if "fast" can't run.
+
+    Args:
+        mode: The mode passed to mso_axon, or None.
+        covered: Whether the configuration is ported (covers()).
+
+    Returns:
+        "fast" or "exact".
+    """
+    if effective(mode, covered) == "fast":
         return "fast"
-    if want == "fast":
+    if requested(mode) == "fast":
         why = (
             "the msoaxon-fast extension is not installed (uv sync --extra fast)"
             if _ext is None
