@@ -16,10 +16,15 @@ their protocol. If noise keeps the peak lower (e.g. 85%), the half-maximum width
 comes out wider than this estimate (~10% in the two-compartment model).
 `probability_trials` checks this with noisy runs.
 
+A run spikes when the axon rises `criterion` above the soma: 10 mV (FACTOR) by
+default, as in the MATLAB EPSG-pair sweeps, or a fraction of the model's own
+spike height, criterion=Relative(0.5) (issue #21; see spike_height).
+
 This is new analysis code, not part of the MATLAB port: it uses a standard
 bracketing bisection rather than BinarySearch.m's halving search.
 """
 
+import dataclasses
 from collections.abc import Sequence
 from concurrent import futures
 from typing import Any
@@ -33,6 +38,39 @@ T_END = 20.0
 FACTOR = (
     10.0  # spike = axon rises this far above soma (as in the EPSGpair sweeps)
 )
+HEIGHT_AT = 2.0  # spike_height's run, as a multiple of the 10 mV threshold
+HEIGHT_REL_TOL = 1e-3  # that threshold's tolerance: the height is flat there
+
+
+@dataclasses.dataclass(frozen=True)
+class Relative:
+    """A spike criterion as a fraction of the model's own spike height.
+
+    criterion=Relative(0.5) asks for axon - soma to reach half of
+    spike_height() for the same configuration, instead of FACTOR mV.
+
+    Attributes:
+        fraction: The fraction of the spike height, strictly between 0
+            and 1.
+    """
+
+    fraction: float
+
+    def __post_init__(self) -> None:
+        """Checks the fraction.
+
+        Raises:
+            ValueError: If the fraction is not strictly between 0 and 1.
+        """
+        if not 0 < self.fraction < 1:
+            raise ValueError(
+                f"Relative needs a fraction strictly between 0 and 1, got "
+                f"{self.fraction!r}"
+            )
+
+
+# a float is absolute [mV]; a Relative is a fraction of spike_height()
+Criterion = float | Relative
 
 
 def _respond(
@@ -45,11 +83,13 @@ def _respond(
     site: tuple[str, int, int | None],
     model_kw: dict[str, Any],
     start: float = START,
+    *,
+    factor: float = FACTOR,
 ) -> tuple[bool, float]:
     """Runs one EPSG pair, `delay` apart.
 
     Returns (spiked, peak axon - soma); site = (stim, input_node,
-    input_node2).
+    input_node2); factor is the resolved spike criterion [mV].
     """
     stim, input_node, input_node2 = site
     syn = synaptic.SynParams(t_end=T_END, epsg_tau=tuple(epsg_tau))
@@ -66,7 +106,7 @@ def _respond(
         v0,
         input_node,
         syn,
-        factor=FACTOR,
+        factor=factor,
         **model_kw,
     )
 
@@ -81,10 +121,21 @@ def _spikes(
     site: tuple[str, int, int | None],
     model_kw: dict[str, Any],
     start: float = START,
+    *,
+    factor: float = FACTOR,
 ) -> bool:
-    return _respond(model, I, delay, node, v0, epsg_tau, site, model_kw, start)[
-        0
-    ]
+    return _respond(
+        model,
+        I,
+        delay,
+        node,
+        v0,
+        epsg_tau,
+        site,
+        model_kw,
+        start,
+        factor=factor,
+    )[0]
 
 
 def threshold(
@@ -101,6 +152,7 @@ def threshold(
     stim: str = "EPSGpair",
     input_node: int = 1,
     input_node2: int | None = None,
+    criterion: Criterion = FACTOR,
 ) -> float:
     """Finds the smallest EPSG-pair amplitude that spikes at this delay.
 
@@ -124,6 +176,8 @@ def threshold(
             input_node2).
         input_node: Where the (first) EPSG enters, 1-indexed.
         input_node2: Where the second EPSG enters, for "EPSGbilateral".
+        criterion: The spike criterion: axon - soma [mV], or a
+            Relative fraction of spike_height().
 
     Returns:
         The threshold amplitude, to rel_tol, or inf if nothing up to
@@ -133,15 +187,34 @@ def threshold(
         _bisect.FiresWithoutInputError: If the cell fires with no input.
     """
     site, model_kw = (stim, input_node, input_node2), model_kw or {}
+    factor = resolve_criterion(
+        criterion,
+        model,
+        node,
+        v0,
+        epsg_tau,
+        model_kw,
+        stim=stim,
+        input_node=input_node,
+        input_node2=input_node2,
+    )
     try:
         return _bisect.smallest_crossing(
             lambda I: _respond(
-                model, I, delay, node, v0, epsg_tau, site, model_kw
+                model,
+                I,
+                delay,
+                node,
+                v0,
+                epsg_tau,
+                site,
+                model_kw,
+                factor=factor,
             ),
             guess,
             ceiling,
             rel_tol,
-            FACTOR,
+            factor,
         )
     except _bisect.FiresWithoutInputError as e:
         config = _dispatch.describe(
@@ -179,6 +252,7 @@ def threshold_curve(
     stim: str = "EPSGpair",
     input_node: int = 1,
     input_node2: int | None = None,
+    criterion: Criterion = FACTOR,
 ) -> np.ndarray:
     """Computes threshold() at each delay, in parallel.
 
@@ -199,11 +273,16 @@ def threshold_curve(
             input_node2).
         input_node: Where the (first) EPSG enters, 1-indexed.
         input_node2: Where the second EPSG enters, for "EPSGbilateral".
+        criterion: The spike criterion (see threshold()), resolved here
+            once rather than in every worker.
 
     Returns:
         An array of thresholds, one per delay.
     """
     site = {"stim": stim, "input_node": input_node, "input_node2": input_node2}
+    site["criterion"] = resolve_criterion(
+        criterion, model, node, v0, epsg_tau, model_kw or {}, **site
+    )
     tasks = [
         (
             (
@@ -276,6 +355,7 @@ def window(
     stim: str = "EPSGpair",
     input_node: int = 1,
     input_node2: int | None = None,
+    criterion: Criterion = FACTOR,
 ) -> tuple[float, float]:
     """Finds the coincidence-window width at `margin` directly.
 
@@ -309,12 +389,25 @@ def window(
             input_node2).
         input_node: Where the (first) EPSG enters, 1-indexed.
         input_node2: Where the second EPSG enters, for "EPSGbilateral".
+        criterion: The spike criterion (see threshold()). A given
+            threshold0 must have been found with the same one.
 
     Returns:
         (width, th0): the width [ms], nan if the input still spikes at
         max_delay, and the coincident threshold.
     """
     site, model_kw = (stim, input_node, input_node2), model_kw or {}
+    factor = resolve_criterion(
+        criterion,
+        model,
+        node,
+        v0,
+        epsg_tau,
+        model_kw,
+        stim=stim,
+        input_node=input_node,
+        input_node2=input_node2,
+    )
     th0 = (
         threshold0
         if threshold0 is not None
@@ -329,31 +422,35 @@ def window(
             stim=stim,
             input_node=input_node,
             input_node2=input_node2,
+            criterion=factor,
         )
     )
     amp = (1 + margin) * th0
 
     def respond(delay: float) -> tuple[bool, float]:
-        return _respond(model, amp, delay, node, v0, epsg_tau, site, model_kw)
+        return _respond(
+            model, amp, delay, node, v0, epsg_tau, site, model_kw, factor=factor
+        )
 
     spiked, peak = respond(max_delay)
     if spiked:
         return np.nan, th0
-    # amp > th0, so it spikes at delay 0; the peak falls smoothly through FACTOR
-    # as the delay grows, so the same interpolation as in threshold() applies
+    # amp > th0, so it spikes at delay 0; the peak falls smoothly through the
+    # criterion as the delay grows, so the same interpolation as in threshold()
+    # applies
     far, near = _bisect.crossing(
         respond,
         max_delay,
         0.0,
         lambda _no, _yes: delay_tol,
-        FACTOR,
+        factor,
         [(max_delay, peak)],
     )
     return far + near, th0  # twice the midpoint of the final bracket
 
 
 def _trial(args: tuple[Any, ...]) -> bool:
-    model, amp, t1, t2, node, v0, epsg_tau, site, model_kw = args
+    model, amp, t1, t2, node, v0, epsg_tau, site, model_kw, factor = args
     first, second = min(t1, t2), max(t1, t2)
     return _spikes(
         model,
@@ -365,6 +462,7 @@ def _trial(args: tuple[Any, ...]) -> bool:
         site,
         model_kw,
         start=first,
+        factor=factor,
     )
 
 
@@ -386,6 +484,7 @@ def probability_trials(
     stim: str = "EPSGpair",
     input_node: int = 1,
     input_node2: int | None = None,
+    criterion: Criterion = FACTOR,
 ) -> np.ndarray:
     """Measures spike probability per delay from noisy trials.
 
@@ -413,11 +512,24 @@ def probability_trials(
             input_node2).
         input_node: Where the (first) EPSG enters, 1-indexed.
         input_node2: Where the second EPSG enters, for "EPSGbilateral".
+        criterion: The spike criterion (see threshold()), resolved here
+            once rather than in every worker.
 
     Returns:
         An array with the fraction of trials that spiked, per delay.
     """
     site = (stim, input_node, input_node2)
+    factor = resolve_criterion(
+        criterion,
+        model,
+        node,
+        v0,
+        epsg_tau,
+        model_kw or {},
+        stim=stim,
+        input_node=input_node,
+        input_node2=input_node2,
+    )
     rng = np.random.default_rng(seed)
     tasks = []
     for d in delays:
@@ -436,7 +548,202 @@ def probability_trials(
                     tuple(epsg_tau),
                     site,
                     model_kw or {},
+                    factor,
                 )
             )
     hits = _parallel.map_tasks(_trial, tasks, workers, executor, chunksize=16)
     return np.array(hits, float).reshape(len(delays), n_trials).mean(axis=1)
+
+
+# --- the spike height, for a relative criterion -------------------------------
+
+# spike_height() results, keyed on _height_key(); failures are not stored
+_HEIGHTS: dict[tuple[Any, ...], float] = {}
+
+
+def _frozen(name: str, value: object) -> object:
+    """Returns a hashable stand-in for one model keyword's value.
+
+    A morphology or membrane (a SimpleNamespace, unhashable and mutable)
+    stands in as its `key`, which names every setting it was built
+    from, plus a membrane's morph_key.
+
+    Raises:
+        TypeError: If the value is neither keyed nor hashable.
+    """
+    key = getattr(value, "key", None)
+    if key is not None:
+        return ("key", key, getattr(value, "morph_key", None))
+    try:
+        hash(value)
+    except TypeError:
+        raise TypeError(
+            f"spike_height can't cache on model keyword {name}={value!r}: "
+            "it is neither hashable nor a keyed morphology or membrane"
+        ) from None
+    return value
+
+
+def _height_key(
+    model: str,
+    node: int,
+    v0: float,
+    epsg_tau: tuple[float, float],
+    model_kw: dict[str, Any],
+    stim: str = "EPSGpair",
+    input_node: int = 1,
+    input_node2: int | None = None,
+) -> tuple[Any, ...]:
+    """Names everything that shapes spike_height()'s runs, hashably."""
+    return (
+        model,
+        int(node),
+        float(v0),
+        tuple(float(x) for x in epsg_tau),
+        stim,
+        int(input_node),
+        input_node2,
+        tuple(sorted((k, _frozen(k, v)) for k, v in model_kw.items())),
+    )
+
+
+def spike_height(
+    model: str,
+    node: int = 3,
+    v0: float = -68.0,
+    epsg_tau: tuple[float, float] = synaptic.EPSG_TAU,
+    model_kw: dict[str, Any] | None = None,
+    *,
+    stim: str = "EPSGpair",
+    input_node: int = 1,
+    input_node2: int | None = None,
+) -> float:
+    """Measures the model's spike height, for a Relative criterion.
+
+    The height is the largest axon - soma of one coincident EPSG pair at
+    HEIGHT_AT (2x) the 10 mV threshold, run to T_END with no spike stop.
+    It is flat there (within 2.5% from 1.5x to 3x threshold), so the
+    10 mV threshold that seeds it doesn't bias it: 38.4 mV for the
+    45-compartment model, 38.0 for TwoCpt.m, 20.2 with Goldwyn's
+    calibration (model EPSG). It costs one threshold search plus one run,
+    and is cached per configuration: the model, node, v0, EPSG kinetics,
+    stimulus sites and every model keyword (a morphology or membrane by
+    its key, not by identity), since variants such as dendrites or a KLT
+    block change the spike.
+
+    Args:
+        model: "multi" or "two".
+        node: The compartment compared with the soma, 1-indexed.
+        v0: Initial potential [mV].
+        epsg_tau: The EPSG (rise, decay) time constants [ms].
+        model_kw: Further model keywords (see threshold()).
+        stim: "EPSGpair" or "EPSGbilateral" (see threshold()).
+        input_node: Where the (first) EPSG enters, 1-indexed.
+        input_node2: Where the second EPSG enters, for "EPSGbilateral".
+
+    Returns:
+        The peak axon - soma [mV].
+
+    Raises:
+        _bisect.FiresWithoutInputError: If the cell fires with no input.
+        ValueError: If no EPSG pair up to threshold()'s ceiling spikes,
+            so there is no spike to measure.
+        TypeError: If a model keyword can't be part of the cache key.
+    """
+    model_kw = model_kw or {}
+    site = {"stim": stim, "input_node": input_node, "input_node2": input_node2}
+    key = _height_key(model, node, v0, epsg_tau, model_kw, **site)
+    if key in _HEIGHTS:
+        return _HEIGHTS[key]
+    try:
+        th = threshold(
+            model,
+            0.0,
+            node,
+            v0,
+            epsg_tau,
+            model_kw,
+            HEIGHT_REL_TOL,
+            criterion=FACTOR,
+            **site,
+        )
+    except _bisect.FiresWithoutInputError as e:
+        raise _bisect.FiresWithoutInputError(
+            f"coincidence.spike_height: {e}"
+        ) from e
+    if not np.isfinite(th):
+        config = _dispatch.describe(
+            model, node, v0, model_kw.get("mem"), **site
+        )
+        raise ValueError(
+            f"coincidence.spike_height({config}): no EPSG pair up to the "
+            "ceiling spikes, so there is no spike height"
+        )
+    syn = synaptic.SynParams(t_end=T_END, epsg_tau=tuple(epsg_tau))
+    kw = model_kw
+    if input_node2 is not None:
+        kw = {**model_kw, "input_node2": input_node2}
+    t, x = _dispatch.run_model(
+        model,
+        stim,
+        START,
+        START,
+        HEIGHT_AT * th,
+        node,
+        T_END,
+        v0,
+        input_node,
+        syn,
+        **kw,
+    )
+    axon = node - 1 if model == "multi" else 1
+    _HEIGHTS[key] = float((x[:, axon] - x[:, 0]).max())
+    return _HEIGHTS[key]
+
+
+def resolve_criterion(
+    criterion: Criterion,
+    model: str,
+    node: int = 3,
+    v0: float = -68.0,
+    epsg_tau: tuple[float, float] = synaptic.EPSG_TAU,
+    model_kw: dict[str, Any] | None = None,
+    *,
+    stim: str = "EPSGpair",
+    input_node: int = 1,
+    input_node2: int | None = None,
+) -> float:
+    """Turns a spike criterion into mV for this configuration.
+
+    Args:
+        criterion: axon - soma [mV], or a Relative fraction of
+            spike_height().
+        model: "multi" or "two".
+        node: The compartment compared with the soma, 1-indexed.
+        v0: Initial potential [mV].
+        epsg_tau: The EPSG (rise, decay) time constants [ms].
+        model_kw: Further model keywords (see threshold()).
+        stim: "EPSGpair" or "EPSGbilateral" (see threshold()).
+        input_node: Where the (first) EPSG enters, 1-indexed.
+        input_node2: Where the second EPSG enters, for "EPSGbilateral".
+
+    Returns:
+        The criterion [mV]: a float unchanged, a Relative times the
+        spike height.
+
+    Raises:
+        _bisect.FiresWithoutInputError: See spike_height().
+        ValueError: See spike_height().
+    """
+    if not isinstance(criterion, Relative):
+        return criterion
+    return criterion.fraction * spike_height(
+        model,
+        node,
+        v0,
+        epsg_tau=epsg_tau,
+        model_kw=model_kw,
+        stim=stim,
+        input_node=input_node,
+        input_node2=input_node2,
+    )
