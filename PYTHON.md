@@ -108,9 +108,22 @@ ported: every stimulus (Synaptic and SynapticPair included), the lumped chain an
 fallback is a ramp with `stop == start`, where the numpy path raises
 `ZeroDivisionError` and keeps doing so.
 
-**Speed** (Apple M1 Max, best of 3; FAST_TIMINGS):
+**Speed** (Apple M1 Max, Python 3.12, best of 3; the machine was busy, so read the
+ratios rather than the seconds):
 
-FAST_TABLE
+| | `"exact"` | `"fast"` | Speed-up |
+|---|---|---|---|
+| one right-hand side call (315 states) | 63.5 µs | 3.5 µs | 18× |
+| one run (EPSG pair, 20 ms) | 0.42 s | 0.15 s | 2.8× |
+| `coincidence.threshold("multi", 0.1)` | 3.16 s | 1.19 s | 2.7× |
+| `coincidence.window("multi", 0.03, delay_tol=1e-3)` | 3.78 s | 1.41 s | 2.7× |
+| `scripts/benchmark_search.py --check` (all 20 searches, both models) | 274 s | 124 s | 2.2× |
+
+Every value above came out identical in both modes, and `benchmark_search.py
+--check` reported the same values, run counts and 0 mismatches in each. The rest
+of a run is scipy's own Python (step control, the sparse finite-difference
+Jacobian, LU), which caps the gain near 3×; the two-compartment model is
+unchanged.
 
 `tests/test_fast.py` compares the two right-hand sides on sampled states across
 every covered configuration (to 1e-12 relative, and bit for bit on
