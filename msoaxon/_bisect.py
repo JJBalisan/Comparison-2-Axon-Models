@@ -73,7 +73,10 @@ def crossing(
 
     Runs that don't spike give their peak below `level`, and the peak
     rises smoothly to `level` at the boundary (B4 of the search-speed
-    plan: at the searches' 10 mV criterion there is no jump there).
+    plan: at the searches' default 10 mV criterion there is no jump
+    there). A relative criterion of half the spike height (~19 mV, on
+    the upstroke of the 45-compartment and TwoCpt.m spikes) still
+    converges, with ~7% more runs (issue #21).
 
     Each step predicts the boundary from the non-spiking points
     (_predict) and probes there, kept 0.4 tol inside the bracket so that

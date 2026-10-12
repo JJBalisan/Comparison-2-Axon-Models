@@ -133,12 +133,38 @@ How the widths are computed:
 - Earlier versions read the crossing off a threshold curve on a 20 µs grid. Linear interpolation across a curve that bends upward read 0.1–4 µs low, most at the 0.5% margin.
 - Noisy trials check this: 1% amplitude jitter plus 5 µs onset jitter give 200 µs against `window()`'s 199 µs. If the noise is large enough to keep peak probability near 85%, the half-maximum width comes out about 10% wider.
 
-The spike criterion (axon − soma, 10 mV here, as in the MATLAB EPSG-pair sweeps) sits below where the spike takes off, 1–3% above that threshold. It barely affects the windows. Set as a fraction of each model's own spike height instead (about 38.5 mV of axon − soma in the 45-compartment and `TwoCpt.m` models, 20 mV with Goldwyn's calibration), anywhere from 25% to 75% of it, the 3% windows change by at most 1.7% (201 → 198 µs for the 45-compartment model) and 3.5% for Goldwyn. The coincident thresholds move more: up to 3%, and 13% for Goldwyn at 25%, where the criterion is below its takeoff. A fixed 20 or 30 mV criterion is out of reach for Goldwyn's calibration altogether.
-
 Findings:
 - With matched methods, the original calibration reproduces the measured window closely.
 - Goldwyn's faster membrane narrows it by about 17%.
 - An earlier estimate here (half-way point of the threshold curve, ~340 µs) measured a different quantity.
+
+#### Spike criterion
+
+A run counts as a spike once axon − soma exceeds 10 mV, as in the MATLAB EPSG-pair sweeps (`coincidence.FACTOR`, `somatic.FACTOR`). That fixed value means different things in different models:
+- **45-compartment and `TwoCpt.m`:** 10 mV is about 26% of their spike (38 mV of axon − soma). It sits on the foot of the takeoff, which comes 1–3% above that threshold.
+- **Goldwyn's calibration:** 10 mV is about 50% of its spike (20 mV). Its response is graded rather than all-or-none: the peak grows smoothly from 5.8 to 19.6 mV between 0.9× and 1.5× threshold. So for Goldwyn the criterion *defines* the threshold rather than locating it. A 5 or 15 mV criterion moves its coincident threshold by −13% or +8%. Its windows are robust, though: they move by at most 4%.
+- A fixed 20 or 30 mV criterion is out of reach for Goldwyn's calibration altogether.
+
+The criterion is an option (issue #21). `coincidence.threshold`, `threshold_curve`, `window` and `probability_trials`, and `somatic.fires`, `rheobase` and `spike_amplitude` take `criterion=`:
+- a float is absolute, in mV; the default is 10.0, so nothing changes unless you ask;
+- `coincidence.Relative(0.5)` is 50% of that configuration's own spike height.
+
+`coincidence.spike_height()` measures the height as the largest axon − soma of a coincident EPSG pair at 2× the 10 mV threshold, run with no spike stop. That costs one threshold search plus one run. The height is flat (within 2.5%) from 1.5× to 3× threshold, so the 10 mV seed doesn't bias it. It is cached per configuration: model, node, `v0`, EPSG kinetics, stimulus sites and every model keyword. Membranes and morphologies are keyed by their settings, so the dendritic and dendrotoxin variants, whose spikes differ, each get their own height. `somatic` measures the height with an EPSG pair on the same membrane. The MATLAB ports (`threshold.binary_search`, `spiking`, `combine_all.py --factor`) keep their absolute 10 and 30 mV: those values are part of what they reproduce.
+
+At 50% of each model's height (model EPSG; `Relative(0.5)` against the 10 mV default):
+
+| Model | Spike height | 50% | Coincident threshold | 3% window | Rheobase (100 ms step) |
+|---|---|---|---|---|---|
+| 45-compartment | 38.4 mV | 19.2 mV | 48.01 → 48.81 nS (+1.7%) | 201.1 → 199.7 µs (−0.7%) | 3785 → 3852 pA (+1.8%) |
+| 2-compartment, `TwoCpt.m` | 38.0 mV | 19.0 mV | 47.72 → 48.22 nS (+1.1%) | 199.0 → 198.0 µs (−0.5%) | 3848 → 3877 pA (+0.8%) |
+| 2-compartment, Goldwyn 2019 calibration | 20.2 mV | 10.1 mV | 26.35 → 26.39 nS (+0.1%) | 167.5 → 166.9 µs (−0.4%) | 2070 → 2072 pA (+0.1%) |
+
+- With the Myoga EPSG the shifts are the same size: the 3% windows go 219 → 217.5, 216.8 → 215.5 and 182.4 → 182.5 µs.
+- The 0.5% windows narrow by 0.5–0.7% for the 45-compartment and `TwoCpt.m` models.
+- At 50% Goldwyn's criterion is today's, so its results don't move. The other two models' criterion moves onto the steep upstroke, which raises their thresholds 1.0–1.8% and narrows their windows by at most 0.75%: about 2 µs on 200, inside the 0.5% vs 3% margin ambiguity above. Goldwyn still narrows the window by about 17% (−16.7% at 10 mV, −16.4% at 50%).
+- At 25% or 75% of the height, the 3% windows change by at most 1.8% (4% for Goldwyn). The coincident thresholds move more: up to 3%, and Goldwyn's by −13% at 25%, where the criterion is below its takeoff.
+- Goldwyn's rheobase is the same 100 ms step run with its calibration (`v0=-58, r1=8.5, tau_est=0.34`); `somatic` itself doesn't take those keywords.
+- The searches take about 7% more simulations at 50%: the interpolation still converges on the upstroke, a little less efficiently.
 
 ### Other benchmarks
 
