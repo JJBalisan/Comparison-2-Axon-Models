@@ -7,8 +7,7 @@ stimType, inputNode, start, stop, I, Syn.
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ._common import stimulus
-from .two import applied_current
+from msoaxon import _common, two
 
 
 def _panel(ax, t, V, title, labels, t_end, ylabel="Voltage (mV)"):
@@ -21,29 +20,66 @@ def _panel(ax, t, V, title, labels, t_end, ylabel="Voltage (mV)"):
 
 
 def input_trace(graph, t2, x):
-    """Applied current along the two-compartment solution.
+    """Computes the applied current along the two-compartment solution.
 
-    Graphing.m recomputes this with its own copy of the stimulus code (and indexes
-    the 2-CPT voltage with the multi-compartment time index); here it reuses the
-    model's own stimulus function evaluated on the 2-CPT run instead.
+    Graphing.m recomputes this with its own copy of the stimulus code
+    (and indexes the 2-CPT voltage with the multi-compartment time
+    index); here it reuses the model's own stimulus function evaluated
+    on the 2-CPT run instead.
+
+    Args:
+        graph: The graph settings (see the module docstring).
+        t2: Times of the two-compartment run [ms].
+        x: The two-compartment run's state.
+
+    Returns:
+        The applied current [pA] at each time.
     """
-    s = stimulus(graph["stimType"], graph["start"], graph["stop"], graph["I"],
-                 graph["tEnd"], graph["Syn"])
-    return np.array([applied_current(t, V1, graph["stimType"], s) for t, V1 in zip(t2, x[:, 0])])
+    s = _common.stimulus(
+        graph["stimType"],
+        graph["start"],
+        graph["stop"],
+        graph["I"],
+        graph["tEnd"],
+        graph["Syn"],
+    )
+    return np.array(
+        [
+            two.applied_current(t, V1, graph["stimType"], s)
+            for t, V1 in zip(t2, x[:, 0])
+        ]
+    )
 
 
 def graphing(graph, t1, y, t2=None, x=None, t3=None, z=None):
-    """Draw graph["Type"] and return the figure (Graphing.m).
+    """Draws graph["Type"] and returns the figure (Graphing.m).
 
-    (t1, y) is the multi-compartment run, (t2, x) the two-compartment run at
-    graph["node"] and (t3, z) a second two-compartment run (node 5 in
-    Combine_all.m). What each Type uses:
-      Contour, MultiCompartment        t1, y
-      TwoCompartment                   t1, y, where y is a *two-compartment* run
-      ModelComparison, NodeComparison  t1, y, t2, x
-      ModelComparison2                 t2, x, t3, z
-      Input                            t2, x (the current is recomputed on it)
-      Multigraph                       all six
+    What each Type uses:
+
+        Contour, MultiCompartment        t1, y
+        TwoCompartment                   t1, y, where y is a
+                                         *two-compartment* run
+        ModelComparison, NodeComparison  t1, y, t2, x
+        ModelComparison2                 t2, x, t3, z
+        Input                            t2, x (the current is
+                                         recomputed on it)
+        Multigraph                       all six
+
+    Args:
+        graph: The graph settings (see the module docstring).
+        t1: Times of the multi-compartment run [ms].
+        y: The multi-compartment run's state.
+        t2: Times of the two-compartment run at graph["node"].
+        x: That run's state.
+        t3: Times of a second two-compartment run (node 5 in
+            Combine_all.m).
+        z: That run's state.
+
+    Returns:
+        The matplotlib figure.
+
+    Raises:
+        ValueError: For an unknown graph Type.
     """
     node, t_end, kind = graph["node"], graph["tEnd"], graph["Type"]
     fig = plt.figure(figsize=(9, 7))
@@ -52,19 +88,44 @@ def graphing(graph, t1, y, t2=None, x=None, t3=None, z=None):
         ax = fig.add_subplot(projection="3d")
         X, Y = np.meshgrid(np.arange(1, 46), t1)
         ax.plot_surface(X, Y, y[:, :45], cmap="viridis", linewidth=0)
-        ax.set(title="Voltage Propagation", xlabel="Compartment Number (1-45)",
-               ylabel="Time", zlabel="Voltage (mV)")
+        ax.set(
+            title="Voltage Propagation",
+            xlabel="Compartment Number (1-45)",
+            ylabel="Time",
+            zlabel="Voltage (mV)",
+        )
 
     elif kind == "ModelComparison":
         a1, a2 = fig.subplots(2, 1)
-        _panel(a1, t1, y[:, [0, node - 1]], "multi-compartment", ["Soma", f"node {node}"], t_end)
+        _panel(
+            a1,
+            t1,
+            y[:, [0, node - 1]],
+            "multi-compartment",
+            ["Soma", f"node {node}"],
+            t_end,
+        )
         _panel(a2, t2, x[:, :2], "two-compartment", ["Soma", "node"], t_end)
         fig.suptitle("Comparison of 2 Compartment and Multi-Compartment Models")
 
     elif kind == "ModelComparison2":
         a1, a2 = fig.subplots(2, 1)
-        _panel(a1, t2, x[:, :2], "Two-Compartment (Node 3)", ["Soma", "node"], t_end)
-        _panel(a2, t3, z[:, :2], "Two-Compartment (Node 5)", ["Soma", "node"], t_end)
+        _panel(
+            a1,
+            t2,
+            x[:, :2],
+            "Two-Compartment (Node 3)",
+            ["Soma", "node"],
+            t_end,
+        )
+        _panel(
+            a2,
+            t3,
+            z[:, :2],
+            "Two-Compartment (Node 5)",
+            ["Soma", "node"],
+            t_end,
+        )
         fig.suptitle("Comparison of 2 Compartment Models")
 
     elif kind == "NodeComparison":
@@ -77,26 +138,76 @@ def graphing(graph, t1, y, t2=None, x=None, t3=None, z=None):
         fig.suptitle(f"Comparison of Soma and node {node}")
 
     elif kind == "MultiCompartment":
-        _panel(fig.add_subplot(), t1, y[:, [0, node - 1]],
-               f"Multi-compartment model, node: {node}", ["Soma", f"node {node}"], t_end)
+        _panel(
+            fig.add_subplot(),
+            t1,
+            y[:, [0, node - 1]],
+            f"Multi-compartment model, node: {node}",
+            ["Soma", f"node {node}"],
+            t_end,
+        )
 
     elif kind == "TwoCompartment":
-        _panel(fig.add_subplot(), t1, y[:, :2], "two-compartment", ["Soma", "node"], t_end)
+        _panel(
+            fig.add_subplot(),
+            t1,
+            y[:, :2],
+            "two-compartment",
+            ["Soma", "node"],
+            t_end,
+        )
 
     elif kind == "Input":
-        _panel(fig.add_subplot(), t2, input_trace(graph, t2, x), "Input", [], t_end,
-               ylabel="Current (pA)")
+        _panel(
+            fig.add_subplot(),
+            t2,
+            input_trace(graph, t2, x),
+            "Input",
+            [],
+            t_end,
+            ylabel="Current (pA)",
+        )
 
     elif kind == "Multigraph":
         gs = fig.add_gridspec(2, 3)
         cols = [1, 3, 5, 9, 13, 21, 29, 37, 45]
-        _panel(fig.add_subplot(gs[0, :]), t1, y[:, [c - 1 for c in cols]], "multi-compartment",
-               ["Soma"] + [f"node {c}" for c in cols[1:]], t_end)
-        _panel(fig.add_subplot(gs[1, 0]), t2, x[:, :2], "Two-Compartment (Node 3)", ["Soma", "node"], t_end)
-        _panel(fig.add_subplot(gs[1, 1]), t3, z[:, :2], "Two-Compartment (Node 5)", ["Soma", "node"], t_end)
-        _panel(fig.add_subplot(gs[1, 2]), t2, input_trace(graph, t2, x), "Input", [], t_end,
-               ylabel="Current (pA)")
-        fig.suptitle("Comparison of 2 Compartment and Multi-Compartment Models with Input")
+        _panel(
+            fig.add_subplot(gs[0, :]),
+            t1,
+            y[:, [c - 1 for c in cols]],
+            "multi-compartment",
+            ["Soma"] + [f"node {c}" for c in cols[1:]],
+            t_end,
+        )
+        _panel(
+            fig.add_subplot(gs[1, 0]),
+            t2,
+            x[:, :2],
+            "Two-Compartment (Node 3)",
+            ["Soma", "node"],
+            t_end,
+        )
+        _panel(
+            fig.add_subplot(gs[1, 1]),
+            t3,
+            z[:, :2],
+            "Two-Compartment (Node 5)",
+            ["Soma", "node"],
+            t_end,
+        )
+        _panel(
+            fig.add_subplot(gs[1, 2]),
+            t2,
+            input_trace(graph, t2, x),
+            "Input",
+            [],
+            t_end,
+            ylabel="Current (pA)",
+        )
+        fig.suptitle(
+            "Comparison of 2 Compartment and Multi-Compartment Models "
+            "with Input"
+        )
 
     else:
         raise ValueError(f"unknown graph Type {kind!r}")
@@ -106,7 +217,18 @@ def graphing(graph, t1, y, t2=None, x=None, t3=None, z=None):
 
 
 def threshold_figure(x_values, multi, two, title, xlabel):
-    """One panel of Making_Threshold_graphs.m."""
+    """Draws one panel of Making_Threshold_graphs.m.
+
+    Args:
+        x_values: What the sweep varies, per point.
+        multi: The multi-compartment thresholds.
+        two: The two-compartment thresholds.
+        title: The panel title.
+        xlabel: The x-axis label.
+
+    Returns:
+        The matplotlib figure.
+    """
     fig, ax = plt.subplots()
     ax.plot(x_values, multi, linewidth=2, label="Multi-Compartment")
     ax.plot(x_values, two, linewidth=2, label="Two-Compartment")

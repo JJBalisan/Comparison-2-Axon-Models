@@ -6,6 +6,15 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+      # same ruff as .pre-commit-config.yaml; `ruff check` joins once its
+      # remaining findings (annotations, mostly) are cleared
+      - run: uvx ruff@0.16.10 format --check .
+
   pytest:
     runs-on: ubuntu-latest
     strategy:

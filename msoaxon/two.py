@@ -5,28 +5,37 @@ MATLAB code, so x[:, 0] is the soma and x[:, 1] the axon compartment.
 Currents are in pA, conductances in nS, capacitances in pF, time in ms.
 """
 
-from types import SimpleNamespace
+import types
 
 import numpy as np
 
-from . import constants as C
-from ._common import _stops, check_args, stimulus
-from ._solve import breakpoints, integrate, pre_stimulus_is_quiet
-from .synaptic import SynParams, epsg_unitary, interp_g
+from msoaxon import _common, _solve, constants as C, synaptic
 
-# Passive targets of Goldwyn, Remme & Rinzel 2019 (PLoS Comput Biol 15:e1006476), the
-# paper this model's coupling-constant framework comes from. TwoCpt.m still carries
-# them as comments (%8.5, %-58) beside the values it replaced them with.
+# Passive targets of Goldwyn, Remme & Rinzel 2019 (PLoS Comput Biol
+# 15:e1006476), the paper this model's coupling-constant framework comes from.
+# TwoCpt.m still carries them as comments (%8.5, %-58) beside the values it
+# replaced them with.
 GOLDWYN_2019 = dict(r1=8.5, tau_est=0.34, v0=-58.0)
 
 
 def get_params(v0, node, input_node, model_type, r1=10.0, tau_est=0.71):
-    """Port of getParam. `node` and `input_node` are 1-indexed like the MATLAB code.
+    """Ports getParam: the two-compartment parameters.
 
-    r1: soma input resistance of the passive model [MOhm]; tau_est: its soma
-    voltage decay time constant [ms]. Defaults are TwoCpt.m's values.
+    Args:
+        v0: Resting (and leak reversal) potential [mV].
+        node: The axon compartment, 1-indexed like the MATLAB code,
+            whose coupling constants and channel fractions set the
+            second compartment.
+        input_node: Where the stimulus enters, 1-indexed.
+        model_type: Which channels are active.
+        r1: Soma input resistance of the passive model [MOhm].
+        tau_est: The passive model's soma voltage decay time constant
+            [ms]. Defaults are TwoCpt.m's values.
+
+    Returns:
+        A SimpleNamespace P with TwoCpt.m's field names.
     """
-    P = SimpleNamespace()
+    P = types.SimpleNamespace()
     P.couple12 = C.COUPLING1[node - 2]  # forward coupling
     P.couple21 = C.COUPLING2[node - 2]  # backward coupling
 
@@ -41,16 +50,22 @@ def get_params(v0, node, input_node, model_type, r1=10.0, tau_est=0.71):
         h1 = h2 = 0.0
 
     # 'Active-sodium' (capital A) is how TwoCpt.m spells it, so 'active-sodium'
-    # gets no Na in this model. Kept as-is; see PYTHON.md, "Quirks kept on purpose".
+    # gets no Na in this model. Kept as-is; see PYTHON.md, "Quirks kept on
+    # purpose".
     if model_type in ("Active-sodium", "active-full"):
         na1 = C.NA_FRAC[0]
-        # only nodes 3 and 5 were calibrated; TwoCpt.m uses 140 for every other node
+        # only nodes 3 and 5 were calibrated; TwoCpt.m uses 140 for every other
+        # node
         P.gNa2 = {3: 119.0, 5: 25.5}.get(node, 140.0)
     else:
         na1 = 0.0
         P.gNa2 = 0.0
 
-    P.gKHT = 0.1 / C.SA[0] * 1000 if model_type in ("active-KHT", "active-full") else 0.0
+    P.gKHT = (
+        0.1 / C.SA[0] * 1000
+        if model_type in ("active-KHT", "active-full")
+        else 0.0
+    )
 
     area_ratio = C.AREA_RATIO[node - 1]
     R1 = r1 * 1e-3  # input resistance to CPT1 [GOhm]
@@ -91,10 +106,22 @@ def get_params(v0, node, input_node, model_type, r1=10.0, tau_est=0.71):
 
 
 def applied_current(t, V1, stim_type, s):
-    """Input current [pA] at time t (the Iapp branch of TwoCptODE). "none" means no stimulus.
+    """Returns the input current at time t (the Iapp branch of TwoCptODE).
 
-    Deliberately not shared with multi.external_current: see the table above that
-    function for how the two MATLAB files differ.
+    Deliberately not shared with multi.external_current: see the table
+    above that function for how the two MATLAB files differ.
+
+    Args:
+        t: Time [ms].
+        V1: Soma voltage [mV].
+        stim_type: The stimulus name; "none" means no stimulus.
+        s: The stimulus settings (_common.stimulus).
+
+    Returns:
+        The current [pA]; positive depolarises.
+
+    Raises:
+        ValueError: For an unknown stim_type.
     """
     if stim_type == "none":
         return 0.0
@@ -106,45 +133,65 @@ def applied_current(t, V1, stim_type, s):
         return float(s.start <= t <= t_top) * s.I * (t - s.start) * slope
     if stim_type == "ramp2":
         slope = 1 / (s.stop - s.start)
-        return min(s.I, float(t >= 5) * s.I * (t - 5) * slope)  # start hardcoded to 5
+        return min(
+            s.I, float(t >= 5) * s.I * (t - 5) * slope
+        )  # start hardcoded to 5
     if stim_type == "sine":
         wave = np.sin(2 * np.pi * s.f * (t - s.start) / 1000)
         return float(s.start <= t <= s.stop) * s.I * wave * (wave > 0)
     if stim_type == "Synaptic":
-        g = interp_g(s.t_syn, s.g_syn, t)
+        g = synaptic.interp_g(s.t_syn, s.g_syn, t)
         return -float(s.start <= t <= s.stop) * g * (V1 - s.VsynE)
     if stim_type == "SynapticPair":
-        g1 = interp_g(s.t_syn, s.g_syn, t)
-        g2 = interp_g(s.t_syn, s.g_syn, t + s.diff) if t + s.diff < s.t_end else 0.0
+        g1 = synaptic.interp_g(s.t_syn, s.g_syn, t)
+        g2 = (
+            synaptic.interp_g(s.t_syn, s.g_syn, t + s.diff)
+            if t + s.diff < s.t_end
+            else 0.0
+        )
         return -float(s.start <= t <= s.stop) * (g1 + g2) * (V1 - s.VsynE)
     if stim_type == "EPSG":
         te = t - s.start
-        return s.I * (0 - V1) * float(te >= 0) * epsg_unitary(te, s.epsg_tau)
+        return (
+            s.I
+            * (0 - V1)
+            * float(te >= 0)
+            * synaptic.epsg_unitary(te, s.epsg_tau)
+        )
     if stim_type == "EPSGpair":
         te = t - s.start
         td = s.stop - s.start
-        return s.I * (0 - V1) * (float(te >= 0) * epsg_unitary(te, s.epsg_tau)
-                                 + float(te >= td) * epsg_unitary(te - td, s.epsg_tau))
+        return (
+            s.I
+            * (0 - V1)
+            * (
+                float(te >= 0) * synaptic.epsg_unitary(te, s.epsg_tau)
+                + float(te >= td) * synaptic.epsg_unitary(te - td, s.epsg_tau)
+            )
+        )
     raise ValueError(f"unknown stimType {stim_type!r}")
 
 
 def _rhs(t, x, P, stim_type, s):
-    """TwoCptODE.m. Compartment 1 is the soma, 2 the axon node; currents in pA."""
+    """Computes TwoCptODE.m's right-hand side.
+
+    Compartment 1 is the soma, 2 the axon node; currents in pA.
+    """
     V1, V2, w1, h1, w2, m1, m2, h2, p, a1, a2 = x
     z = P.z_rest  # KLT inactivation is frozen at rest in this model
 
-    # soma: KHT exists only here. Na, KLT and h have their value at rest subtracted
-    # (the *0 terms from get_params); KHT and leak don't
+    # soma: KHT exists only here. Na, KLT and h have their value at rest
+    # subtracted (the *0 terms from get_params); KHT and leak don't
     IKHT = P.gKHT * p * (V1 - P.VK)
-    INa1 = P.gNa1 * m1 ** 4 * (0.993 * h1 + 0.007) * (V1 - P.ENa) - P.INa0_1
+    INa1 = P.gNa1 * m1**4 * (0.993 * h1 + 0.007) * (V1 - P.ENa) - P.INa0_1
     Ilk1 = P.glk1 * (V1 - P.Elk)
-    IKLT1 = P.gKLT1 * w1 ** 4 * z * (V1 - P.EK) - P.IKLT0_1
+    IKLT1 = P.gKLT1 * w1**4 * z * (V1 - P.EK) - P.IKLT0_1
     Ih1 = P.gh1 * a1 * (V1 - P.Vh) - P.Ih0_1
 
     # axon compartment: no KHT
     Ilk2 = P.glk2 * (V2 - P.Elk)
-    INa2 = P.gNa2 * m2 ** 4 * (0.993 * h2 + 0.007) * (V2 - P.ENa) - P.INa0_2
-    IKLT2 = P.gKLT2 * w2 ** 4 * z * (V2 - P.EK) - P.IKLT0_2
+    INa2 = P.gNa2 * m2**4 * (0.993 * h2 + 0.007) * (V2 - P.ENa) - P.INa0_2
+    IKLT2 = P.gKLT2 * w2**4 * z * (V2 - P.EK) - P.IKLT0_2
     Ih2 = P.gh2 * a2 * (V2 - P.Vh) - P.Ih0_2
 
     IC = P.gC * (V1 - V2)  # coupling current, soma to axon
@@ -168,46 +215,113 @@ def _rhs(t, x, P, stim_type, s):
     ]
 
 
-def two_cpt(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
-            syn: SynParams | None = None, stop_on_spike=None, r1=10.0, tau_est=0.71,
-            max_step=0.1, stop_when_settled=False):
-    """Run the two-compartment model. Returns (t, x) with x shaped (n_times, 11).
+def two_cpt(
+    stim_type,
+    start,
+    stop,
+    I,
+    node,
+    model_type,
+    t_end,
+    v0,
+    input_node,
+    syn: synaptic.SynParams | None = None,
+    stop_on_spike=None,
+    r1=10.0,
+    tau_est=0.71,
+    max_step=0.1,
+    stop_when_settled=False,
+):
+    """Runs the two-compartment model.
 
-    Arguments are as in mso_axon (see its docstring for what start, stop and I
-    mean for each stim_type), with these differences, all from TwoCptODE.m:
-    - currents enter compartment 1 if input_node == 1, else compartment 2 (the
-      axon); step, ramp and sine are on for start <= t < stop (or <= stop)
-      rather than start < t <= stop;
+    Arguments are as in mso_axon (see its docstring for what start, stop
+    and I mean for each stim_type), with these differences, all from
+    TwoCptODE.m:
+
+    - currents enter compartment 1 if input_node == 1, else compartment
+      2 (the axon); step, ramp and sine are on for start <= t < stop (or
+      <= stop) rather than start < t <= stop;
     - ramp2 always starts at t = 5, whatever `start` is;
     - EPSG is not cut off at stop.
-    - node (2..45) picks the axon compartment whose coupling constants and
-      channel fractions set the second compartment; only nodes 3 and 5 have a
-      calibrated axonal Na density (see get_params).
-    - max_step is a fixed 0.1 ms, not a fraction of t_end.
 
-    r1 [MOhm] and tau_est [ms] set the passive calibration (TwoCpt.m: 10 and 0.71;
-    Goldwyn et al 2019: 8.5 and 0.34, with v0 = -58, see GOLDWYN_2019).
+    Args:
+        stim_type: One of _common.STIM_TYPES.
+        start: Stimulus start [ms].
+        stop: Stimulus stop [ms].
+        I: Stimulus amplitude.
+        node: The axon compartment (2..45) whose coupling constants and
+            channel fractions set the second compartment; only nodes 3
+            and 5 have a calibrated axonal Na density (see get_params).
+        model_type: Which channels are active.
+        t_end: End time [ms].
+        v0: Initial and leak reversal potential [mV].
+        input_node: 1 for the soma; anything else means the axon.
+        syn: Synaptic waveform settings (SynParams).
+        stop_on_spike: If given (mV), stop as soon as the axon
+            compartment rises that far above the soma; t then ends before
+            t_end.
+        r1: Passive calibration: soma input resistance [MOhm] (TwoCpt.m:
+            10; Goldwyn et al 2019: 8.5, with v0 = -58, see GOLDWYN_2019).
+        tau_est: Passive calibration: soma time constant [ms] (TwoCpt.m:
+            0.71; Goldwyn et al 2019: 0.34).
+        max_step: Largest solver step: a fixed 0.1 ms, not a fraction of
+            t_end.
+        stop_when_settled: With stop_on_spike, also stop once no spike
+            can follow (see mso_axon).
 
-    stop_on_spike: if given (mV), stop as soon as the axon compartment rises that
-    far above the soma; t then ends before t_end.
+    Returns:
+        (t, x) with x shaped (n_times, 11); see the module docstring for
+        the state layout.
+
+    Raises:
+        ValueError: For unknown names or out-of-range compartments.
     """
-    check_args(stim_type, model_type, node, input_node, min_node=2)  # node 1 is the soma
-    syn = syn or SynParams(t_end=t_end)
+    _common.check_args(
+        stim_type, model_type, node, input_node, min_node=2
+    )  # node 1 is the soma
+    syn = syn or synaptic.SynParams(t_end=t_end)
     P = get_params(v0, node, input_node, model_type, r1=r1, tau_est=tau_est)
-    s = stimulus(stim_type, start, stop, I, t_end, syn)
+    s = _common.stimulus(stim_type, start, stop, I, t_end, syn)
     Vr = P.Vrest
-    x0 = [Vr, Vr, C.winf(Vr), C.hinf(Vr), C.winf(Vr), C.minf(Vr), C.minf(Vr),
-          C.hinf(Vr), C.pinf(Vr), C.ainf(Vr), C.ainf(Vr)]
-    cuts = breakpoints(stim_type, start, stop, t_end)
+    x0 = [
+        Vr,
+        Vr,
+        C.winf(Vr),
+        C.hinf(Vr),
+        C.winf(Vr),
+        C.minf(Vr),
+        C.minf(Vr),
+        C.hinf(Vr),
+        C.pinf(Vr),
+        C.ainf(Vr),
+        C.ainf(Vr),
+    ]
+    cuts = _solve.breakpoints(stim_type, start, stop, t_end)
     quiet = None
     # step and the synaptic inputs are already on at t == start (TwoCptODE uses
-    # t >= start), and the first segment's last step evaluates there, so sharing a
-    # stimulus-free prefix would change their results slightly. They skip the cache.
-    if (stim_type not in ("step", "Synaptic", "SynapticPair")
-            and pre_stimulus_is_quiet(cuts, start, stop)):
-        quiet = (("two", node, model_type, float(v0), input_node, r1, tau_est),
-                 lambda t, x: _rhs(t, x, P, "none", s))
+    # t >= start), and the first segment's last step evaluates there, so sharing
+    # a stimulus-free prefix would change their results slightly. They skip the
+    # cache.
+    if stim_type not in (
+        "step",
+        "Synaptic",
+        "SynapticPair",
+    ) and _solve.pre_stimulus_is_quiet(cuts, start, stop):
+        quiet = (
+            ("two", node, model_type, float(v0), input_node, r1, tau_est),
+            lambda t, x: _rhs(t, x, P, "none", s),
+        )
     rhs = lambda t, x: _rhs(t, x, P, stim_type, s)  # noqa: E731
-    return integrate(rhs, x0, t_end, cuts, rtol=1e-6, atol=1e-6, max_step=max_step,
-                     quiet=quiet, stop_event=_stops(rhs, 1, stop_on_spike, stop_when_settled,
-                                                   stim_type, s, 2))
+    return _solve.integrate(
+        rhs,
+        x0,
+        t_end,
+        cuts,
+        rtol=1e-6,
+        atol=1e-6,
+        max_step=max_step,
+        quiet=quiet,
+        stop_event=_common._stops(
+            rhs, 1, stop_on_spike, stop_when_settled, stim_type, s, 2
+        ),
+    )

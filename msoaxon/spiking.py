@@ -1,4 +1,7 @@
-"""Spike detection (port of Spiking.m and the inline counters in BinarySearch.m)."""
+"""Spike detection.
+
+Ports Spiking.m and the inline counters in BinarySearch.m.
+"""
 
 import math
 
@@ -6,10 +9,20 @@ import numpy as np
 
 
 def spiking(x, factor, model):
-    """Mark the first sample of each excursion where compartment j exceeds the soma by `factor`.
+    """Marks where each compartment first exceeds the soma by `factor`.
 
-    Faithful to Spiking.m, including `reset` carrying over from one column to the
-    next rather than being cleared per column.
+    Marks the first sample of each excursion. Faithful to Spiking.m,
+    including `reset` carrying over from one column to the next rather
+    than being cleared per column.
+
+    Args:
+        x: A run's state, voltages in the first columns.
+        factor: The spike criterion: compartment - soma [mV].
+        model: "Two" or "two" for the two-compartment model (2
+            columns); anything else means 45 columns.
+
+    Returns:
+        An array like x[:, :ncols] with 1 at each marked sample.
     """
     ncols = 2 if model in ("Two", "two") else 45
     diff = x[:, :ncols] - x[:, [0]]
@@ -26,13 +39,32 @@ def spiking(x, factor, model):
 
 
 def count_rising_edges(col):
-    """Combine_all.m's counter: 0 -> 1 transitions in a spike-marker column."""
+    """Counts 0 -> 1 transitions in a spike-marker column (Combine_all.m).
+
+    Args:
+        col: One column of spiking()'s markers.
+
+    Returns:
+        The number of rising edges.
+    """
     col = np.asarray(col)
     return int(np.sum((col[1:] > 0) & (col[:-1] <= 0)))
 
 
 def count_spikes(soma, axon, factor):
-    """BinarySearch.m's counter: axon above soma by `factor`, re-armed once axon < soma."""
+    """Counts spikes the way BinarySearch.m does.
+
+    A spike is the axon above the soma by `factor`; the counter re-arms
+    once axon < soma.
+
+    Args:
+        soma: Soma voltage per sample [mV].
+        axon: Axon voltage per sample [mV].
+        factor: The spike criterion: axon - soma [mV].
+
+    Returns:
+        The number of spikes.
+    """
     count, armed = 0, True
     for u1, u2 in zip(soma, axon):
         if u2 - u1 > factor and armed:
@@ -44,6 +76,16 @@ def count_spikes(soma, axon, factor):
 
 
 def matlab_round(x, digits=0):
-    """MATLAB round(x, n): half away from zero (Python's round is half-to-even)."""
-    scale = 10.0 ** digits
-    return math.copysign(math.floor(abs(x) * scale + 0.5), x) * 10.0 ** -digits
+    """Rounds like MATLAB's round(x, n): half away from zero.
+
+    Python's round is half-to-even.
+
+    Args:
+        x: The value.
+        digits: Decimal digits to keep; negative rounds to tens etc.
+
+    Returns:
+        The rounded value.
+    """
+    scale = 10.0**digits
+    return math.copysign(math.floor(abs(x) * scale + 0.5), x) * 10.0**-digits

@@ -1,16 +1,18 @@
-"""Checks that need no MATLAB: constants vs the stored .mat files, rest state, helpers."""
+"""Checks that need no MATLAB.
 
-from pathlib import Path
+Constants vs the stored .mat files, the rest state, and helpers.
+"""
+
+import pathlib
 
 import h5py
 import numpy as np
 import pytest
 
-from msoaxon import constants as C
-from msoaxon import mso_axon, two_cpt
-from msoaxon.spiking import count_spikes, matlab_round
+import msoaxon
+from msoaxon import constants as C, spiking
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = pathlib.Path(__file__).resolve().parents[1]
 
 
 def _mat(name):
@@ -20,9 +22,16 @@ def _mat(name):
 
 def test_area_matches_constants_m_output():
     m = _mat("Area.mat")
-    for key, ours in [("SA", C.SA), ("SAcm", C.SA_CM), ("areaRatio", C.AREA_RATIO),
-                      ("L", C.L), ("Lcm", C.L_CM), ("Rcyl", C.R_CYL), ("XA", C.XA),
-                      ("XAcm", C.XA_CM)]:
+    for key, ours in [
+        ("SA", C.SA),
+        ("SAcm", C.SA_CM),
+        ("areaRatio", C.AREA_RATIO),
+        ("L", C.L),
+        ("Lcm", C.L_CM),
+        ("Rcyl", C.R_CYL),
+        ("XA", C.XA),
+        ("XAcm", C.XA_CM),
+    ]:
         np.testing.assert_allclose(ours, m[key], rtol=1e-12, err_msg=key)
 
 
@@ -41,25 +50,28 @@ def test_coupling_matches_mat():
 
 @pytest.mark.parametrize("model_type", ["passive", "active-KLT", "active-full"])
 def test_two_cpt_stays_at_rest_without_input(model_type):
-    _, x = two_cpt("step", 5, 10, 0.0, 3, model_type, 20, -68, 1)
+    _, x = msoaxon.two_cpt("step", 5, 10, 0.0, 3, model_type, 20, -68, 1)
     assert np.abs(x[:, :2] + 68).max() < 1e-5
 
 
 def test_mso_axon_near_rest_without_input():
-    # Unlike TwoCptODE.m, msoAxon.m does not subtract resting currents and starts
-    # gating at rounded values (m0=.12, h0=.67, ...), so it sits ~0.9 mV off -68
-    _, y = mso_axon("step", 5, 10, 0.0, 3, "active-full", 20, -68, 1)
+    # Unlike TwoCptODE.m, msoAxon.m does not subtract resting currents and
+    # starts gating at rounded values (m0=.12, h0=.67, ...), so it sits ~0.9 mV
+    # off -68
+    _, y = msoaxon.mso_axon("step", 5, 10, 0.0, 3, "active-full", 20, -68, 1)
     assert np.abs(y[:, :45] + 68).max() < 1.5
 
 
-@pytest.mark.parametrize("model", [two_cpt, mso_axon])
+@pytest.mark.parametrize("model", [msoaxon.two_cpt, msoaxon.mso_axon])
 def test_strong_epsg_pair_spikes(model):
     _, x = model("EPSGpair", 5, 5, 100, 3, "active-full", 20, -68, 1)
-    axon = 1 if model is two_cpt else 2
-    assert count_spikes(x[:, 0], x[:, axon], 10) == 1
+    axon = 1 if model is msoaxon.two_cpt else 2
+    assert spiking.count_spikes(x[:, 0], x[:, axon], 10) == 1
 
 
 def test_matlab_round_is_half_away_from_zero():
-    assert matlab_round(2.5) == 3 and matlab_round(-2.5) == -3
-    assert matlab_round(15, -1) == 20 and matlab_round(25, -1) == 30
-
+    assert spiking.matlab_round(2.5) == 3 and spiking.matlab_round(-2.5) == -3
+    assert (
+        spiking.matlab_round(15, -1) == 20
+        and spiking.matlab_round(25, -1) == 30
+    )

@@ -13,8 +13,7 @@ the charging transient and shortly before the axonal spike.
 
 import numpy as np
 
-from ._bisect import smallest_firing
-from ._dispatch import run_model, spikes
+from msoaxon import _bisect, _dispatch
 
 START, STOP, T_END = 5.0, 105.0, 110.0
 FACTOR = 10.0  # spike = axon rises this far above soma
@@ -23,29 +22,97 @@ LOOKBACK = 0.5  # ms before the spike-detection time searched for the takeoff
 
 
 def fires(model, I, node=3, v0=-68.0, mem=None):
-    """Whether a 100 ms somatic step of I [pA] makes compartment `node` spike."""
-    return spikes(model, "step", START, STOP, I, node, T_END, v0, 1, mem=mem, factor=FACTOR)
+    """Returns whether a 100 ms somatic step makes compartment `node` spike.
+
+    Args:
+        model: "multi" or "two".
+        I: Step amplitude [pA].
+        node: The compartment compared with the soma, 1-indexed.
+        v0: Initial potential [mV].
+        mem: Channel overrides from multi.membrane(), or None.
+
+    Returns:
+        True if it spikes.
+    """
+    return _dispatch.spikes(
+        model,
+        "step",
+        START,
+        STOP,
+        I,
+        node,
+        T_END,
+        v0,
+        1,
+        mem=mem,
+        factor=FACTOR,
+    )
 
 
 def rheobase(model, node=3, v0=-68.0, mem=None, rel_tol=1e-4, guess=2000.0):
-    """Smallest 100 ms somatic step [pA] that fires, by bisection (inf above 1e6)."""
-    return smallest_firing(lambda I: fires(model, I, node, v0, mem), guess, 1e6, rel_tol)
+    """Finds the smallest 100 ms somatic step that fires, by bisection.
+
+    Args:
+        model: "multi" or "two".
+        node: The compartment compared with the soma, 1-indexed.
+        v0: Initial potential [mV].
+        mem: Channel overrides from multi.membrane(), or None.
+        rel_tol: The relative tolerance.
+        guess: The first amplitude tried [pA].
+
+    Returns:
+        The rheobase [pA], or inf if nothing up to 1e6 pA fires.
+    """
+    return _bisect.smallest_firing(
+        lambda I: fires(model, I, node, v0, mem), guess, 1e6, rel_tol
+    )
 
 
 def spike_amplitude(model, I, node=3, v0=-68.0, mem=None):
-    """Somatic spike amplitude from the inflection point [mV], plus details.
+    """Measures the somatic spike amplitude from the inflection point.
 
-    Returns dict(amplitude, peak_above_rest, t_spike, t_inflection, v_inflection,
-    trace), where trace = (t, x) is the finely sampled run up to 2 ms after the
-    spike, or None if the step doesn't fire.
+    Args:
+        model: "multi" or "two".
+        I: Step amplitude [pA].
+        node: The compartment compared with the soma, 1-indexed.
+        v0: Initial potential [mV].
+        mem: Channel overrides from multi.membrane(), or None.
+
+    Returns:
+        dict(amplitude, peak_above_rest, t_spike, t_inflection,
+        v_inflection, trace) in mV and ms, where trace = (t, x) is the
+        finely sampled run up to 2 ms after the spike; or None if the
+        step doesn't fire.
     """
-    t0, _ = run_model(model, "step", START, STOP, I, node, T_END, v0, 1, mem=mem,
-                      stop_on_spike=FACTOR)
+    t0, _ = _dispatch.run_model(
+        model,
+        "step",
+        START,
+        STOP,
+        I,
+        node,
+        T_END,
+        v0,
+        1,
+        mem=mem,
+        stop_on_spike=FACTOR,
+    )
     ts = t0[-1]
     if ts >= T_END:
         return None
-    t, x = run_model(model, "step", START, STOP, I, node, ts + 2.0, v0, 1, mem=mem,
-                     max_step=0.005)
+    t, x = _dispatch.run_model(
+        model,
+        "step",
+        START,
+        STOP,
+        I,
+        node,
+        ts + 2.0,
+        v0,
+        1,
+        mem=mem,
+        max_step=0.005,
+    )
     grid = np.arange(START + 0.001, ts + 2.0, 0.001)
     V = np.interp(grid, t, x[:, 0])
     d2 = np.gradient(np.gradient(V, grid), grid)
@@ -53,5 +120,11 @@ def spike_amplitude(model, I, node=3, v0=-68.0, mem=None):
     lo = max(START + CHARGING, ts - LOOKBACK)
     win = np.flatnonzero((grid >= lo) & (np.arange(len(grid)) < i_pk))
     i_inf = win[np.argmax(d2[win])]
-    return dict(amplitude=V[i_pk] - V[i_inf], peak_above_rest=V[i_pk] - v0,
-                t_spike=ts, t_inflection=grid[i_inf], v_inflection=V[i_inf], trace=(t, x))
+    return dict(
+        amplitude=V[i_pk] - V[i_inf],
+        peak_above_rest=V[i_pk] - v0,
+        t_spike=ts,
+        t_inflection=grid[i_inf],
+        v_inflection=V[i_inf],
+        trace=(t, x),
+    )
