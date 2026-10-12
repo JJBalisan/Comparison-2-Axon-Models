@@ -16,7 +16,16 @@ import numpy as np
 import pytest
 
 import msoaxon
-from msoaxon import _common, _fast, _parallel, _solve, multi, synaptic
+from msoaxon import (
+    _common,
+    _dispatch,
+    _fast,
+    _parallel,
+    _solve,
+    coincidence,
+    multi,
+    synaptic,
+)
 
 BITWISE = sys.platform == "darwin" and platform.machine() == "arm64"
 needs_ext = pytest.mark.skipif(
@@ -352,8 +361,6 @@ def test_mode_is_part_of_the_quiet_cache_key(fake_ext):
 
 
 def test_run_model_passes_mode_to_multi_only(fake_ext):
-    from msoaxon import _dispatch  # noqa: PLC0415
-
     args = ("EPSGpair", 5, 5.1, 30, 3, 8, -68.0, 1)
     _dispatch.run_model("multi", *args, mode="fast")
     assert fake_ext == ["EPSGpair", "none"]
@@ -395,3 +402,44 @@ def test_epsg_constants_follow_synaptic():
         inv_peak * (np.exp(-t / decay) - np.exp(-t / rise)),
         synaptic.epsg_unitary(t, MYOGA),
     )
+
+
+# --- coincidence.spike_height's cache ----------------------------------------
+
+
+@pytest.fixture
+def fake_runs(monkeypatch):
+    """Fakes _dispatch: threshold 40, height 30; counts the height runs."""
+    runs = []
+
+    def response(model, stim, start, stop, amp, *args, factor, **kw):
+        if amp >= 40.0:
+            return True, factor
+        return False, factor * min(amp / 40.0, 0.999) ** 6
+
+    def run_model(*args, **kw):
+        runs.append(kw.get("mode"))
+        return np.array([0.0, 20.0]), np.array([[0.0, 0.0], [0.0, 30.0]])
+
+    monkeypatch.setattr(_dispatch, "response", response)
+    monkeypatch.setattr(_dispatch, "run_model", run_model)
+    monkeypatch.setattr(coincidence, "_HEIGHTS", {})
+    return runs
+
+
+def test_spike_height_cache_keys_the_resolved_mode(
+    fake_ext, fake_runs, monkeypatch
+):
+    # unset, the mode resolves to "fast" here (fake extension); once
+    # MSOAXON_MODE=exact it resolves to "exact", so the cached fast height
+    # must not serve it
+    assert coincidence.spike_height("multi", node=2) == 30.0
+    monkeypatch.setenv(_fast.MODE_ENV, "exact")
+    assert coincidence.spike_height("multi", node=2) == 30.0
+    assert len(fake_runs) == 2
+    # an explicit mode="exact" is the same configuration: a hit
+    coincidence.spike_height("multi", node=2, model_kw={"mode": "exact"})
+    assert len(fake_runs) == 2
+    monkeypatch.delenv(_fast.MODE_ENV)
+    coincidence.spike_height("multi", node=2, model_kw={"mode": "fast"})
+    assert len(fake_runs) == 2  # the first, unset-mode entry
