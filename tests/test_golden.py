@@ -69,7 +69,7 @@ TOLERANCES = {
     "cross-platform": {"rtol": 1e-4, "atol": 5e-3},
 }
 TIMES = (1.0, 5.1, 5.3, 5.6, 6.0, 7.0, 9.0, 12.0)
-DTX = dict(soma_klt_scale=0, ais_klt_scale=0, rebalance_rest=True)
+DTX = {"soma_klt_scale": 0, "ais_klt_scale": 0, "rebalance_rest": True}
 
 # (stimType, start, stop, I, t_end, SynParams keywords); active-full, node 3,
 # v0 -68 mV, input at the soma unless a case below says otherwise
@@ -79,8 +79,8 @@ STIMULI = {
     "ramp": ("ramp", 5, 5.5, 8500, 20, {}),
     "ramp2": ("ramp2", 5, 5.5, 8500, 20, {}),
     "sine": ("sine", 5, 7.5, 8500, 20, {}),
-    "Synaptic": ("Synaptic", 5, 15, 0, 20, dict(random_in=1396)),
-    "SynapticPair": ("SynapticPair", 5, 15, 0, 20, dict(diff=1.0)),
+    "Synaptic": ("Synaptic", 5, 15, 0, 20, {"random_in": 1396}),
+    "SynapticPair": ("SynapticPair", 5, 15, 0, 20, {"diff": 1.0}),
     "EPSG": ("EPSG", 5, 10, 108, 20, {}),
     "EPSG-subthreshold": ("EPSG", 5, 10, 26.7, 20, {}),
     "EPSGpair": ("EPSGpair", 5, 5.2, 100, 20, {}),
@@ -135,28 +135,28 @@ def cases():
         for name, (stim, start, stop, amp, t_end, syn_kw) in STIMULI.items():
             out[f"{model}/{name}"] = (
                 model,
-                dict(
-                    stim=stim,
-                    start=start,
-                    stop=stop,
-                    amp=amp,
-                    t_end=t_end,
-                    syn_kw=syn_kw,
-                ),
+                {
+                    "stim": stim,
+                    "start": start,
+                    "stop": stop,
+                    "amp": amp,
+                    "t_end": t_end,
+                    "syn_kw": syn_kw,
+                },
                 axon,
             )
         for mt in MULTI_TYPES if model == "multi" else TWO_TYPES:
             out[f"{model}/type/{mt}"] = (
                 model,
-                dict(
-                    stim="EPSG",
-                    start=5,
-                    stop=10,
-                    amp=108,
-                    t_end=15,
-                    syn_kw={},
-                    model_type=mt,
-                ),
+                {
+                    "stim": "EPSG",
+                    "start": 5,
+                    "stop": 10,
+                    "amp": 108,
+                    "t_end": 15,
+                    "syn_kw": {},
+                    "model_type": mt,
+                },
                 axon,
             )
         # input into the axon: two_cpt routes it to compartment 2, mso_axon to
@@ -164,89 +164,89 @@ def cases():
         for stim, amp in (("step", 8500), ("EPSGpair", 100)):
             out[f"{model}/{stim}-input-node-3"] = (
                 model,
-                dict(
-                    stim=stim,
-                    start=5,
-                    stop=5.2 if stim == "EPSGpair" else 10,
-                    amp=amp,
-                    t_end=20,
-                    syn_kw={},
-                    input_node=3,
-                ),
+                {
+                    "stim": stim,
+                    "start": 5,
+                    "stop": 5.2 if stim == "EPSGpair" else 10,
+                    "amp": amp,
+                    "t_end": 20,
+                    "syn_kw": {},
+                    "input_node": 3,
+                },
                 axon,
             )
     d = multi.with_dendrites()
     lat, med = int(d.lateral[2]), int(d.medial[2])
     out["multi/EPSGbilateral"] = (
         "multi",
-        dict(
-            stim="EPSGbilateral",
-            start=5,
-            stop=5.2,
-            amp=60,
-            t_end=20,
-            syn_kw={},
-            input_node2=3,
-        ),
+        {
+            "stim": "EPSGbilateral",
+            "start": 5,
+            "stop": 5.2,
+            "amp": 60,
+            "t_end": 20,
+            "syn_kw": {},
+            "input_node2": 3,
+        },
         2,
     )
     out["multi/dendrites/EPSGbilateral"] = (
         "multi",
-        dict(
-            stim="EPSGbilateral",
-            start=5,
-            stop=5.1,
-            amp=60,
-            t_end=15,
-            syn_kw={},
-            input_node=lat,
-            input_node2=med,
-            morph=d,
-        ),
+        {
+            "stim": "EPSGbilateral",
+            "start": 5,
+            "stop": 5.1,
+            "amp": 60,
+            "t_end": 15,
+            "syn_kw": {},
+            "input_node": lat,
+            "input_node2": med,
+            "morph": d,
+        },
         2,
     )
     out["multi/dendrites/EPSG-klt-from-soma-ra200"] = (
         "multi",
-        dict(
-            stim="EPSG",
-            start=5,
-            stop=10,
-            amp=60,
-            t_end=15,
-            syn_kw={},
-            input_node=lat,
-            morph=multi.with_dendrites(
+        {
+            "stim": "EPSG",
+            "start": 5,
+            "stop": 10,
+            "amp": 60,
+            "t_end": 15,
+            "syn_kw": {},
+            "input_node": lat,
+            "morph": multi.with_dendrites(
                 conserve_totals=False, dendrite_ra=200.0
             ),
-        ),
+        },
         2,
     )
     out["multi/membrane/dendrotoxin"] = (
         "multi",
-        dict(
-            stim="step",
-            start=5,
-            stop=10,
-            amp=1500,
-            t_end=15,
-            syn_kw={},
-            mem=multi.membrane(-68.0, **DTX),
-        ),
+        {
+            "stim": "step",
+            "start": 5,
+            "stop": 10,
+            "amp": 1500,
+            "t_end": 15,
+            "syn_kw": {},
+            "mem": multi.membrane(-68.0, **DTX),
+        },
         2,
     )
     out["multi/membrane/soma-na-vhalf"] = (
         "multi",
-        dict(
-            stim="EPSGpair",
-            start=5,
-            stop=5.2,
-            amp=60,
-            t_end=15,
-            syn_kw={},
-            mem=multi.membrane(
+        {
+            "stim": "EPSGpair",
+            "start": 5,
+            "stop": 5.2,
+            "amp": 60,
+            "t_end": 15,
+            "syn_kw": {},
+            "mem": multi.membrane(
                 -68.0, soma_klt_scale=3, soma_na_vhalf=-77, rebalance_rest=True
             ),
-        ),
+        },
         2,
     )
     goldwyn = {k: v for k, v in two.GOLDWYN_2019.items() if k != "v0"}
@@ -265,15 +265,15 @@ def cases():
     )
     out["two/node-5"] = (
         "two",
-        dict(
-            stim="EPSGpair",
-            start=5,
-            stop=5.2,
-            amp=60,
-            t_end=15,
-            syn_kw={},
-            node=5,
-        ),
+        {
+            "stim": "EPSGpair",
+            "start": 5,
+            "stop": 5.2,
+            "amp": 60,
+            "t_end": 15,
+            "syn_kw": {},
+            "node": 5,
+        },
         1,
     )
     return out
@@ -357,7 +357,14 @@ def test_golden_trace(golden, tolerance, name):
 
 def test_step_ignores_input_node_in_mso_axon():
     # msoAxon.m injects the step into the soma whatever input_node says
-    kw = dict(stim="step", start=5, stop=10, amp=8500, t_end=20, syn_kw={})
+    kw = {
+        "stim": "step",
+        "start": 5,
+        "stop": 10,
+        "amp": 8500,
+        "t_end": 20,
+        "syn_kw": {},
+    }
     t1, y1 = _run("multi", **kw, input_node=1)
     t2, y2 = _run("multi", **kw, input_node=3)
     np.testing.assert_array_equal(t1, t2)
@@ -366,7 +373,14 @@ def test_step_ignores_input_node_in_mso_axon():
 
 def test_step_follows_input_node_in_two_cpt():
     # TwoCptODE.m does route it: input_node != 1 means the axon compartment
-    kw = dict(stim="step", start=5, stop=10, amp=8500, t_end=20, syn_kw={})
+    kw = {
+        "stim": "step",
+        "start": 5,
+        "stop": 10,
+        "amp": 8500,
+        "t_end": 20,
+        "syn_kw": {},
+    }
     _, x1 = _run("two", **kw, input_node=1)
     _, x3 = _run("two", **kw, input_node=3)
     assert not np.array_equal(x1, x3)

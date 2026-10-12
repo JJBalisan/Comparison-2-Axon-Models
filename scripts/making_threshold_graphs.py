@@ -9,6 +9,7 @@ across all CPUs unless --workers says otherwise.
 
 import argparse
 import pathlib
+from concurrent import futures
 
 import numpy as np
 
@@ -24,7 +25,7 @@ SWEEPS = {
 }
 
 
-def main():
+def main() -> None:
     """Parses the command line and runs the threshold sweeps."""
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -57,7 +58,9 @@ def main():
             run(a, pool)
 
 
-def run(a, pool):
+def run(
+    a: argparse.Namespace, pool: futures.ProcessPoolExecutor | None
+) -> None:
     # imported here rather than at the top: pool workers re-import this script,
     # and only the main process draws (msoaxon.plotting imports matplotlib)
     """Runs the threshold sweeps and draws or saves one figure per sweep.
@@ -77,7 +80,7 @@ def run(a, pool):
         if stim == "EPSGpair":
             dt = 0.1 if a.jpg_grid else dt
             n = 11 if a.jpg_grid else n
-            kw = dict(epsg_pair_dt=dt, rounded=not a.jpg_grid)
+            kw = {"epsg_pair_dt": dt, "rounded": not a.jpg_grid}
         n = min(n, a.points) if a.points else n
         x_values = np.array(
             [threshold.sweep_x(stim, i, dt) for i in range(1, n + 1)]

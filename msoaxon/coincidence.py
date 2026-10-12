@@ -20,6 +20,10 @@ This is new analysis code, not part of the MATLAB port: it uses a standard
 bracketing bisection rather than BinarySearch.m's halving search.
 """
 
+from collections.abc import Sequence
+from concurrent import futures
+from typing import Any
+
 import numpy as np
 
 from msoaxon import _bisect, _dispatch, _parallel, synaptic
@@ -31,7 +35,17 @@ FACTOR = (
 )
 
 
-def _respond(model, I, delay, node, v0, epsg_tau, site, model_kw, start=START):
+def _respond(
+    model: str,
+    I: float,
+    delay: float,
+    node: int,
+    v0: float,
+    epsg_tau: tuple[float, float],
+    site: tuple[str, int, int | None],
+    model_kw: dict[str, Any],
+    start: float = START,
+) -> tuple[bool, float]:
     """Runs one EPSG pair, `delay` apart.
 
     Returns (spiked, peak axon - soma); site = (stim, input_node,
@@ -57,27 +71,37 @@ def _respond(model, I, delay, node, v0, epsg_tau, site, model_kw, start=START):
     )
 
 
-def _spikes(model, I, delay, node, v0, epsg_tau, site, model_kw, start=START):
+def _spikes(
+    model: str,
+    I: float,
+    delay: float,
+    node: int,
+    v0: float,
+    epsg_tau: tuple[float, float],
+    site: tuple[str, int, int | None],
+    model_kw: dict[str, Any],
+    start: float = START,
+) -> bool:
     return _respond(model, I, delay, node, v0, epsg_tau, site, model_kw, start)[
         0
     ]
 
 
 def threshold(
-    model,
-    delay,
-    node=3,
-    v0=-68.0,
-    epsg_tau=synaptic.EPSG_TAU,
-    model_kw=None,
-    rel_tol=1e-4,
-    guess=50.0,
-    ceiling=2000.0,
+    model: str,
+    delay: float,
+    node: int = 3,
+    v0: float = -68.0,
+    epsg_tau: tuple[float, float] = synaptic.EPSG_TAU,
+    model_kw: dict[str, Any] | None = None,
+    rel_tol: float = 1e-4,
+    guess: float = 50.0,
+    ceiling: float = 2000.0,
     *,
-    stim="EPSGpair",
-    input_node=1,
-    input_node2=None,
-):
+    stim: str = "EPSGpair",
+    input_node: int = 1,
+    input_node2: int | None = None,
+) -> float:
     """Finds the smallest EPSG-pair amplitude that spikes at this delay.
 
     Bisection helped by interpolating the peak axon - soma of the runs
@@ -115,26 +139,26 @@ def threshold(
     )
 
 
-def _threshold_task(task):
+def _threshold_task(task: tuple[tuple[Any, ...], dict[str, Any]]) -> float:
     args, kw = task
     return threshold(*args, **kw)
 
 
 def threshold_curve(
-    model,
-    delays,
-    node=3,
-    v0=-68.0,
-    epsg_tau=synaptic.EPSG_TAU,
-    model_kw=None,
-    rel_tol=1e-4,
-    workers=None,
-    executor=None,
+    model: str,
+    delays: Sequence[float] | np.ndarray,
+    node: int = 3,
+    v0: float = -68.0,
+    epsg_tau: tuple[float, float] = synaptic.EPSG_TAU,
+    model_kw: dict[str, Any] | None = None,
+    rel_tol: float = 1e-4,
+    workers: int | None = None,
+    executor: futures.Executor | None = None,
     *,
-    stim="EPSGpair",
-    input_node=1,
-    input_node2=None,
-):
+    stim: str = "EPSGpair",
+    input_node: int = 1,
+    input_node2: int | None = None,
+) -> np.ndarray:
     """Computes threshold() at each delay, in parallel.
 
     Scripts that call this in parallel need a __main__ guard.
@@ -158,7 +182,7 @@ def threshold_curve(
     Returns:
         An array of thresholds, one per delay.
     """
-    site = dict(stim=stim, input_node=input_node, input_node2=input_node2)
+    site = {"stim": stim, "input_node": input_node, "input_node2": input_node2}
     tasks = [
         (
             (
@@ -179,7 +203,11 @@ def threshold_curve(
     )
 
 
-def half_width(delays, thresholds, margin):
+def half_width(
+    delays: Sequence[float] | np.ndarray,
+    thresholds: Sequence[float] | np.ndarray,
+    margin: float,
+) -> float:
     """Returns the full width at half maximum of the spike-probability curve.
 
     Inputs are set `margin` (fraction) above the coincident threshold;
@@ -213,21 +241,21 @@ def half_width(delays, thresholds, margin):
 
 
 def window(
-    model,
-    margin,
-    node=3,
-    v0=-68.0,
-    epsg_tau=synaptic.EPSG_TAU,
-    model_kw=None,
-    rel_tol=1e-4,
-    delay_tol=1e-4,
-    max_delay=1.0,
-    threshold0=None,
+    model: str,
+    margin: float,
+    node: int = 3,
+    v0: float = -68.0,
+    epsg_tau: tuple[float, float] = synaptic.EPSG_TAU,
+    model_kw: dict[str, Any] | None = None,
+    rel_tol: float = 1e-4,
+    delay_tol: float = 1e-4,
+    max_delay: float = 1.0,
+    threshold0: float | None = None,
     *,
-    stim="EPSGpair",
-    input_node=1,
-    input_node2=None,
-):
+    stim: str = "EPSGpair",
+    input_node: int = 1,
+    input_node2: int | None = None,
+) -> tuple[float, float]:
     """Finds the coincidence-window width at `margin` directly.
 
     Myoga et al held the input size fixed and varied the delay, and this
@@ -284,7 +312,7 @@ def window(
     )
     amp = (1 + margin) * th0
 
-    def respond(delay):
+    def respond(delay: float) -> tuple[bool, float]:
         return _respond(model, amp, delay, node, v0, epsg_tau, site, model_kw)
 
     spiked, peak = respond(max_delay)
@@ -296,14 +324,14 @@ def window(
         respond,
         max_delay,
         0.0,
-        lambda n, y: delay_tol,
+        lambda _no, _yes: delay_tol,
         FACTOR,
         [(max_delay, peak)],
     )
     return far + near, th0  # twice the midpoint of the final bracket
 
 
-def _trial(args):
+def _trial(args: tuple[Any, ...]) -> bool:
     model, amp, t1, t2, node, v0, epsg_tau, site, model_kw = args
     first, second = min(t1, t2), max(t1, t2)
     return _spikes(
@@ -320,24 +348,24 @@ def _trial(args):
 
 
 def probability_trials(
-    model,
-    delays,
-    amplitude,
-    n_trials=200,
-    amp_cv=0.03,
-    jitter=0.015,
-    node=3,
-    v0=-68.0,
-    epsg_tau=synaptic.EPSG_TAU,
-    model_kw=None,
-    seed=0,
-    workers=None,
-    executor=None,
+    model: str,
+    delays: Sequence[float] | np.ndarray,
+    amplitude: float,
+    n_trials: int = 200,
+    amp_cv: float = 0.03,
+    jitter: float = 0.015,
+    node: int = 3,
+    v0: float = -68.0,
+    epsg_tau: tuple[float, float] = synaptic.EPSG_TAU,
+    model_kw: dict[str, Any] | None = None,
+    seed: int = 0,
+    workers: int | None = None,
+    executor: futures.Executor | None = None,
     *,
-    stim="EPSGpair",
-    input_node=1,
-    input_node2=None,
-):
+    stim: str = "EPSGpair",
+    input_node: int = 1,
+    input_node2: int | None = None,
+) -> np.ndarray:
     """Measures spike probability per delay from noisy trials.
 
     This checks half_width's shortcut. Noise per trial: the pair's

@@ -7,9 +7,9 @@ import pathlib
 import subprocess
 import sys
 
-import matplotlib
+import matplotlib as mpl
 
-matplotlib.use("Agg")
+mpl.use("Agg")
 
 import numpy as np
 import pytest
@@ -164,16 +164,16 @@ def runs():
     t1, y = msoaxon.mso_axon(*args, 3, "active-full", 20, -68, 1, syn)
     t2, x = msoaxon.two_cpt(*args, 3, "active-full", 20, -68, 1, syn)
     t3, z = msoaxon.two_cpt(*args, 5, "active-full", 20, -68, 1, syn)
-    graph = dict(
-        node=3,
-        tEnd=20,
-        stimType="EPSGpair",
-        inputNode=1,
-        start=5,
-        stop=5,
-        I=100,
-        Syn=syn,
-    )
+    graph = {
+        "node": 3,
+        "tEnd": 20,
+        "stimType": "EPSGpair",
+        "inputNode": 1,
+        "start": 5,
+        "stop": 5,
+        "I": 100,
+        "Syn": syn,
+    }
     return graph, (t1, y, t2, x, t3, z)
 
 
@@ -193,17 +193,17 @@ def test_graph_types_render(runs, kind):
     graph, data = runs
     fig = plotting.graphing({**graph, "Type": kind}, *data)
     assert fig.axes
-    matplotlib.pyplot.close(fig)
+    mpl.pyplot.close(fig)
 
 
 def test_two_compartment_graph_and_unknown_type(runs):
     graph, (_, _, t2, x, _, _) = runs
-    matplotlib.pyplot.close(
+    mpl.pyplot.close(
         plotting.graphing({**graph, "Type": "TwoCompartment"}, t2, x)
     )
     with pytest.raises(ValueError):
         plotting.graphing({**graph, "Type": "Nope"}, t2, x)
-    matplotlib.pyplot.close(
+    mpl.pyplot.close(
         plotting.threshold_figure([0, 1], [1, 2], [1, 2], "t", "x")
     )
 
@@ -224,6 +224,7 @@ def test_combine_all_script(tmp_path):
         capture_output=True,
         text=True,
         env={"MPLBACKEND": "Agg", "PATH": ""},
+        check=False,
     )
     assert r.returncode == 0, r.stderr
     assert (

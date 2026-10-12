@@ -2,9 +2,10 @@
 # repo-audit toolchain (2026-10-05), adjusted for this repo.
 # https://google.github.io/styleguide/pyguide.html
 #
-# This repo's Python port must stay bit-identical to the MATLAB: format and
-# apply safe fixes only (never --unsafe-fixes), and never reorder floating-point
-# arithmetic. tests/test_golden.py pins the traces.
+# The Python package is the reference (the .m files are the historical
+# original). tests/test_golden.py pins its traces, so a lint fix must not change
+# results: review every --unsafe-fixes change by hand, and never reorder
+# floating-point arithmetic for style.
 line-length = 80          # pyguide 3.2
 indent-width = 4          # pyguide 3.4
 target-version = "py311"  # matches requires-python in pyproject.toml
@@ -76,8 +77,12 @@ max-statements = 50      # ~ pyguide 3.18 "about 40 lines"
 # Scripts: the same MATLAB names, plus dendrites.py's per-check results named
 # after the docstring's checks A-G. They import matplotlib inside run(): pool
 # workers re-import the script, and only the main process draws
-# (tests/test_script_imports.py).
-"scripts/**" = ["T20", "N803", "N806", "E741", "PLC0415"]
+# (tests/test_script_imports.py). Each run() reads top to bottom as the
+# analysis it writes up, so its length (PLR0915) is not split for its own sake.
+"scripts/**" = ["T20", "N803", "N806", "E741", "PLC0415", "PLR0915"]
 # Tests use the models' names too, and import inside tests on purpose in a few
-# places.
-"tests/**" = ["D", "ANN", "S101", "PLR", "ARG", "N806", "N812", "E741"]
+# places. They run the repo's own scripts in subprocesses (S603), and
+# test_golden.py's main guard reports what it regenerated (T20).
+"tests/**" = [
+  "D", "ANN", "S101", "PLR", "ARG", "N806", "N812", "E741", "S603", "T20",
+]

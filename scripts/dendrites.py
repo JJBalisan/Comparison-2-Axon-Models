@@ -24,6 +24,10 @@ lumped results they are compared with.
 import argparse
 import json
 import pathlib
+import types
+from collections.abc import Iterable
+from concurrent import futures
+from typing import Any
 
 import numpy as np
 
@@ -35,7 +39,14 @@ UNITARY = 26.7  # "unitary EPSG" of the MATLAB code
 MYOGA_US = 221
 
 
-def epsp(morph, site, mem, amp=UNITARY, site2=None, t_end=12.0):
+def epsp(
+    morph: types.SimpleNamespace,
+    site: int,
+    mem: types.SimpleNamespace | None,
+    amp: float = UNITARY,
+    site2: int | None = None,
+    t_end: float = 12.0,
+) -> tuple[np.ndarray, np.ndarray]:
     """Somatic voltage change for an EPSG (or a bilateral pair at 0 delay)."""
     if site2 is None:
         t, y = msoaxon.mso_axon(
@@ -71,7 +82,7 @@ def epsp(morph, site, mem, amp=UNITARY, site2=None, t_end=12.0):
     return measure.soma_on_grid(t, y, V0, 4.9, t_end)
 
 
-def shape(g, v):
+def shape(g: np.ndarray, v: np.ndarray) -> dict[str, float]:
     """Measures an EPSP: peak, 10-90% rise time and half width.
 
     Args:
@@ -84,14 +95,16 @@ def shape(g, v):
     pk = v.max()
     r10, r90 = g[np.argmax(v >= 0.1 * pk)], g[np.argmax(v >= 0.9 * pk)]
     above = g[v >= pk / 2]
-    return dict(
-        amp=float(pk),
-        rise_us=float((r90 - r10) * 1e3),
-        half_width_us=float((above[-1] - above[0]) * 1e3),
-    )
+    return {
+        "amp": float(pk),
+        "rise_us": float((r90 - r10) * 1e3),
+        "half_width_us": float((above[-1] - above[0]) * 1e3),
+    }
 
 
-def rin_tau(morph, mem):
+def rin_tau(
+    morph: types.SimpleNamespace, mem: types.SimpleNamespace | None
+) -> dict[str, float]:
     """Measures input resistance and time constant (see passive_step).
 
     Args:
@@ -102,14 +115,14 @@ def rin_tau(morph, mem):
         dict(rin_steady, rin_peak [MOhm], t63_us).
     """
     r = measure.passive_step("multi", V0, morph=morph, mem=mem)
-    return dict(
-        rin_steady=float(r["rin_steady"]),
-        rin_peak=float(r["rin_peak"]),
-        t63_us=float(r["tau"] * 1e3),
-    )
+    return {
+        "rin_steady": float(r["rin_steady"]),
+        "rin_peak": float(r["rin_peak"]),
+        "t63_us": float(r["tau"] * 1e3),
+    }
 
 
-def main():
+def main() -> None:
     """Parses the command line and runs the dendritic checks."""
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -141,7 +154,7 @@ def main():
         run(a, pool)
 
 
-def run(a, pool):
+def run(a: argparse.Namespace, pool: futures.ProcessPoolExecutor) -> None:
     """Runs the dendritic checks A-G and saves the figure and JSON.
 
     Args:
@@ -165,7 +178,11 @@ def run(a, pool):
     # the rest, so all of them go to the pool now, in one batch, and run while
     # A, B and D are computed here. Each search is deterministic, so the results
     # don't depend on this.
-    def th_job(delay, tau=synaptic.EPSG_TAU, **kw):
+    def th_job(
+        delay: float,
+        tau: tuple[float, float] = synaptic.EPSG_TAU,
+        **kw: Any,
+    ) -> futures.Future:
         return pool.submit(
             coincidence.threshold,
             "multi",
@@ -175,10 +192,10 @@ def run(a, pool):
             **kw,
         )
 
-    def collect(jobs):
+    def collect(jobs: Iterable[futures.Future]) -> np.ndarray:
         return np.array([j.result() for j in jobs])
 
-    dend = dict(model_kw=dict(morph=D))
+    dend = {"model_kw": {"morph": D}}
     bil = dict(
         stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m, **dend
     )
@@ -276,13 +293,13 @@ def run(a, pool):
     g, vl = epsp(D, mid_l, reb["dendritic"], amp=amp)
     _, vm = epsp(D, mid_m, reb["dendritic"], amp=amp)
     _, vb = epsp(D, mid_l, reb["dendritic"], amp=amp, site2=mid_m)
-    res["D_summation"] = dict(
-        amplitude=float(amp),
-        unilateral_peaks=[float(vl.max()), float(vm.max())],
-        bilateral_peak=float(vb.max()),
-        sum_of_waveforms_peak=float((vl + vm).max()),
-        ratio=float(vb.max() / (vl + vm).max()),
-    )
+    res["D_summation"] = {
+        "amplitude": float(amp),
+        "unilateral_peaks": [float(vl.max()), float(vm.max())],
+        "bilateral_peak": float(vb.max()),
+        "sum_of_waveforms_peak": float((vl + vm).max()),
+        "ratio": float(vb.max() / (vl + vm).max()),
+    }
     print("D", res["D_summation"], flush=True)
 
     # E. coincidence window with bilateral dendritic inputs
@@ -316,19 +333,19 @@ def run(a, pool):
         k: pool.submit(somatic.spike_amplitude, "multi", rb * k, mem=mem_d)
         for k in mults
     }
-    res["G_somatic_spike"] = dict(
-        rheobase_pA=float(rb),
-        amplitudes_mV={
+    res["G_somatic_spike"] = {
+        "rheobase_pA": float(rb),
+        "amplitudes_mV": {
             str(k): float(j.result()["amplitude"]) for k, j in amp_jobs.items()
         },
-    )
+    }
     print("G", res["G_somatic_spike"], flush=True)
 
     # imported here rather than at the top: pool workers re-import this script,
     # and only the main process draws
-    import matplotlib
+    import matplotlib as mpl
 
-    matplotlib.use("Agg")
+    mpl.use("Agg")
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(1, 3, figsize=(17, 4.8))

@@ -27,14 +27,14 @@ MODEL_TYPES = (
 
 
 def check_args(
-    stim_type,
-    model_type,
-    node,
-    input_node,
-    min_node,
-    stim_types=STIM_TYPES,
-    n_max=C.N_CPT,
-):
+    stim_type: str,
+    model_type: str,
+    node: int,
+    input_node: int,
+    min_node: int,
+    stim_types: tuple[str, ...] = STIM_TYPES,
+    n_max: int = C.N_CPT,
+) -> None:
     """Rejects inputs that numpy's negative indexing would accept silently.
 
     Args:
@@ -66,7 +66,14 @@ def check_args(
         )
 
 
-def stimulus(stim_type, start, stop, I, t_end, syn):
+def stimulus(
+    stim_type: str,
+    start: float,
+    stop: float,
+    I: float,
+    t_end: float,
+    syn: synaptic.SynParams,
+) -> types.SimpleNamespace:
     """Bundles the stimulus settings (what TwoCpt.m stored on P).
 
     Args:
@@ -94,7 +101,15 @@ def stimulus(stim_type, start, stop, I, t_end, syn):
     return s
 
 
-def _stops(rhs, axon_col, stop_on_spike, stop_when_settled, stim_type, s, n_v):
+def _stops(
+    rhs: _solve.Rhs,
+    axon_col: int,
+    stop_on_spike: float | None,
+    stop_when_settled: bool,
+    stim_type: str,
+    s: types.SimpleNamespace,
+    n_v: int,
+) -> list[_solve.Event] | None:
     """Returns the terminal events for a run: none, the spike stop, or both.
 
     n_v: how many leading state entries are voltages (2 for two_cpt, n

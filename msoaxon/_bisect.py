@@ -7,10 +7,19 @@ coincidence.threshold and coincidence.window). The MATLAB port's own search
 as it is.
 """
 
+from collections.abc import Callable, Iterable
+
 import numpy as np
 
+Response = Callable[[float], tuple[bool, float]]
 
-def smallest_firing(fires, guess, ceiling, rel_tol):
+
+def smallest_firing(
+    fires: Callable[[float], bool],
+    guess: float,
+    ceiling: float,
+    rel_tol: float,
+) -> float:
     """Finds the smallest x with fires(x), by doubling and then bisection.
 
     Assumes firing only gets easier as x grows. Doubles from `guess`
@@ -39,7 +48,15 @@ def smallest_firing(fires, guess, ceiling, rel_tol):
     return hi
 
 
-def crossing(respond, x_no, x_yes, tol, level, points=(), log=False):
+def crossing(
+    respond: Response,
+    x_no: float,
+    x_yes: float,
+    tol: Callable[[float, float], float],
+    level: float,
+    points: Iterable[tuple[float, float]] = (),
+    log: bool = False,
+) -> tuple[float, float]:
     """Narrows a bracket [x_no, x_yes] around where a response first spikes.
 
     Runs that don't spike give their peak below `level`, and the peak
@@ -90,7 +107,12 @@ def crossing(respond, x_no, x_yes, tol, level, points=(), log=False):
     return x_no, x_yes
 
 
-def _predict(pts, level, f, finv):
+def _predict(
+    pts: list[tuple[float, float]],
+    level: float,
+    f: Callable[[float], float],
+    finv: Callable[[float], float],
+) -> float | None:
     """Predicts where the peak reaches `level` from the nearest points.
 
     Inverse quadratic interpolation (secant with two points) of f(x)
@@ -122,7 +144,13 @@ def _predict(pts, level, f, finv):
     return finv(est) if np.isfinite(est) else None
 
 
-def smallest_crossing(respond, guess, ceiling, rel_tol, level):
+def smallest_crossing(
+    respond: Response,
+    guess: float,
+    ceiling: float,
+    rel_tol: float,
+    level: float,
+) -> float:
     """Does smallest_firing with the bisection replaced by prediction.
 
     Starts at `guess` like smallest_firing, but finds the bracket by
@@ -166,6 +194,6 @@ def smallest_crossing(respond, guess, ceiling, rel_tol, level):
         ):  # everything spikes: come down, 1.25x first, then halving
             x = hi / 1.25 if hi == guess else hi / 2
     _, hi = crossing(
-        respond, lo, hi, lambda n, y: rel_tol * y, level, pts, log=True
+        respond, lo, hi, lambda _, y: rel_tol * y, level, pts, log=True
     )
     return hi

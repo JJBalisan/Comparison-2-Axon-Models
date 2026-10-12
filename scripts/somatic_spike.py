@@ -22,13 +22,13 @@ CASES = {
     "45-compartment (msoAxon.m)": ("multi", {}),
     "45-compartment, KLT blocked at soma + AIS (dendrotoxin)": (
         "multi",
-        dict(soma_klt_scale=0, ais_klt_scale=0, rebalance_rest=True),
+        {"soma_klt_scale": 0, "ais_klt_scale": 0, "rebalance_rest": True},
     ),
     "2-compartment (TwoCpt.m)": ("two", {}),
 }
 
 
-def main():
+def main() -> None:
     """Runs the somatic-spike protocol and saves the figure and JSON."""
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -47,14 +47,14 @@ def main():
 
     # imported here rather than at the top, like the pool scripts, so importing
     # this module stays cheap
-    import matplotlib
+    import matplotlib as mpl
 
-    matplotlib.use("Agg")
+    mpl.use("Agg")
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(1, len(CASES), figsize=(15, 4.2), sharey=True)
     results = {}
-    for ax, (name, (model, knobs)) in zip(axes, CASES.items()):
+    for ax, (name, (model, knobs)) in zip(axes, CASES.items(), strict=True):
         mem = multi.membrane(-68.0, **knobs) if knobs else None
         rb = somatic.rheobase(model, mem=mem, rel_tol=1e-2 if a.quick else 1e-4)
         rows = []

@@ -28,6 +28,7 @@ def run_script(name, *args):
         capture_output=True,
         text=True,
         env={"MPLBACKEND": "Agg", "PATH": ""},
+        check=False,
     )
     assert r.returncode == 0, r.stderr
     return r.stdout

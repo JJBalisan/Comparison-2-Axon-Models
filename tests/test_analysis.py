@@ -90,7 +90,7 @@ def test_noise_free_trials_agree_with_the_threshold_curve():
 
 def test_noisy_trials_are_seeded_probabilities():
 
-    kw = dict(n_trials=6, amp_cv=0.05, jitter=0.02, workers=1)
+    kw = {"n_trials": 6, "amp_cv": 0.05, "jitter": 0.02, "workers": 1}
     p1 = coincidence.probability_trials("two", [0.0, 0.5], 52.0, seed=3, **kw)
     np.testing.assert_array_equal(
         p1,

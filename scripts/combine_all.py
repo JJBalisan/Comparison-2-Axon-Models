@@ -27,7 +27,7 @@ DEFAULTS = {
 }
 
 
-def main():
+def main() -> None:
     """Parses the command line, runs both models and draws the figure."""
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -99,17 +99,17 @@ def main():
         f"two-compartment {n_two}"
     )
 
-    graph = dict(
-        Type=a.graph,
-        node=a.node,
-        tEnd=a.t_end,
-        stimType=a.stim,
-        inputNode=a.input_node,
-        start=a.start,
-        stop=stop,
-        I=I,
-        Syn=syn,
-    )
+    graph = {
+        "Type": a.graph,
+        "node": a.node,
+        "tEnd": a.t_end,
+        "stimType": a.stim,
+        "inputNode": a.input_node,
+        "start": a.start,
+        "stop": stop,
+        "I": I,
+        "Syn": syn,
+    }
     fig = plotting.graphing(graph, t1, y, t2, x, t3, z)
     if a.out:
         fig.savefig(a.out, dpi=150)

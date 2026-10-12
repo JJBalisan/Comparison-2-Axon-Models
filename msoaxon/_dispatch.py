@@ -3,26 +3,31 @@
 The analysis functions pick the model with model="multi" / "two".
 """
 
-from msoaxon import multi, two
+import types
+from typing import Any
+
+import numpy as np
+
+from msoaxon import multi, synaptic, two
 
 
 def run_model(
-    model,
-    stim,
-    start,
-    stop,
-    I,
-    node,
-    t_end,
-    v0,
-    input_node,
-    syn=None,
-    model_type="active-full",
-    mem=None,
-    morph=None,
-    input_node2=None,
-    **kw,
-):
+    model: str,
+    stim: str,
+    start: float,
+    stop: float,
+    I: float,
+    node: int,
+    t_end: float,
+    v0: float,
+    input_node: int,
+    syn: synaptic.SynParams | None = None,
+    model_type: str = "active-full",
+    mem: types.SimpleNamespace | None = None,
+    morph: types.SimpleNamespace | None = None,
+    input_node2: int | None = None,
+    **kw: Any,
+) -> tuple[np.ndarray, np.ndarray]:
     """Runs mso_axon (model="multi") or two_cpt (model="two").
 
     Args:
@@ -95,20 +100,20 @@ STOP_WHEN_SETTLED = True
 
 
 def response(
-    model,
-    stim,
-    start,
-    stop,
-    I,
-    node,
-    t_end,
-    v0,
-    input_node,
-    syn=None,
+    model: str,
+    stim: str,
+    start: float,
+    stop: float,
+    I: float,
+    node: int,
+    t_end: float,
+    v0: float,
+    input_node: int,
+    syn: synaptic.SynParams | None = None,
     *,
-    factor,
-    **kw,
-):
+    factor: float,
+    **kw: Any,
+) -> tuple[bool, float]:
     """Runs one stimulus and reports whether it spiked and how close it came.
 
     For a run that didn't spike the peak says how close it came, which
@@ -159,20 +164,20 @@ def response(
 
 
 def spikes(
-    model,
-    stim,
-    start,
-    stop,
-    I,
-    node,
-    t_end,
-    v0,
-    input_node,
-    syn=None,
+    model: str,
+    stim: str,
+    start: float,
+    stop: float,
+    I: float,
+    node: int,
+    t_end: float,
+    v0: float,
+    input_node: int,
+    syn: synaptic.SynParams | None = None,
     *,
-    factor,
-    **kw,
-):
+    factor: float,
+    **kw: Any,
+) -> bool:
     """Returns whether compartment `node` rises `factor` mV above the soma.
 
     The run stops at that first spike (stop_on_spike) or, once the input

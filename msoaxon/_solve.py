@@ -1,13 +1,22 @@
 """ode15s stand-in: scipy BDF, split at stimulus breakpoints."""
 
+from collections.abc import Callable, Hashable
+from typing import Any
+
 import numpy as np
 from scipy import integrate as scipy_integrate
+
+# f(t, x) -> dx/dt, and a solve_ivp event function g(t, x)
+Rhs = Callable[[float, np.ndarray], np.ndarray | list[float]]
+Event = Callable[[float, np.ndarray], float]
 
 _QUIET_CACHE = {}
 _QUIET_CACHE_SIZE = 64
 
 
-def breakpoints(stim_type, start, stop, t_end):
+def breakpoints(
+    stim_type: str, start: float, stop: float, t_end: float
+) -> list[float]:
     """Returns the times where the stimulus switches on or off.
 
     Restarting the integrator there keeps it from stepping over a narrow
@@ -29,7 +38,13 @@ def breakpoints(stim_type, start, stop, t_end):
     return sorted(p for p in pts if 0 < p < t_end)
 
 
-def input_end(stim_type, start, stop, t_end, epsg_tau):
+def input_end(
+    stim_type: str,
+    start: float,
+    stop: float,
+    t_end: float,
+    epsg_tau: tuple[float, float],
+) -> float:
     """Returns the time after which the stimulus no longer drives the cell.
 
     EPSGs: the last onset plus 20 decay constants, when the conductance
@@ -56,7 +71,7 @@ def input_end(stim_type, start, stop, t_end, epsg_tau):
     return t_end
 
 
-def pre_stimulus_is_quiet(cuts, start, stop):
+def pre_stimulus_is_quiet(cuts: list[float], start: float, stop: float) -> bool:
     """Returns whether no stimulus acts before the first breakpoint.
 
     If so, the solution on [0, cuts[0]] can be shared between runs.
@@ -72,7 +87,17 @@ def pre_stimulus_is_quiet(cuts, start, stop):
     return bool(cuts) and cuts[0] <= min(start, stop)
 
 
-def _segment(rhs, a, b, y, rtol, atol, max_step, jac_sparsity, events=None):
+def _segment(
+    rhs: Rhs,
+    a: float,
+    b: float,
+    y: np.ndarray,
+    rtol: float,
+    atol: float,
+    max_step: float,
+    jac_sparsity: Any,
+    events: Event | list[Event] | None = None,
+) -> tuple[np.ndarray, np.ndarray, bool]:
     """Solves one segment.
 
     Returns (t, y, stopped), where stopped means a terminal event fired.
@@ -93,7 +118,7 @@ def _segment(rhs, a, b, y, rtol, atol, max_step, jac_sparsity, events=None):
     return sol.t, sol.y, sol.status == 1
 
 
-def spike_event(axon_col, factor):
+def spike_event(axon_col: int, factor: float) -> Event:
     """Returns a terminal event: the axon rises `factor` mV above the soma.
 
     The continuous-time version of count_spikes' first detection.
@@ -106,7 +131,8 @@ def spike_event(axon_col, factor):
         An event function for solve_ivp (terminal, rising).
     """
 
-    def event(t, x):
+    # solve_ivp calls events as g(t, x); this one needs only x
+    def event(t: float, x: np.ndarray) -> float:  # noqa: ARG001
         return x[axon_col] - x[0] - factor
 
     event.terminal = True
@@ -114,7 +140,9 @@ def spike_event(axon_col, factor):
     return event
 
 
-def settled_event(rhs, t_off, axon_col, factor, n_v):
+def settled_event(
+    rhs: Rhs, t_off: float, axon_col: int, factor: float, n_v: int
+) -> Event:
     """Returns a terminal event: after t_off, stop once no spike can follow.
 
     Fires at the first time after t_off when axon - soma is below
@@ -145,7 +173,7 @@ def settled_event(rhs, t_off, axon_col, factor, n_v):
         An event function for solve_ivp (terminal, rising).
     """
 
-    def event(t, x):
+    def event(t: float, x: np.ndarray) -> float:
         if t < t_off or x[axon_col] - x[0] >= factor / 2:
             return -1.0
         dv = np.asarray(
@@ -158,7 +186,16 @@ def settled_event(rhs, t_off, axon_col, factor, n_v):
     return event
 
 
-def _quiet_prefix(key, rhs, b, y0, rtol, atol, max_step, jac_sparsity):
+def _quiet_prefix(
+    key: Hashable,
+    rhs: Rhs,
+    b: float,
+    y0: np.ndarray,
+    rtol: float,
+    atol: float,
+    max_step: float,
+    jac_sparsity: Any,
+) -> tuple[np.ndarray, np.ndarray]:
     """Returns the solution on [0, b] with no stimulus.
 
     Computed once per (model settings, y0, b) and cached.
@@ -181,17 +218,17 @@ def _quiet_prefix(key, rhs, b, y0, rtol, atol, max_step, jac_sparsity):
 
 
 def integrate(
-    rhs,
-    y0,
-    t_end,
-    cuts,
-    rtol,
-    atol,
-    max_step,
-    jac_sparsity=None,
-    quiet=None,
-    stop_event=None,
-):
+    rhs: Rhs,
+    y0: np.ndarray,
+    t_end: float,
+    cuts: list[float],
+    rtol: float,
+    atol: float,
+    max_step: float,
+    jac_sparsity: Any = None,
+    quiet: tuple[Hashable, Rhs] | None = None,
+    stop_event: Event | list[Event] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Integrates from 0 to t_end in pieces split at the breakpoints.
 
     Like ode15s without a tspan vector, the output is every accepted

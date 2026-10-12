@@ -2,7 +2,9 @@
 
 import multiprocessing
 import os
+from collections.abc import Callable, Sequence
 from concurrent import futures
+from typing import Any
 
 # every module whose functions run in pool workers
 _PRELOAD = [
@@ -13,7 +15,9 @@ _PRELOAD = [
 ]
 
 
-def pool_context(method=None):
+def pool_context(
+    method: str | None = None,
+) -> multiprocessing.context.BaseContext:
     """Returns the multiprocessing context for worker pools.
 
     That is the platform default, except that fork is replaced by
@@ -42,7 +46,9 @@ def pool_context(method=None):
     return ctx
 
 
-def process_pool(max_workers=None):
+def process_pool(
+    max_workers: int | None = None,
+) -> futures.ProcessPoolExecutor:
     """Returns a ProcessPoolExecutor using pool_context().
 
     Use this for every worker pool.
@@ -58,7 +64,13 @@ def process_pool(max_workers=None):
     )
 
 
-def map_tasks(fn, tasks, workers=None, executor=None, chunksize=1):
+def map_tasks(
+    fn: Callable[[Any], Any],
+    tasks: Sequence[Any],
+    workers: int | None = None,
+    executor: futures.Executor | None = None,
+    chunksize: int = 1,
+) -> list[Any]:
     """Computes [fn(t) for t in tasks], in parallel unless workers == 1.
 
     Args:

@@ -9,7 +9,7 @@ import pytest
 import msoaxon
 from msoaxon import _solve, multi, somatic
 
-DTX = dict(soma_klt_scale=0, ais_klt_scale=0, rebalance_rest=True)
+DTX = {"soma_klt_scale": 0, "ais_klt_scale": 0, "rebalance_rest": True}
 ARGS = ("EPSGpair", 5, 5.2, 60, 3, "active-full", 12, -68.0, 1)
 
 
@@ -23,9 +23,9 @@ def test_default_membrane_is_msoaxon_m():
 @pytest.mark.parametrize(
     "knobs",
     [
-        dict(rebalance_rest=True),
+        {"rebalance_rest": True},
         DTX,
-        dict(soma_klt_scale=3, soma_na_vhalf=-77, rebalance_rest=True),
+        {"soma_klt_scale": 3, "soma_na_vhalf": -77, "rebalance_rest": True},
     ],
 )
 def test_rebalanced_rest_holds(knobs):

@@ -10,7 +10,9 @@ EPSG_TAU = (
 )  # (rise, decay) [ms], the Franken et al 2015 waveform used by the MATLAB
 
 
-def epsg_unitary(t, tau=EPSG_TAU):
+def epsg_unitary(
+    t: float | np.ndarray, tau: tuple[float, float] = EPSG_TAU
+) -> float | np.ndarray:
     """Returns the unitary EPSG waveform (difference of exponentials).
 
     The peak is 1. The default kinetics keep the MATLAB expression,
@@ -61,7 +63,7 @@ class SynParams:
     epsg_tau: tuple = EPSG_TAU
 
 
-def synaptic(syn: SynParams):
+def synaptic(syn: SynParams) -> tuple[np.ndarray, np.ndarray]:
     """Makes the synaptic conductance: filtered noise convolved with an EPSG.
 
     The noise is gammatone-filtered and rectified. numpy's RNG differs
@@ -98,7 +100,7 @@ def synaptic(syn: SynParams):
     return t, g
 
 
-def interp_g(t_syn, g_syn, t):
+def interp_g(t_syn: np.ndarray, g_syn: np.ndarray, t: float) -> float:
     """Interpolates the conductance table like interp1q, but 0 outside it.
 
     MATLAB's interp1q gives NaN outside the table; TwoCptODE's guard
