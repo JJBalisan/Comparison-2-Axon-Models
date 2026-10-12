@@ -9,7 +9,8 @@ through _dispatch.run_model. Each value is compared with a reference computed at
 rel_tol 1e-7 without the settled stop (cached in figures/benchmark/reference.json;
 --reference recomputes it), so methods that change results can be compared with
 methods that don't. --check makes every spikes() call run with and without the
-settled stop and counts the decisions that differ (it must be 0).
+settled stop and counts the decisions that differ (it must be 0); response()
+calls, which the EPSG-pair searches use, are compared on the spiked flag only.
 """
 
 import argparse
@@ -59,6 +60,7 @@ def cases():
 def instrument(stats, check):
     """Count runs and simulated time; with check, compare both stop settings."""
     run_model, spikes = _dispatch.run_model, _dispatch.spikes
+    response = _dispatch.response
 
     def counted(*a, **kw):
         t, x = run_model(*a, **kw)
@@ -77,10 +79,31 @@ def instrument(stats, check):
             _dispatch.STOP_WHEN_SETTLED = saved
         return answer
 
-    # the analysis modules imported spikes by name, so replace it there too
+    def checked_response(*a: object, **kw: object) -> tuple[bool, float]:
+        """response() for the EPSG-pair searches; checks the spiked flag.
+
+        The peak is not compared: the searches bracket on the yes/no and use
+        the peak only as an interpolation hint.
+        """
+        answer = response(*a, **kw)
+        if check:
+            saved = _dispatch.STOP_WHEN_SETTLED
+            _dispatch.STOP_WHEN_SETTLED = False
+            n, ms = stats["runs"], stats["sim_ms"]
+            try:
+                if response(*a, **kw)[0] != answer[0]:
+                    stats["mismatches"] += 1
+            finally:
+                stats["runs"], stats["sim_ms"] = n, ms
+                _dispatch.STOP_WHEN_SETTLED = saved
+        return answer
+
+    # the analysis modules imported spikes by name, so replace it there too;
+    # coincidence imported response, which calls run_model, not spikes
     _dispatch.run_model = counted
     for mod in (_dispatch, coincidence, somatic, threshold_mod):
         mod.spikes = checked
+    _dispatch.response = coincidence.response = checked_response
 
 
 def as_list(v):
