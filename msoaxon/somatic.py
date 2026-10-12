@@ -62,10 +62,19 @@ def rheobase(model, node=3, v0=-68.0, mem=None, rel_tol=1e-4, guess=2000.0):
 
     Returns:
         The rheobase [pA], or inf if nothing up to 1e6 pA fires.
+
+    Raises:
+        _bisect.FiresWithoutInputError: If the cell fires with no input.
     """
-    return _bisect.smallest_firing(
-        lambda I: fires(model, I, node, v0, mem), guess, 1e6, rel_tol
-    )
+    try:
+        return _bisect.smallest_firing(
+            lambda I: fires(model, I, node, v0, mem), guess, 1e6, rel_tol
+        )
+    except _bisect.FiresWithoutInputError as e:
+        config = _dispatch.describe(model, node, v0, mem)
+        raise _bisect.FiresWithoutInputError(
+            f"somatic.rheobase({config}): {e}"
+        ) from e
 
 
 def spike_amplitude(model, I, node=3, v0=-68.0, mem=None):

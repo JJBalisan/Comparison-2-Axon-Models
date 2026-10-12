@@ -5,6 +5,11 @@ and crossing / smallest_crossing (bisection helped by interpolation, used by
 coincidence.threshold and coincidence.window). The MATLAB port's own search
 (threshold._search, BinarySearch.m's halving search) is separate and must stay
 as it is.
+
+Both searches assume zero input doesn't fire. When their first value fires
+they check that with one run at zero, and raise FiresWithoutInputError if the
+cell fires anyway (otherwise they would halve towards zero: smallest_firing
+for ~1000 runs, smallest_crossing for ever).
 """
 
 import numpy as np
@@ -17,7 +22,8 @@ def smallest_firing(fires, guess, ceiling, rel_tol):
     until fires(hi), giving up with inf once the next doubling would
     exceed `ceiling` (so values between the last tested one and the
     ceiling are never tried), then bisects [lo, hi] until
-    hi - lo <= rel_tol * hi.
+    hi - lo <= rel_tol * hi. If `guess` itself fires, the bracket's
+    lower end is zero, so zero is tested once first.
 
     Args:
         fires: The predicate, fires(x) -> bool.
@@ -27,12 +33,18 @@ def smallest_firing(fires, guess, ceiling, rel_tol):
 
     Returns:
         hi, the smallest value seen to fire, or inf.
+
+    Raises:
+        FiresWithoutInputError: If fires(0.0), tested only when `guess`
+            fires.
     """
     lo, hi = 0.0, guess
     while not fires(hi):
         lo, hi = hi, hi * 2
         if hi > ceiling:
             return np.inf
+    if lo == 0.0:  # guess fired: nothing yet shows zero is quiet
+        _check_quiet(fires(0.0))
     while hi - lo > rel_tol * hi:
         mid = (lo + hi) / 2
         lo, hi = (lo, mid) if fires(mid) else (mid, hi)
@@ -132,7 +144,8 @@ def smallest_crossing(respond, guess, ceiling, rel_tol, level):
     step), while nothing does it steps up (to the prediction, at most 2x
     per step). It gives up with inf past `ceiling` and keeps the same
     guarantee as smallest_firing; the value differs from
-    smallest_firing's within the tolerance.
+    smallest_firing's within the tolerance. Like smallest_firing, it tests
+    zero once if `guess` spikes; that run is not used for prediction.
 
     Args:
         respond: respond(x) -> (spiked, peak).
@@ -144,6 +157,10 @@ def smallest_crossing(respond, guess, ceiling, rel_tol, level):
     Returns:
         A value that spikes, with a non-spiking one within rel_tol of
         it, or inf.
+
+    Raises:
+        FiresWithoutInputError: If respond(0.0) spikes, tested only when
+            `guess` spikes.
     """
     pts, x = [], guess
     lo = hi = None
@@ -151,6 +168,8 @@ def smallest_crossing(respond, guess, ceiling, rel_tol, level):
         if x > ceiling:
             return np.inf
         spiked, peak = respond(x)
+        if spiked and lo is None and hi is None:  # only ever the guess
+            _check_quiet(respond(0.0)[0])
         if spiked:
             hi = x if hi is None else min(hi, x)
         else:
@@ -169,3 +188,26 @@ def smallest_crossing(respond, guess, ceiling, rel_tol, level):
         respond, lo, hi, lambda n, y: rel_tol * y, level, pts, log=True
     )
     return hi
+
+
+# --- a cell that fires with no input ------------------------------------------
+
+REST_HINT = (
+    "A multi-compartment cell built with rebalance_rest=False (the default "
+    "of multi.membrane) settles ~0.9 mV away from v0 and, with KLT reduced, "
+    "can fire on its own; build it with multi.membrane(v0, ..., "
+    "rebalance_rest=True)."
+)
+
+
+class FiresWithoutInputError(ValueError):
+    """The cell fires with no input, so no smallest firing input exists."""
+
+
+def _check_quiet(spiked_at_zero: bool) -> None:
+    """Raises FiresWithoutInputError if the run at zero input spiked."""
+    if spiked_at_zero:
+        raise FiresWithoutInputError(
+            "the cell fires with no input (x = 0), so there is no smallest "
+            "input that fires. " + REST_HINT
+        )

@@ -218,3 +218,39 @@ def spikes(
     )
     axon = node - 1 if model == "multi" else 1
     return bool(t[-1] < t_end and x[-1, axon] - x[-1, 0] > 0.75 * factor)
+
+
+# the fields of multi.membrane()'s cache key, in order
+_MEMBRANE_KEY = (
+    "v0",
+    "soma_klt_scale",
+    "ais_klt_scale",
+    "soma_na_vhalf",
+    "rebalance_rest",
+    "dendrite_klt_scale",
+)
+
+
+def describe(
+    model: str, node: int, v0: float, mem: object = None, **settings: object
+) -> str:
+    """Names a model configuration, for error messages.
+
+    Args:
+        model: "multi" or "two".
+        node: The compartment compared with the soma, 1-indexed.
+        v0: Initial potential [mV].
+        mem: Channel overrides from multi.membrane(), or None.
+        **settings: Further settings to name, in order.
+
+    Returns:
+        E.g. "'multi', node=3, v0=-68.0, mem=membrane(v0=-68.0, ...)".
+    """
+    parts = [repr(model), f"node={node}", f"v0={v0}"]
+    parts += [f"{k}={v!r}" for k, v in settings.items()]
+    if mem is not None:
+        knobs = ", ".join(
+            f"{k}={v}" for k, v in zip(_MEMBRANE_KEY, mem.key, strict=True)
+        )
+        parts.append(f"mem=membrane({knobs})")
+    return ", ".join(parts)
