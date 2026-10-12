@@ -18,11 +18,14 @@ V_REST_REF = -68.0  # resting potential used to compute the fractions [mV]
 
 
 def _alternating(internode, node):
-    """The 42 axon compartments after soma + 2 AIS: internode, node, internode, ..."""
+    """Returns the 42 axon compartments after soma + 2 AIS.
+
+    They alternate: internode, node, internode, ...
+    """
     return np.tile([internode, node], 21)
 
 
-# --- Channel densities, Lehnert et al 2014 Table 2 [nS/um^2] ---------------------
+# --- Channel densities, Lehnert et al 2014 Table 2 [nS/um^2] -----------------
 G_NA = np.concatenate([[0.2, 4, 4], _alternating(0, 4)]).astype(float)
 G_KHT = np.zeros(N_CPT)
 G_KHT[0] = 0.1
@@ -31,9 +34,9 @@ G_H = np.concatenate([[0.02, 0.02, 0.02], np.zeros(42)])
 G_LK = np.concatenate([[0.0005, 0.0005, 0.0005], _alternating(0.0002, 0.05)])
 
 
-# --- Steady-state gating functions shared by both models -------------------------
-# V in mV; each returns the open fraction at steady state. Sources as msoAxon.m gives
-# them (Lehnert et al 2014 used the same channel models).
+# --- Steady-state gating functions shared by both models ---------------------
+# V in mV; each returns the open fraction at steady state. Sources as msoAxon.m
+# gives them (Lehnert et al 2014 used the same channel models).
 
 
 def minf(V):
@@ -110,7 +113,7 @@ def ainf(V):
     return 1.0 / (1.0 + np.exp(0.1 * (V + 80.4)))
 
 
-# --- Gating time constants [ms] at 35 C, shared by both models --------------------
+# --- Gating time constants [ms] at 35 C, shared by both models ---------------
 # The expressions are msoAxon.m's and TwoCpt.m's, term for term, so results stay
 # bit-identical. The 2-CPT model holds z at rest and never uses tauz.
 _P_TEMP = 3 ** ((22 - 35) / 10)  # Q10 of 3 from 22 C
@@ -197,7 +200,7 @@ def taua(V):
     return _A_TEMP * (79 + 417 * np.exp(-((V + 61.5) ** 2) / 800))
 
 
-# --- Conductance fractions at rest -----------------------------------------------
+# --- Conductance fractions at rest -------------------------------------------
 def _fractions(v_rest=V_REST_REF):
     """Returns the KLT, h and Na fractions of the resting conductance."""
     h = G_H * ainf(v_rest)
@@ -213,10 +216,11 @@ def _fractions(v_rest=V_REST_REF):
 KLT_FRAC, H_FRAC, NA_FRAC = _fractions()
 
 
-# --- Geometry ----------------------------------------------------------------------
-# membrane surface area [um^2]; conical frustum for the tapered AIS, inner area for
-# myelinated internodes. The 1.66/3 term is reproduced as written in Constants.m
-# (likely meant 0.66/2) because the stored Area.mat was built from it.
+# --- Geometry -----------------------------------------------------------------
+# membrane surface area [um^2]; conical frustum for the tapered AIS, inner area
+# for myelinated internodes. The 1.66/3 term is reproduced as written in
+# Constants.m (likely meant 0.66/2) because the stored Area.mat was built from
+# it.
 SA = np.concatenate(
     [
         [
@@ -232,19 +236,21 @@ SA = np.concatenate(
 SA_CM = SA * 1e-8  # [cm^2]
 AREA_RATIO = SA_CM / SA_CM[0]
 
-# compartment length [um]; soma treated as a cylinder as long as the sphere's diameter
+# compartment length [um]; soma treated as a cylinder as long as the sphere's
+# diameter
 L = np.concatenate(
     [[np.sqrt(8750 / np.pi), 10.0, 10.0], _alternating(100.0, 1.0)]
 )
 L_CM = L * 1e-4  # [cm]
 
-# cross-sectional area [um^2], every compartment treated as a cylinder with the same SA
+# cross-sectional area [um^2], every compartment treated as a cylinder with the
+# same SA
 R_CYL = SA / (2 * np.pi * L)
 XA = np.pi * R_CYL**2
 XA_CM = XA * 1e-8  # [cm^2]
 
 
-# --- Coupling constants (Coupling.mat) ----------------------------------------------
+# --- Coupling constants (Coupling.mat) ---------------------------------------
 _coupling = json.loads(
     (pathlib.Path(__file__).parent / "data" / "coupling.json").read_text()
 )

@@ -1,4 +1,7 @@
-"""One entry point for both models, used by the analysis code (model="multi" / "two")."""
+"""One entry point for both models, used by the analysis code.
+
+The analysis functions pick the model with model="multi" / "two".
+"""
 
 from msoaxon import multi, two
 

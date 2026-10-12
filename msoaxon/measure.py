@@ -1,4 +1,7 @@
-"""Passive and synaptic measurements on the soma, shared by scripts and tests."""
+"""Passive and synaptic measurements on the soma.
+
+Shared by the scripts and the tests.
+"""
 
 import numpy as np
 

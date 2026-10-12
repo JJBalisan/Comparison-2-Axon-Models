@@ -1,4 +1,4 @@
-"""Dendritic morphology (Lehnert et al 2014 Fig. 8 variant) and EPSGbilateral."""
+"""Dendritic morphology (Lehnert et al 2014 Fig. 8) and EPSGbilateral."""
 
 import numpy as np
 import pytest
@@ -183,7 +183,8 @@ def test_dendrite_ra_changes_only_dendritic_edges():
 
 
 def test_prestimulus_cache_separates_membrane_v0():
-    # the leak reversals come from membrane()'s v0, so it must be part of the cache key
+    # the leak reversals come from membrane()'s v0, so it must be part of the
+    # cache key
     assert multi.membrane(-60.0).key != multi.membrane(-68.0).key
     args = ("EPSG", 5, 10, 26.7, 3, "active-full", 8, -68.0, 1)
     _solve._QUIET_CACHE.clear()

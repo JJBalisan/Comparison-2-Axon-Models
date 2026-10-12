@@ -48,7 +48,10 @@ _GATE0 = (0.12, 0.67, 0.0, 0.28, 0.67, 0.22)
 
 
 def _chain_jac_sparsity():
-    """Jacobian pattern: dV to neighbouring V and its gates, each gate to its V."""
+    """Returns the Jacobian pattern of msoAxon.m's unbranched chain.
+
+    dV couples to neighbouring V and its own gates; each gate to its own V.
+    """
     I = sparse.eye(N)
     tri = sparse.diags([1.0, 1.0, 1.0], [-1, 0, 1], shape=(N, N))
     blocks = [[tri] + [I] * 6] + [
@@ -80,24 +83,31 @@ def _tree_jac_sparsity(n, parent, child):
     return sparse.bmat(blocks).tocsc()
 
 
-# A morphology is a SimpleNamespace with these fields (LUMPED and with_dendrites()):
-#   key       hashable summary of every setting, part of the pre-stimulus cache key
+# A morphology is a SimpleNamespace with these fields (LUMPED and
+# with_dendrites()):
+#   key       hashable summary of every setting, part of the pre-stimulus
+#             cache key
 #   n         number of compartments (45 for LUMPED)
-#   sa, cap   membrane area [um^2] and capacitance [ms nS/um^2] per compartment
+#   sa, cap   membrane area [um^2] and capacitance [ms nS/um^2] per
+#             compartment
 #   g_na, g_kht, g_klt, g_h, g_lk
-#             channel densities [nS/um^2] per compartment (membrane() may override
-#             g_na / g_klt / the leak reversal without touching these)
+#             channel densities [nS/um^2] per compartment (membrane() may
+#             override g_na / g_klt / the leak reversal without touching
+#             these)
 #   parent, child, g_ax
-#             the axial edges, 0-based: current flows along parent[k] -> child[k]
-#             with conductance g_ax[k] [S]
-#   chain     True if the edges are exactly 0-1-2-..., so axial_current can use
-#             msoAxon.m's own float order
+#             the axial edges, 0-based: current flows along
+#             parent[k] -> child[k] with conductance g_ax[k] [S]
+#   chain     True if the edges are exactly 0-1-2-..., so axial_current can
+#             use msoAxon.m's own float order
 #   jac       sparsity pattern of the 7n x 7n Jacobian for the BDF solver
-#   labels    a name per compartment ("soma", "AIS", "node", "lateral dendrite", ...)
+#   labels    a name per compartment ("soma", "AIS", "node",
+#             "lateral dendrite", ...)
 #   lateral, medial (with_dendrites only)
-#             1-indexed compartment numbers of each dendrite, proximal to distal
+#             1-indexed compartment numbers of each dendrite, proximal to
+#             distal
 #
-# The unbranched 45-compartment chain of msoAxon.m (soma, 2 AIS, 21 internode/node pairs)
+# The unbranched 45-compartment chain of msoAxon.m (soma, 2 AIS, 21
+# internode/node pairs)
 LUMPED = types.SimpleNamespace(
     key="lumped",
     n=N,
@@ -217,8 +227,9 @@ def with_dendrites(
         l_cm[parent] / xa_cm[parent] + l_cm[child] / xa_cm[child]
     )
     if dendrite_ra != R_AXIAL:
-        # only edges into a dendrite compartment change, so the axon's conductances
-        # stay bit-identical; each half-compartment uses its own resistivity
+        # only edges into a dendrite compartment change, so the axon's
+        # conductances stay bit-identical; each half-compartment uses its own
+        # resistivity
         ra = np.concatenate(
             [np.full(N, R_AXIAL), np.full(n_d, float(dendrite_ra))]
         )
@@ -284,29 +295,33 @@ def axial_current(V, morph=LUMPED):
     return -I * 1e9 / morph.sa
 
 
-# external_current and two.applied_current look like duplicates but each copies its
-# own MATLAB file (msoAxon.m / TwoCptODE.m), and they differ on purpose. Merging them
-# would change results. The differences:
+# external_current and two.applied_current look like duplicates but each copies
+# its own MATLAB file (msoAxon.m / TwoCptODE.m), and they differ on purpose.
+# Merging them would change results. The differences:
 #
-#                 multi (this file)                     two (applied_current)
-#   units, sign   density [pA/um^2], negative           current [pA], positive
-#                 depolarises (enters dV with a minus)  depolarises
-#   where         compartment input_node (but step      soma if input_node == 1, else axon
-#                 always into the soma)
-#   area          the soma's for every stimulus but     -
-#                 EPSG/EPSGpair, even at another node
-#   window        start < t <= stop (step, sine,        start <= t < stop (step);
-#                 Synaptic*, EPSG)                      start <= t <= stop (sine, Synaptic*)
-#   ramp          start <= t <= stop, and only while    start <= t <= stop
-#                 5 < t <= stop + 5 (hardcoded 5);
-#                 /1000 then *1e3 round trip
-#   ramp2         rises from start                      rises from t = 5 (hardcoded)
-#   EPSG          cut off at stop                       never cut off
-#   EPSG, pair    driving force at the input node       driving force at the soma, even
-#                                                       with axonal input
-#   Synaptic*     driving force at the soma             driving force at the soma
-#   SynapticPair  -                                     second input zeroed once
-#                                                       t + diff >= t_end
+#                 multi (this file)              two (applied_current)
+#   units, sign   density [pA/um^2], negative    current [pA], positive
+#                 depolarises (enters dV with    depolarises
+#                 a minus)
+#   where         compartment input_node (but    soma if input_node == 1,
+#                 step always into the soma)     else axon
+#   area          the soma's for every stimulus  -
+#                 but EPSG/EPSGpair, even at
+#                 another node
+#   window        start < t <= stop (step,       start <= t < stop (step);
+#                 sine, Synaptic*, EPSG)         start <= t <= stop (sine,
+#                                                Synaptic*)
+#   ramp          start <= t <= stop, and only   start <= t <= stop
+#                 while 5 < t <= stop + 5
+#                 (hardcoded 5); /1000 then
+#                 *1e3 round trip
+#   ramp2         rises from start               rises from t = 5 (hardcoded)
+#   EPSG          cut off at stop                never cut off
+#   EPSG, pair    driving force at the input     driving force at the soma,
+#                 node                           even with axonal input
+#   Synaptic*     driving force at the soma      driving force at the soma
+#   SynapticPair  -                              second input zeroed once
+#                                                t + diff >= t_end
 
 
 def external_current(t, V, stim_type, s, input_node, sa=C.SA):
@@ -457,10 +472,12 @@ def membrane(
     morph = morph or LUMPED
     if dendrite_klt_scale != 1.0 and morph.n == N:
         raise ValueError(
-            "dendrite_klt_scale needs a morphology with dendrites (morph=with_dendrites())"
+            "dendrite_klt_scale needs a morphology with dendrites "
+            "(morph=with_dendrites())"
         )
-    # v0 is in the key because the leak reversals (vlk) are built from it: without
-    # it, membrane(-60) and membrane(-68) would share a pre-stimulus cache entry
+    # v0 is in the key because the leak reversals (vlk) are built from it:
+    # without it, membrane(-60) and membrane(-68) would share a pre-stimulus
+    # cache entry
     m = types.SimpleNamespace(
         key=(
             float(v0),
@@ -641,7 +658,8 @@ def mso_axon(
         input_node2 and 1 <= input_node2 <= morph.n
     ):
         raise ValueError(
-            f"EPSGbilateral needs input_node2 in 1..{morph.n}, got {input_node2}"
+            f"EPSGbilateral needs input_node2 in 1..{morph.n}, "
+            f"got {input_node2}"
         )
     if model_type not in ACTIVE_GATES:
         raise ValueError(f"unknown model type {model_type!r}")
@@ -652,7 +670,8 @@ def mso_axon(
     mem = mem or membrane(v0, morph=morph)
     if mem.morph_key != morph.key:
         raise ValueError(
-            "mem was built for a different morphology; pass morph= to membrane()"
+            "mem was built for a different morphology; "
+            "pass morph= to membrane()"
         )
     n = morph.n
     if mem.y0_gates is None:

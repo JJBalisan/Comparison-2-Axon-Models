@@ -5,7 +5,7 @@
 
 Each binary-search point runs ~8 simulations per model; points run in parallel
 across all CPUs unless --workers says otherwise.
-"""
+"""  # noqa: E501 (printed verbatim as --help)
 
 import argparse
 import pathlib
@@ -14,7 +14,8 @@ import numpy as np
 
 from msoaxon import _parallel, threshold
 
-# stimType: (n_points, factor, max, title, xlabel); x-values come from threshold.sweep_x
+# stimType: (n_points, factor, max, title, xlabel); x-values come from
+# threshold.sweep_x
 SWEEPS = {
     "ramp": (15, 30, 15000, "Ramp", "Stop Value"),
     "sine": (12, 30, 15000, "Sine", "Frequency"),
@@ -36,7 +37,8 @@ def main():
     ap.add_argument(
         "--jpg-grid",
         action="store_true",
-        help="EPSGpair on the grid the repo's jpgs used: 11 points 0.1 ms apart, unrounded",
+        help="EPSGpair on the grid the repo's jpgs used: 11 points 0.1 ms "
+        "apart, unrounded",
     )
     ap.add_argument("--out-dir", help="save PNGs here instead of showing them")
     ap.add_argument(

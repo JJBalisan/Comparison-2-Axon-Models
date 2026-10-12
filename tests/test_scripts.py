@@ -16,8 +16,9 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
-# about 60 s locally, ~4 min on a CI runner; the scripts don't depend on the Python
-# version, so CI runs these on 3.12 only (deselect locally with -m "not slow")
+# about 60 s locally, ~4 min on a CI runner; the scripts don't depend on the
+# Python version, so CI runs these on 3.12 only (deselect locally with -m "not
+# slow")
 pytestmark = pytest.mark.slow
 
 
@@ -125,6 +126,7 @@ def test_making_threshold_graphs_script(tmp_path):
         "--out-dir",
         tmp_path,
     )
-    # one sweep point, BinarySearch.m's rounding to 10 (unrounded: 11054.08 / 11541.14)
+    # one sweep point, BinarySearch.m's rounding to 10 (unrounded: 11054.08 /
+    # 11541.14)
     assert "sine: multi=[11050.0]" in out and "two  =[11540.0]" in out
     assert (tmp_path / "sine_thresholds_cpt3.png").stat().st_size > 0

@@ -1,4 +1,7 @@
-"""Checks that need no MATLAB: constants vs the stored .mat files, rest state, helpers."""
+"""Checks that need no MATLAB.
+
+Constants vs the stored .mat files, the rest state, and helpers.
+"""
 
 import pathlib
 
@@ -52,8 +55,9 @@ def test_two_cpt_stays_at_rest_without_input(model_type):
 
 
 def test_mso_axon_near_rest_without_input():
-    # Unlike TwoCptODE.m, msoAxon.m does not subtract resting currents and starts
-    # gating at rounded values (m0=.12, h0=.67, ...), so it sits ~0.9 mV off -68
+    # Unlike TwoCptODE.m, msoAxon.m does not subtract resting currents and
+    # starts gating at rounded values (m0=.12, h0=.67, ...), so it sits ~0.9 mV
+    # off -68
     _, y = msoaxon.mso_axon("step", 5, 10, 0.0, 3, "active-full", 20, -68, 1)
     assert np.abs(y[:, :45] + 68).max() < 1.5
 

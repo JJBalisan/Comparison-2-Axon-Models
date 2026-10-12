@@ -11,9 +11,10 @@ import numpy as np
 
 from msoaxon import _common, _solve, constants as C, synaptic
 
-# Passive targets of Goldwyn, Remme & Rinzel 2019 (PLoS Comput Biol 15:e1006476), the
-# paper this model's coupling-constant framework comes from. TwoCpt.m still carries
-# them as comments (%8.5, %-58) beside the values it replaced them with.
+# Passive targets of Goldwyn, Remme & Rinzel 2019 (PLoS Comput Biol
+# 15:e1006476), the paper this model's coupling-constant framework comes from.
+# TwoCpt.m still carries them as comments (%8.5, %-58) beside the values it
+# replaced them with.
 GOLDWYN_2019 = dict(r1=8.5, tau_est=0.34, v0=-58.0)
 
 
@@ -49,10 +50,12 @@ def get_params(v0, node, input_node, model_type, r1=10.0, tau_est=0.71):
         h1 = h2 = 0.0
 
     # 'Active-sodium' (capital A) is how TwoCpt.m spells it, so 'active-sodium'
-    # gets no Na in this model. Kept as-is; see PYTHON.md, "Quirks kept on purpose".
+    # gets no Na in this model. Kept as-is; see PYTHON.md, "Quirks kept on
+    # purpose".
     if model_type in ("Active-sodium", "active-full"):
         na1 = C.NA_FRAC[0]
-        # only nodes 3 and 5 were calibrated; TwoCpt.m uses 140 for every other node
+        # only nodes 3 and 5 were calibrated; TwoCpt.m uses 140 for every other
+        # node
         P.gNa2 = {3: 119.0, 5: 25.5}.get(node, 140.0)
     else:
         na1 = 0.0
@@ -177,8 +180,8 @@ def _rhs(t, x, P, stim_type, s):
     V1, V2, w1, h1, w2, m1, m2, h2, p, a1, a2 = x
     z = P.z_rest  # KLT inactivation is frozen at rest in this model
 
-    # soma: KHT exists only here. Na, KLT and h have their value at rest subtracted
-    # (the *0 terms from get_params); KHT and leak don't
+    # soma: KHT exists only here. Na, KLT and h have their value at rest
+    # subtracted (the *0 terms from get_params); KHT and leak don't
     IKHT = P.gKHT * p * (V1 - P.VK)
     INa1 = P.gNa1 * m1**4 * (0.993 * h1 + 0.007) * (V1 - P.ENa) - P.INa0_1
     Ilk1 = P.glk1 * (V1 - P.Elk)
@@ -296,8 +299,9 @@ def two_cpt(
     cuts = _solve.breakpoints(stim_type, start, stop, t_end)
     quiet = None
     # step and the synaptic inputs are already on at t == start (TwoCptODE uses
-    # t >= start), and the first segment's last step evaluates there, so sharing a
-    # stimulus-free prefix would change their results slightly. They skip the cache.
+    # t >= start), and the first segment's last step evaluates there, so sharing
+    # a stimulus-free prefix would change their results slightly. They skip the
+    # cache.
     if stim_type not in (
         "step",
         "Synaptic",

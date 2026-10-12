@@ -1,4 +1,4 @@
-"""Golden traces: soma and axon voltage pinned for every stimulus and model type.
+"""Golden traces: soma and axon voltage pinned per stimulus and model type.
 
 Each case runs one model once and samples the soma and the compared axon
 compartment at fixed times (linear interpolation between solver steps). The

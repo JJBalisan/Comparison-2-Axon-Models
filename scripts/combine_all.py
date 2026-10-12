@@ -1,7 +1,8 @@
 """Run both models on one stimulus and plot them (port of Combine_all.m).
 
-uv run scripts/combine_all.py --stim EPSGpair --node 3 --out comparison.png
-"""
+    uv run scripts/combine_all.py --stim EPSGpair --node 3 --out comparison.png
+"""  # noqa: D208, E501  # fmt: skip
+# (the docstring is argparse's --help text, so the formatter leaves it as is)
 
 import argparse
 
@@ -27,7 +28,7 @@ DEFAULTS = {
 
 
 def main():
-    """Parses the command line and runs the two models and draws or saves the figure."""
+    """Parses the command line, runs both models and draws the figure."""
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -36,7 +37,8 @@ def main():
     ap.add_argument(
         "--type",
         default="active-full",
-        help="passive, active-KLT, active-H, active-KLT+H, active-sodium, active-KHT, active-full",
+        help="passive, active-KLT, active-H, active-KLT+H, active-sodium, "
+        "active-KHT, active-full",
     )
     ap.add_argument(
         "--node",
@@ -61,7 +63,8 @@ def main():
     ap.add_argument(
         "--graph",
         default="ModelComparison",
-        help="ModelComparison, NodeComparison, MultiCompartment, Contour, Input, Multigraph, ModelComparison2",
+        help="ModelComparison, NodeComparison, MultiCompartment, Contour, "
+        "Input, Multigraph, ModelComparison2",
     )
     ap.add_argument("--out", help="save the figure here instead of showing it")
     a = ap.parse_args()
@@ -78,12 +81,13 @@ def main():
     t2, x = msoaxon.two_cpt(
         *args, a.node, a.type, a.t_end, a.v0, a.input_node, syn
     )
-    # Combine_all.m ran TwoCpt twice with identical arguments for the node-3/node-5
-    # panels; here the second run uses node 5 so those panels mean what they say.
+    # Combine_all.m ran TwoCpt twice with identical arguments for the
+    # node-3/node-5 panels; here the second run uses node 5 so those panels mean
+    # what they say.
     t3, z = msoaxon.two_cpt(*args, 5, a.type, a.t_end, a.v0, a.input_node, syn)
 
-    # Combine_all.m counted column 1 of the 2-CPT markers (soma minus soma, always 0);
-    # column 2 is the axon compartment it meant.
+    # Combine_all.m counted column 1 of the 2-CPT markers (soma minus soma,
+    # always 0); column 2 is the axon compartment it meant.
     n_two = spiking.count_rising_edges(
         spiking.spiking(x, a.factor, "Two")[:, 1]
     )
@@ -91,7 +95,8 @@ def main():
         spiking.spiking(y, a.factor, "Mult")[:, a.node - 1]
     )
     print(
-        f"spikes at node {a.node}: multi-compartment {n_multi}, two-compartment {n_two}"
+        f"spikes at node {a.node}: multi-compartment {n_multi}, "
+        f"two-compartment {n_two}"
     )
 
     graph = dict(

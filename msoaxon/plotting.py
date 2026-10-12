@@ -205,7 +205,8 @@ def graphing(graph, t1, y, t2=None, x=None, t3=None, z=None):
             ylabel="Current (pA)",
         )
         fig.suptitle(
-            "Comparison of 2 Compartment and Multi-Compartment Models with Input"
+            "Comparison of 2 Compartment and Multi-Compartment Models "
+            "with Input"
         )
 
     else:

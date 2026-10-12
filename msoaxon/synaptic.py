@@ -57,7 +57,8 @@ class SynParams:
     random_in: int = 1396  # RNG seed
     diff: float = 1.0  # time offset of the second input for SynapticPair [ms]
     f: float = 200.0  # sine frequency [Hz]
-    epsg_tau: tuple = EPSG_TAU  # EPSG/EPSGpair (rise, decay) [ms]; Myoga et al 2014 used decay 0.3
+    # EPSG/EPSGpair (rise, decay) [ms]; Myoga et al 2014 used decay 0.3
+    epsg_tau: tuple = EPSG_TAU
 
 
 def synaptic(syn: SynParams):
@@ -85,7 +86,8 @@ def synaptic(syn: SynParams):
     )
     rect_gam = np.maximum(np.convolve(gam_filter, n)[:nt], 0)
 
-    # 17.57 normalises so max is G, 37 is the unitary epsg amplitude (Lehnert et al)
+    # 17.57 normalises so max is G, 37 is the unitary epsg amplitude (Lehnert et
+    # al)
     epsg = (
         syn.gE
         * 37

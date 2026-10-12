@@ -1,4 +1,6 @@
-"""Coincidence-detection windows comparable to Myoga et al 2014 (Nat Commun 5:3790).
+"""Coincidence-detection windows comparable to Myoga et al 2014.
+
+Myoga et al 2014: Nat Commun 5:3790.
 
 Their protocol: two identical EPSGs at relative times stepped in 20 us, peak
 conductance set just above G_t (50% spike probability for coincident inputs),
@@ -288,8 +290,8 @@ def window(
     spiked, peak = respond(max_delay)
     if spiked:
         return np.nan, th0
-    # amp > th0, so it spikes at delay 0; the peak falls smoothly through FACTOR as
-    # the delay grows, so the same interpolation as in threshold() applies
+    # amp > th0, so it spikes at delay 0; the peak falls smoothly through FACTOR
+    # as the delay grows, so the same interpolation as in threshold() applies
     far, near = _bisect.crossing(
         respond,
         max_delay,

@@ -1,4 +1,4 @@
-"""EPSG kinetics, two-compartment recalibration, and the coincidence-window analysis."""
+"""EPSG kinetics, 2-compartment recalibration and the coincidence windows."""
 
 import numpy as np
 import pytest

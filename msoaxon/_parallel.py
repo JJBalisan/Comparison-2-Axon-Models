@@ -34,10 +34,10 @@ def pool_context(method=None):
     if method != "fork":
         return multiprocessing.get_context(method)
     ctx = multiprocessing.get_context("forkserver")
-    # the server imports these once, so each worker forks with msoaxon, numpy and
-    # scipy already loaded instead of importing them itself (nearly fork's start-up
-    # cost; the server runs no other threads, so forking it is safe). No effect once
-    # the server is running.
+    # the server imports these once, so each worker forks with msoaxon, numpy
+    # and scipy already loaded instead of importing them itself (nearly fork's
+    # start-up cost; the server runs no other threads, so forking it is safe).
+    # No effect once the server is running.
     ctx.set_forkserver_preload(_PRELOAD)
     return ctx
 

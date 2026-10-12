@@ -11,7 +11,7 @@ rel_tol 1e-7 without the settled stop (cached in figures/benchmark/reference.jso
 methods that don't. --check makes every spikes() call run with and without the
 settled stop and counts the decisions that differ (it must be 0); response()
 calls, which the EPSG-pair searches use, are compared on the spiked flag only.
-"""
+"""  # noqa: E501 (printed verbatim as --help)
 
 import argparse
 import collections
@@ -230,7 +230,8 @@ def main():
         for k in ("runs", "sim_ms", "wall_s", "mismatches"):
             by_stim[stim][k] += row[k]
         print(
-            f"{name:38s} runs {row['runs']:4d}  sim {row['sim_ms']:8.1f} ms  wall {wall:6.2f} s  "
+            f"{name:38s} runs {row['runs']:4d}  sim {row['sim_ms']:8.1f} ms  "
+            f"wall {wall:6.2f} s  "
             f"err {err:.1e}"
             + (f"  mismatches {row['mismatches']}" if a.check else ""),
             flush=True,
@@ -239,7 +240,8 @@ def main():
     print("\nby stimulus:")
     for stim, s in by_stim.items():
         print(
-            f"  {stim:15s} runs {int(s['runs']):4d}  sim {s['sim_ms']:9.1f} ms  wall {s['wall_s']:7.2f} s"
+            f"  {stim:15s} runs {int(s['runs']):4d}  "
+            f"sim {s['sim_ms']:9.1f} ms  wall {s['wall_s']:7.2f} s"
             + (f"  mismatches {int(s['mismatches'])}" if a.check else "")
         )
     total = {
@@ -247,7 +249,8 @@ def main():
         for k in ("runs", "sim_ms", "wall_s", "mismatches")
     }
     print(
-        f"  {'total':15s} runs {total['runs']:4d}  sim {total['sim_ms']:9.1f} ms  "
+        f"  {'total':15s} runs {total['runs']:4d}  "
+        f"sim {total['sim_ms']:9.1f} ms  "
         f"wall {total['wall_s']:7.2f} s"
         + (f"  mismatches {total['mismatches']}" if a.check else "")
     )

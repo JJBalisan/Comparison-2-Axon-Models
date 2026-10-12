@@ -19,7 +19,7 @@ Uses with_dendrites() (Lehnert et al 2014, Fig. 8 variant: two 200 x 5 um dendri
 A, B and D use rest-rebalanced membranes so sub-mV signals aren't mixed with the
 slow resting drift; C, E and F use the default (unbalanced) membranes, like the
 lumped results they are compared with.
-"""
+"""  # noqa: E501 (printed verbatim as --help)
 
 import argparse
 import json
@@ -110,7 +110,7 @@ def rin_tau(morph, mem):
 
 
 def main():
-    """Parses the command line and runs the dendritic checks on one process pool."""
+    """Parses the command line and runs the dendritic checks."""
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -119,29 +119,30 @@ def main():
     ap.add_argument(
         "--klt-from-soma",
         action="store_true",
-        help="start the KLT/h gradient at the soma's density instead of conserving "
-        "the lumped totals (halves total KLT)",
+        help="start the KLT/h gradient at the soma's density instead of "
+        "conserving the lumped totals (halves total KLT)",
     )
     ap.add_argument(
         "--quick",
         action="store_true",
-        help="coarse grids and 1%% threshold tolerance: a smoke test, not results",
+        help="coarse grids and 1%% threshold tolerance: a smoke test, "
+        "not results",
     )
     ap.add_argument(
         "--dendrite-ra",
         type=float,
         default=100.0,
-        help="axial resistivity of the dendrites [Ohm cm] (Mathews et al 2010: 200)",
+        help="axial resistivity of the dendrites [Ohm cm] "
+        "(Mathews et al 2010: 200)",
     )
     a = ap.parse_args()
-    with (
-        _parallel.process_pool() as pool
-    ):  # one pool for every parallel call below
+    # one pool for every parallel call below
+    with _parallel.process_pool() as pool:
         run(a, pool)
 
 
 def run(a, pool):
-    """Runs the dendritic checks A-G on a worker pool and saves the figure and JSON.
+    """Runs the dendritic checks A-G and saves the figure and JSON.
 
     Args:
         a: The parsed command-line arguments.
@@ -160,9 +161,10 @@ def run(a, pool):
     tol = 1e-2 if a.quick else 1e-4  # threshold / rheobase tolerance
     res = {}
 
-    # Every threshold search (C, E, F) and the rheobase (G) is independent of the rest,
-    # so all of them go to the pool now, in one batch, and run while A, B and D are
-    # computed here. Each search is deterministic, so the results don't depend on this.
+    # Every threshold search (C, E, F) and the rheobase (G) is independent of
+    # the rest, so all of them go to the pool now, in one batch, and run while
+    # A, B and D are computed here. Each search is deterministic, so the results
+    # don't depend on this.
     def th_job(delay, tau=synaptic.EPSG_TAU, **kw):
         return pool.submit(
             coincidence.threshold,
@@ -200,8 +202,8 @@ def run(a, pool):
         ("model EPSG (0.18 ms)", synaptic.EPSG_TAU),
         ("Myoga EPSG (0.3 ms)", (0.1, 0.3)),
     )
-    # E's widths come from window() (fixed input, bisection over delay); its curves
-    # are only drawn, so they use a 50 us grid
+    # E's widths come from window() (fixed input, bisection over delay); its
+    # curves are only drawn, so they use a 50 us grid
     W_jobs = {
         (kname, m): pool.submit(
             coincidence.window,

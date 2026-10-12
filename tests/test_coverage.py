@@ -1,4 +1,7 @@
-"""Stimulus branches, input validation, synaptic input, threshold search, plotting, scripts."""
+"""Stimulus branches, input validation and synaptic input.
+
+Also the threshold search, plotting and the combine_all script.
+"""
 
 import pathlib
 import subprocess
@@ -124,8 +127,8 @@ def test_every_model_type_runs():
 
 
 def test_spiking_reset_carries_across_columns_mult():
-    # column 2 ends above threshold; with the carried-over reset, column 3's first
-    # excursion is not marked until its difference drops to <= 0
+    # column 2 ends above threshold; with the carried-over reset, column 3's
+    # first excursion is not marked until its difference drops to <= 0
     x = np.zeros((4, 315))
     x[:, 1] = [0, 50, 50, 50]
     x[:, 2] = [50, 50, 0, 50]
@@ -135,7 +138,10 @@ def test_spiking_reset_carries_across_columns_mult():
 
 
 def test_epsgpair_thresholds_match_repo_jpg():
-    """Delays 0 and 0.3 ms at node 3: both models read 41q and 55q off EPSGpair_Thresholds_CPT3.jpg."""
+    """Delays 0 and 0.3 ms at node 3, as read off the repo's jpg.
+
+    Both models read 41q and 55q off EPSGpair_Thresholds_CPT3.jpg.
+    """
     multi, two = threshold_mod.binary_search(
         "EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, rounded=False
     )
@@ -251,7 +257,8 @@ def test_stop_on_spike_truncates_the_full_run(model, axon):
     t, x = model(*args)
     te, xe = model(*args, stop_on_spike=10)
     assert te[-1] < 20 and np.isclose(xe[-1, axon] - xe[-1, 0], 10)
-    # same accepted steps as the full run until the step where the spike is found
+    # same accepted steps as the full run until the step where the spike is
+    # found
     np.testing.assert_array_equal(te[:-1], t[: len(te) - 1])
     np.testing.assert_array_equal(xe[:-1], x[: len(te) - 1])
     # and the first sample above the factor in the full run comes right after
@@ -307,7 +314,8 @@ def test_smallest_firing():
         _bisect.smallest_firing(lambda x: x >= 3.0, 1.0, 100.0, 1e-6) >= 3.0
     )  # returns a firing value
     assert _bisect.smallest_firing(lambda x: False, 1.0, 100.0, 1e-3) == np.inf
-    # the ceiling bounds the doubling: 64 is tested, 128 exceeds 100, so 90 is never reached
+    # the ceiling bounds the doubling: 64 is tested, 128 exceeds 100, so 90 is
+    # never reached
     assert (
         _bisect.smallest_firing(lambda x: x >= 90.0, 1.0, 100.0, 1e-3) == np.inf
     )

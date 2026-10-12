@@ -84,9 +84,10 @@ def _search(spiked_at, stim_type, i, factor, max_I, zoom, epsg_pair_dt):
     while distance > zoom and location <= max_I:
         stop, syn, I_override = sweep_setting(stim_type, i, epsg_pair_dt)
         I = location if I_override is None else I_override
-        # BinarySearch.m counts spikes in the full trace (count_spikes). The run now
-        # stops at the first spike, so an early end is that count being nonzero: any
-        # sampled crossing is a sign change the terminal event catches
+        # BinarySearch.m counts spikes in the full trace (count_spikes). The run
+        # now stops at the first spike, so an early end is that count being
+        # nonzero: any sampled crossing is a sign change the terminal event
+        # catches
         spiked = spiked_at(stim_type, START, stop, I, syn, factor)
         tested = location
         first = location
@@ -165,8 +166,9 @@ def binary_search(
     Returns:
         (thresholds_multi, thresholds_two), one value per sweep point.
     """
-    # multi-compartment points first: they take ~10x longer, so starting them early
-    # keeps the pool busy while the cheap two-compartment points fill the gaps
+    # multi-compartment points first: they take ~10x longer, so starting them
+    # early keeps the pool busy while the cheap two-compartment points fill the
+    # gaps
     tasks = [
         (model, stim_type, i, node, factor, max_I, zoom, epsg_pair_dt)
         for model in ("multi", "two")

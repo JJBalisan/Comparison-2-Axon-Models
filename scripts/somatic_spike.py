@@ -29,7 +29,7 @@ CASES = {
 
 
 def main():
-    """Parses the command line and runs the somatic-spike protocol and saves the figure and JSON."""
+    """Runs the somatic-spike protocol and saves the figure and JSON."""
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -38,14 +38,15 @@ def main():
     ap.add_argument(
         "--quick",
         action="store_true",
-        help="1%% rheobase tolerance, 1.5x and 3x only: a smoke test, not results",
+        help="1%% rheobase tolerance, 1.5x and 3x only: a smoke test, "
+        "not results",
     )
     a = ap.parse_args()
     out = pathlib.Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    # imported here rather than at the top, like the pool scripts, so importing this
-    # module stays cheap
+    # imported here rather than at the top, like the pool scripts, so importing
+    # this module stays cheap
     import matplotlib
 
     matplotlib.use("Agg")

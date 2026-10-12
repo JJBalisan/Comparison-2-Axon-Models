@@ -7,7 +7,7 @@ recalibrated to Goldwyn et al 2019's passive targets) with the model's EPSG
 (decay 0.18 ms) and Myoga's (0.3 ms), finds each spike-probability half-width
 directly (coincidence.window: fixed input, bisection over delay), and checks it
 against noisy trials. Threshold curves are drawn on a 50 us grid.
-"""
+"""  # noqa: E501 (printed verbatim as --help)
 
 import argparse
 import json
@@ -57,17 +57,17 @@ def main():
     ap.add_argument(
         "--quick",
         action="store_true",
-        help="coarse grids and 1%% threshold tolerance: a smoke test, not results",
+        help="coarse grids and 1%% threshold tolerance: a smoke test, "
+        "not results",
     )
     a = ap.parse_args()
-    with (
-        _parallel.process_pool() as pool
-    ):  # one pool for every parallel call below
+    # one pool for every parallel call below
+    with _parallel.process_pool() as pool:
         run(a, pool)
 
 
 def run(a, pool):
-    """Runs the coincidence-window comparison on a worker pool and saves the figure and JSON.
+    """Runs the coincidence-window comparison and saves the figure and JSON.
 
     Args:
         a: The parsed command-line arguments.
@@ -79,7 +79,8 @@ def run(a, pool):
     tol = 1e-2 if a.quick else 1e-4  # threshold tolerance
     delay_tol = 1e-3 if a.quick else 1e-4  # window boundary tolerance [ms]
     combos = [(c, k) for c in CONFIGS for k in KINETICS]
-    # the widths come from window(), all submitted at once; the curves are only drawn
+    # the widths come from window(), all submitted at once; the curves are only
+    # drawn
     win_jobs = {}
     for cname, kname in combos:
         model, v0, kw = CONFIGS[cname]
@@ -114,7 +115,8 @@ def run(a, pool):
         direct[cname, kname] = dict(zip(MARGINS, widths))
         rows.append((cname, kname, th0, widths))
         print(
-            f"{cname} | {kname}: threshold(0) {th0:.2f}, plateau/zero-delay {th[-1] / th0:.2f}, "
+            f"{cname} | {kname}: threshold(0) {th0:.2f}, "
+            f"plateau/zero-delay {th[-1] / th0:.2f}, "
             + ", ".join(
                 f"half-width @{m:.1%} {w:.1f} us"
                 for m, w in zip(MARGINS, widths)
@@ -122,13 +124,15 @@ def run(a, pool):
             flush=True,
         )
 
-    # check window() against real noisy trials (2-cpt TwoCpt.m, model EPSG, 3% margin)
+    # check window() against real noisy trials (2-cpt TwoCpt.m, model EPSG, 3%
+    # margin)
     cname, kname = list(CONFIGS)[1], list(KINETICS)[0]
     model, v0, kw = CONFIGS[cname]
     amp = (1 + 0.03) * rows[combos.index((cname, kname))][2]
     mc_delays = np.round(np.arange(0, 0.3001, 0.1 if a.quick else 0.02), 4)
-    # small noise so probability peaks near 100%, as in Myoga's protocol; 1% amplitude
-    # jitter plus 5 us onset jitter per EPSG (a noise source window() ignores)
+    # small noise so probability peaks near 100%, as in Myoga's protocol; 1%
+    # amplitude jitter plus 5 us onset jitter per EPSG (a noise source window()
+    # ignores)
     prob = coincidence.probability_trials(
         model,
         mc_delays,
@@ -159,7 +163,8 @@ def run(a, pool):
         )
     direct_us = direct[cname, kname][0.03]
     print(
-        f"noisy-trial check ({cname}, {kname}, 3%): peak probability {prob.max():.2f}, "
+        f"noisy-trial check ({cname}, {kname}, 3%): "
+        f"peak probability {prob.max():.2f}, "
         f"half-width {mc_width:.0f} us vs window() {direct_us:.0f} us",
         flush=True,
     )
@@ -229,7 +234,10 @@ def run(a, pool):
         ylim=(-0.03, 1.05),
         xlabel="Delay between EPSGs (us)",
         ylabel="Spike probability",
-        title="Coincidence window at half maximum (model EPSG; bars offset around 0.5)",
+        title=(
+            "Coincidence window at half maximum "
+            "(model EPSG; bars offset around 0.5)"
+        ),
     )
     a2.legend(
         fontsize=7.5,
@@ -245,7 +253,9 @@ def run(a, pool):
         "curve_delays_ms": delays.tolist(),
         "margins": MARGINS,
         "myoga_half_width_us": MYOGA_US,
-        "half_width_method": "coincidence.window: fixed input, bisection over delay",
+        "half_width_method": (
+            "coincidence.window: fixed input, bisection over delay"
+        ),
         "curves": {f"{c} | {k}": v.tolist() for (c, k), v in curves.items()},
         "half_widths_us": [
             {

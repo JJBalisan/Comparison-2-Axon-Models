@@ -1,4 +1,7 @@
-"""Membrane overrides and the somatic-spike measurement (Scott et al 2005 protocol)."""
+"""Membrane overrides and the somatic-spike measurement.
+
+The measurement follows Scott et al 2005's protocol.
+"""
 
 import numpy as np
 import pytest
@@ -42,7 +45,8 @@ def test_rebalanced_rest_holds(knobs):
 
 
 def test_unbalanced_klt_block_fires_on_its_own():
-    # why rebalancing matters: without it the soma depolarises and fires with no input
+    # why rebalancing matters: without it the soma depolarises and fires with no
+    # input
     mem = multi.membrane(-68.0, soma_klt_scale=0, ais_klt_scale=0)
     _, y = msoaxon.mso_axon(
         "step", 5, 10, 0.0, 3, "active-full", 20, -68.0, 1, mem=mem

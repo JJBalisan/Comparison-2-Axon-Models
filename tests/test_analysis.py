@@ -27,7 +27,7 @@ def test_map_tasks_handles_no_tasks():
     assert coincidence.threshold_curve("two", []).shape == (0,)
 
 
-# --- threshold sweeps (threshold.py) --------------------------------------------------
+# --- threshold sweeps (threshold.py) ------------------------------------------
 
 
 def test_sweep_settings_follow_binarysearch_m():
@@ -59,7 +59,8 @@ def test_sweep_settings_follow_binarysearch_m():
 
 def test_sine_sweep_point_regression():
     # in-process (workers=1) so the halving search itself runs under the test;
-    # values from the current code, which reproduces the MATLAB-faithful baseline
+    # values from the current code, which reproduces the MATLAB-faithful
+    # baseline
 
     assert threshold.binary_search(
         "sine", 1, 3, 30, 15000, workers=1, rounded=False
@@ -69,7 +70,7 @@ def test_sine_sweep_point_regression():
     )
 
 
-# --- coincidence trials (coincidence.py) ----------------------------------------------
+# --- coincidence trials (coincidence.py) --------------------------------------
 
 
 def test_noise_free_trials_agree_with_the_threshold_curve():
@@ -98,7 +99,7 @@ def test_noisy_trials_are_seeded_probabilities():
     assert np.all((p1 >= 0) & (p1 <= 1)) and p1[0] >= p1[1]
 
 
-# --- model entry points and solver ----------------------------------------------------
+# --- model entry points and solver --------------------------------------------
 
 
 def test_spikes_is_an_early_stop():
@@ -117,7 +118,8 @@ def test_spikes_is_an_early_stop():
 
 
 def test_bilateral_at_one_site_is_an_epsg_pair():
-    # the same two EPSGs, summed per input instead of per waveform: equal up to rounding
+    # the same two EPSGs, summed per input instead of per waveform: equal up to
+    # rounding
 
     t1, y1 = msoaxon.mso_axon(
         "EPSGpair", 5, 5.2, 30, 3, "active-full", 8, -68.0, 1
@@ -166,7 +168,8 @@ def test_quiet_cache_is_bounded():
 
 def test_remaining_argument_errors():
 
-    # TwoCpt.m's capitalised 'Active-sodium' exists only in the 2-compartment model
+    # TwoCpt.m's capitalised 'Active-sodium' exists only in the 2-compartment
+    # model
     with pytest.raises(ValueError, match="unknown model type"):
         msoaxon.mso_axon("step", 5, 10, 100.0, 3, "Active-sodium", 10, -68.0, 1)
     with pytest.raises(ValueError, match="larger than the lumped"):
@@ -175,7 +178,7 @@ def test_remaining_argument_errors():
         two.applied_current(0.0, -68.0, "bogus", None)
 
 
-# --- somatic and passive measurements -------------------------------------------------
+# --- somatic and passive measurements -----------------------------------------
 
 
 def test_subthreshold_step_has_no_spike_amplitude():
@@ -195,7 +198,8 @@ def test_spike_amplitude_trace_is_the_measured_run():
 
 
 def test_passive_step_matches_the_dendrites_table():
-    # PYTHON.md / figures/dendrites: lumped model, rest-rebalanced, 2.4 / 4.7 MOhm
+    # PYTHON.md / figures/dendrites: lumped model, rest-rebalanced, 2.4 / 4.7
+    # MOhm
 
     r = measure.passive_step(
         "multi", mem=multi.membrane(-68.0, rebalance_rest=True)
@@ -239,7 +243,7 @@ def test_pools_never_fork():
         ]
 
 
-# --- settled stop (_solve.settled_event, search-speed A1) --------------------------
+# --- settled stop (_solve.settled_event, search-speed A1) ---------------------
 
 
 def test_input_end_per_stimulus():
@@ -277,14 +281,15 @@ def test_settled_stop_ends_quiet_runs_early_with_the_same_answer(model):
     t_full, _ = _dispatch.run_model(*args, stop_on_spike=10)
     t, x = _dispatch.run_model(*args, stop_on_spike=10, stop_when_settled=True)
     t_off = _solve.input_end("EPSGpair", 5, 5.3, 20, (0.1, 0.18))
-    # stopped after the input ended (the root-finder may land a few 1e-15 ms early
-    # when the condition already holds at t_off, where the event switches)
+    # stopped after the input ended (the root-finder may land a few 1e-15 ms
+    # early when the condition already holds at t_off, where the event switches)
     assert t_full[-1] == 20 and t_off - 1e-9 <= t[-1] < 20
     axon = 2 if model == "multi" else 1
     assert (
         x[-1, axon] - x[-1, 0] < 5
     )  # below factor / 2: a settled stop, not a spike
-    # identical solver steps up to the stop (the last point is the event time itself)
+    # identical solver steps up to the stop (the last point is the event time
+    # itself)
     np.testing.assert_array_equal(t[:-1], t_full[: len(t) - 1])
     assert _dispatch.spikes(*args, factor=10) is False
 
@@ -326,7 +331,7 @@ def test_runs_that_never_settle_are_unchanged():
         _dispatch.run_model(*args, stop_when_settled=True)
 
 
-# --- coincidence windows found directly (coincidence.window, search-speed C1) --------
+# --- coincidence windows found directly (coincidence.window, C1) -------------
 
 
 def test_window_brackets_the_spike_boundary():

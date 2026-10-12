@@ -1,4 +1,7 @@
-"""Spike detection (port of Spiking.m and the inline counters in BinarySearch.m)."""
+"""Spike detection.
+
+Ports Spiking.m and the inline counters in BinarySearch.m.
+"""
 
 import math
 
