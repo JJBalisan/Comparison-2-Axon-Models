@@ -5,6 +5,28 @@ package is the reference: a release pins the numbers the analysis produces,
 and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least.
 
+## Unreleased
+
+### Added
+
+- `mode="fast"`: the 45-compartment right-hand side (`multi._rhs`) in Rust,
+  as the optional `fast` extra (`uv sync --extra fast`, needs cargo; the
+  `msoaxon-fast` package in `rust/`). scipy's BDF solver is unchanged. Single
+  runs, thresholds and windows are about 2.7 times faster on an M1 Max. The
+  port covers every stimulus, the chain and dendrite morphologies,
+  `membrane()` overrides and every model type (#30).
+- `mode=` on `mso_axon` and `_dispatch.run_model` (so also in `model_kw`):
+  `"exact"` runs the numpy reference, `"fast"` the Rust port. The default is
+  `"fast"` when the extension is installed, else `"exact"`; the
+  `MSOAXON_MODE` environment variable overrides it, in pool workers too
+  (#30).
+- `msoaxon.DriftWarning`, issued once per process at the first fast run.
+  The run self-checks the port against numpy on 24 states and says whether
+  it was bit-identical on this machine: it is on darwin-arm64, and on other
+  hardware it may differ in the last bits (#30).
+- CI: a `pytest-fast` job on Linux and macOS lints the crate (`cargo fmt`,
+  `clippy -D warnings`), builds it and runs the suite in fast mode (#30).
+
 ## 1.0.0 (12 Oct 2026)
 
 The first versioned release, and the first in which the Python package,

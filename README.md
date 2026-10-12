@@ -3,6 +3,10 @@
 **Python:** the `msoaxon` package is the reference implementation; see
 [PYTHON.md](PYTHON.md). The MATLAB files described below are the historical original
 it was ported from, kept unchanged; the Python no longer has to match them.
+`uv sync --extra fast` also builds an optional Rust right-hand side for the
+45-compartment model (needs cargo), which makes its runs and searches about
+2.7 times faster; without it the package runs on numpy alone. See "Fast mode"
+in PYTHON.md for `mode="exact"`/`"fast"` and the `DriftWarning`.
 
 Combine_all Inputs
 

@@ -17,7 +17,7 @@ import types
 import numpy as np
 from scipy import sparse
 
-from msoaxon import _common, _solve, constants as C, synaptic
+from msoaxon import _common, _fast, _solve, constants as C, synaptic
 
 N = C.N_CPT
 
@@ -615,6 +615,7 @@ def mso_axon(
     morph: types.SimpleNamespace | None = None,
     input_node2: int | None = None,
     stop_when_settled: bool = False,
+    mode: str | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Runs the multi-compartment model.
 
@@ -663,6 +664,11 @@ def mso_axon(
         stop_when_settled: With stop_on_spike, also stop once the input
             is over and no spike can follow (_solve.settled_event), for
             callers that only need yes/no.
+        mode: "exact" runs the numpy right-hand side (_rhs, the
+            reference); "fast" runs its Rust port (the `fast` extra),
+            which issues a DriftWarning on first use. None (default):
+            the MSOAXON_MODE environment variable if set, else "fast"
+            when the extension is installed, else "exact". See _fast.
 
     Returns:
         (t, y) with y shaped (n_times, 7 * n); see the module docstring
@@ -670,7 +676,8 @@ def mso_axon(
 
     Raises:
         ValueError: For unknown names, out-of-range compartments, a
-            missing input_node2, or a mem built for another morphology.
+            missing input_node2, a mem built for another morphology, or
+            an unknown mode.
     """
     morph = morph or (mem.morph if mem is not None else LUMPED)
     _common.check_args(
@@ -709,19 +716,29 @@ def mso_axon(
     else:
         y0 = np.concatenate([np.full(n, float(v0)), *mem.y0_gates])
     cuts = _solve.breakpoints(stim_type, start, stop, t_end)
+    mode = _fast.resolve(mode, _fast.covers(stim_type, start, stop))
+    if mode == "fast":
+        rhs = _fast.build(
+            stim_type, s, input_node, active, mem, morph, input_node2
+        )
+        quiet_rhs = _fast.build("none", s, input_node, active, mem, morph)
+    else:
+        rhs = lambda t, x: _rhs(  # noqa: E731
+            t, x, stim_type, s, input_node, active, mem, morph, input_node2
+        )
+        quiet_rhs = lambda t, x: _rhs(  # noqa: E731
+            t, x, "none", s, input_node, active, mem, morph
+        )
     quiet = None
     # unlike two_cpt, step shares the prefix: msoAxon.m switches stimuli on for
     # t > start (the EPSG waveforms are zero at onset), so the equations at
-    # t == start are still stimulus-free
+    # t == start are still stimulus-free. The mode is part of the key: the two
+    # right-hand sides need not agree in the last bits.
     if _solve.pre_stimulus_is_quiet(cuts, start, stop):
         quiet = (
-            ("mso", model_type, float(v0), mem.key, morph.key),
-            lambda t, x: _rhs(t, x, "none", s, input_node, active, mem, morph),
+            ("mso", model_type, float(v0), mem.key, morph.key, mode),
+            quiet_rhs,
         )
-
-    rhs = lambda t, x: _rhs(  # noqa: E731
-        t, x, stim_type, s, input_node, active, mem, morph, input_node2
-    )
     return _solve.integrate(
         rhs,
         y0,

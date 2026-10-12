@@ -8,7 +8,7 @@ where this page says the port reproduces the MATLAB, that describes how it was b
 not a promise for future changes.
 
 ```bash
-uv sync
+uv sync                                                    # or: uv sync --extra fast (Rust, below)
 uv run pytest                                              # the tests, in parallel (-n 0: serially)
 uv run pytest --cov                                        # plus line + branch coverage (as CI)
 uv run scripts/combine_all.py --stim EPSGpair --node 3     # Combine_all.m
@@ -53,6 +53,83 @@ Code that isn't a port of a MATLAB file:
 | `msoaxon/coincidence.py` | Myoga-style coincidence windows; `stim=`, `input_node=`, `input_node2=` pick the input sites, `model_kw` passes model options such as `morph` |
 | `msoaxon/somatic.py` | rheobase and the Scott et al. 2005 somatic spike amplitude |
 | `msoaxon/measure.py` | input resistance and time constant from a current step; soma trace on a grid |
+| `msoaxon/_fast.py` | the optional Rust right-hand side: mode selection, self-check, `DriftWarning` |
+| `rust/` | the `msoaxon-fast` extension (PyO3, built by maturin): `multi._rhs` in Rust |
+
+## Fast mode: the 45-compartment right-hand side in Rust
+
+`multi._rhs` spends nearly all of its time in numpy's per-call overhead on
+45-element arrays, and the 45-compartment runs are where the scripts spend
+their time. `rust/` ports that one function to Rust. scipy's BDF solver, the
+breakpoints, the events and the pre-stimulus cache are unchanged; the solver
+just calls a compiled right-hand side.
+
+```bash
+uv sync --extra fast        # builds rust/ with maturin; needs cargo (rustup.rs)
+uv sync                     # numpy only: no Rust toolchain needed
+```
+
+`mso_axon(..., mode=...)` picks the right-hand side; `_dispatch.run_model` passes
+`mode` on, so it also works in `model_kw` (`coincidence.threshold("multi", 0.1,
+model_kw={"mode": "exact"})`) and `measure.passive_step(..., mode=...)`. The
+two-compartment model has only its numpy path and ignores it.
+
+| `mode` | Right-hand side |
+|---|---|
+| `"exact"` | `multi._rhs`, the numpy reference |
+| `"fast"` | the Rust port; warns and runs `"exact"` if the extension is missing |
+| `None` (default) | `MSOAXON_MODE` if set (`exact` or `fast`), else `"fast"` when the extension is installed, else `"exact"` (silently) |
+
+`MSOAXON_MODE=exact uv run scripts/...` runs a whole script on the reference,
+worker processes included (pools hand their workers the parent's setting).
+
+**Drift.** The port keeps numpy's floating-point evaluation order expression for
+expression (`m**4` is `powf(4.0)`, not `powi`; `np.interp`'s fused multiply-add on
+arm64 is reproduced). On darwin-arm64, where numpy and Rust call the same libm, it
+is bit-identical to `multi._rhs`, and so are whole runs, thresholds and windows. On
+other hardware numpy may use its own SIMD `exp`/`pow` while Rust calls the system
+libm, so results can differ in the last bits; through a spike upstroke that grows
+to the size of the cross-platform drift the golden traces already tolerate. The
+first fast run in each process therefore checks the port against `multi._rhs` on
+24 fixed states (about 5 ms) and issues a `msoaxon.DriftWarning` saying whether it
+was bit-identical on this machine. Silence it with
+
+```python
+import warnings
+
+import msoaxon
+
+warnings.filterwarnings("ignore", category=msoaxon.DriftWarning)
+```
+
+or pass `mode="exact"` to use the reference. Everything `multi._rhs` handles is
+ported: every stimulus (Synaptic and SynapticPair included), the lumped chain and
+`with_dendrites()` trees, `membrane()` overrides and every model type. The one
+fallback is a ramp with `stop == start`, where the numpy path raises
+`ZeroDivisionError` and keeps doing so.
+
+**Speed** (Apple M1 Max, Python 3.12, best of 3; the machine was busy, so read the
+ratios rather than the seconds):
+
+| | `"exact"` | `"fast"` | Speed-up |
+|---|---|---|---|
+| one right-hand side call (315 states) | 63.5 µs | 3.5 µs | 18× |
+| one run (EPSG pair, 20 ms) | 0.42 s | 0.15 s | 2.8× |
+| `coincidence.threshold("multi", 0.1)` | 3.16 s | 1.19 s | 2.7× |
+| `coincidence.window("multi", 0.03, delay_tol=1e-3)` | 3.78 s | 1.41 s | 2.7× |
+| `scripts/benchmark_search.py --check` (all 20 searches, both models) | 274 s | 124 s | 2.2× |
+
+Every value above came out identical in both modes, and `benchmark_search.py
+--check` reported the same values, run counts and 0 mismatches in each. The rest
+of a run is scipy's own Python (step control, the sparse finite-difference
+Jacobian, LU), which caps the gain near 3×; the two-compartment model is
+unchanged.
+
+`tests/test_fast.py` compares the two right-hand sides on sampled states across
+every covered configuration (to 1e-12 relative, and bit for bit on
+darwin-arm64), and `tests/test_golden.py` runs every multi-compartment trace in
+both modes. CI runs the suite without the extension (the fallback) on Linux and
+macOS, and with it on both (`pytest-fast`), which also prints the self-check.
 
 ## Validation
 

@@ -1,0 +1,17 @@
+[package]
+name = "msoaxon-fast"
+version = "0.1.0"
+edition = "2021"
+description = "Rust right-hand side for msoaxon's 45-compartment model"
+publish = false
+
+[lib]
+name = "msoaxon_fast"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.25", features = ["extension-module", "abi3-py311"] }
+numpy = "0.25"
+
+[profile.release]
+opt-level = 3

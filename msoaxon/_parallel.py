@@ -6,6 +6,8 @@ from collections.abc import Callable, Sequence
 from concurrent import futures
 from typing import Any
 
+from msoaxon import _fast
+
 # every module whose functions run in pool workers
 _PRELOAD = [
     "msoaxon.coincidence",
@@ -51,7 +53,9 @@ def process_pool(
 ) -> futures.ProcessPoolExecutor:
     """Returns a ProcessPoolExecutor using pool_context().
 
-    Use this for every worker pool.
+    Use this for every worker pool. Workers adopt this process's
+    MSOAXON_MODE and DriftWarning state (_fast.inherit): a forkserver
+    worker would otherwise see the environment of the server's start.
 
     Args:
         max_workers: The number of processes (default: all CPUs).
@@ -60,7 +64,10 @@ def process_pool(
         A concurrent.futures.ProcessPoolExecutor.
     """
     return futures.ProcessPoolExecutor(
-        max_workers=max_workers, mp_context=pool_context()
+        max_workers=max_workers,
+        mp_context=pool_context(),
+        initializer=_fast.inherit,
+        initargs=_fast.parent_state(),
     )
 
 
