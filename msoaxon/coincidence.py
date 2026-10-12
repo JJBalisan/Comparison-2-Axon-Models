@@ -128,15 +128,36 @@ def threshold(
     Returns:
         The threshold amplitude, to rel_tol, or inf if nothing up to
         `ceiling` spikes.
+
+    Raises:
+        _bisect.FiresWithoutInputError: If the cell fires with no input.
     """
     site, model_kw = (stim, input_node, input_node2), model_kw or {}
-    return _bisect.smallest_crossing(
-        lambda I: _respond(model, I, delay, node, v0, epsg_tau, site, model_kw),
-        guess,
-        ceiling,
-        rel_tol,
-        FACTOR,
-    )
+    try:
+        return _bisect.smallest_crossing(
+            lambda I: _respond(
+                model, I, delay, node, v0, epsg_tau, site, model_kw
+            ),
+            guess,
+            ceiling,
+            rel_tol,
+            FACTOR,
+        )
+    except _bisect.FiresWithoutInputError as e:
+        config = _dispatch.describe(
+            model,
+            node,
+            v0,
+            model_kw.get("mem"),
+            delay=delay,
+            stim=stim,
+            input_node=input_node,
+            input_node2=input_node2,
+            model_kw=sorted(model_kw),
+        )
+        raise _bisect.FiresWithoutInputError(
+            f"coincidence.threshold({config}): {e}"
+        ) from e
 
 
 def _threshold_task(task: tuple[tuple[Any, ...], dict[str, Any]]) -> float:
