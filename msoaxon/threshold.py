@@ -1,9 +1,6 @@
 """Spiking-threshold search (port of BinarySearch.m)."""
 
-from ._dispatch import spikes
-from ._parallel import map_tasks
-from .spiking import matlab_round
-from .synaptic import SynParams
+from msoaxon import _dispatch, _parallel, spiking, synaptic
 
 START = 5.0
 T_END = 20.0
@@ -14,7 +11,7 @@ INPUT_NODE = 1
 
 def sweep_setting(stim_type, i, epsg_pair_dt=1 / 25):
     """(stop, syn, I_override) for sweep point i (1-indexed, as in the MATLAB loop)."""
-    syn = SynParams(t_end=T_END)
+    syn = synaptic.SynParams(t_end=T_END)
     if stim_type == "step":
         return 15.0, syn, None
     if stim_type in ("ramp", "ramp2"):
@@ -79,7 +76,7 @@ def _point(task):
     def spiked_at(
         stim, start, stop, I, syn, factor
     ):  # the search only needs yes/no
-        return spikes(
+        return _dispatch.spikes(
             model,
             stim,
             start,
@@ -130,9 +127,13 @@ def binary_search(
         for model in ("multi", "two")
         for i in range(1, n_points + 1)
     ]
-    results = map_tasks(_point, tasks, workers, executor)
+    results = _parallel.map_tasks(_point, tasks, workers, executor)
 
     digits = 0 if stim_type == "EPSGpair" else -1
-    finish = (lambda v: matlab_round(v, digits)) if rounded else (lambda v: v)
+    finish = (
+        (lambda v: spiking.matlab_round(v, digits))
+        if rounded
+        else (lambda v: v)
+    )
     results = [finish(v) for v in results]
     return results[:n_points], results[n_points:]

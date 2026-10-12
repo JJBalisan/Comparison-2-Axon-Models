@@ -9,10 +9,9 @@ rebalanced so the cell doesn't fire spontaneously.
 
 import argparse
 import json
-from pathlib import Path
+import pathlib
 
-from msoaxon.multi import membrane
-from msoaxon.somatic import rheobase, spike_amplitude
+from msoaxon import multi, somatic
 
 MULTS = (
     1.5,
@@ -41,7 +40,7 @@ def main():
         help="1%% rheobase tolerance, 1.5x and 3x only: a smoke test, not results",
     )
     a = ap.parse_args()
-    out = Path(a.out_dir)
+    out = pathlib.Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
     # imported here rather than at the top, like the pool scripts, so importing this
@@ -54,11 +53,11 @@ def main():
     fig, axes = plt.subplots(1, len(CASES), figsize=(15, 4.2), sharey=True)
     results = {}
     for ax, (name, (model, knobs)) in zip(axes, CASES.items()):
-        mem = membrane(-68.0, **knobs) if knobs else None
-        rb = rheobase(model, mem=mem, rel_tol=1e-2 if a.quick else 1e-4)
+        mem = multi.membrane(-68.0, **knobs) if knobs else None
+        rb = somatic.rheobase(model, mem=mem, rel_tol=1e-2 if a.quick else 1e-4)
         rows = []
         for k in (1.5, 3.0) if a.quick else MULTS:
-            r = spike_amplitude(model, rb * k, mem=mem)
+            r = somatic.spike_amplitude(model, rb * k, mem=mem)
             t, x = r.pop("trace")  # the run the amplitude was measured on
             rows.append(
                 {"multiple": k, **{key: float(v) for key, v in r.items()}}

@@ -3,13 +3,13 @@ both do), so the scripts that open worker pools must stay cheap to import: in
 particular they import matplotlib only where they draw, in the main process.
 somatic_spike.py opens no pool but follows the same rule."""
 
+import pathlib
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = pathlib.Path(__file__).resolve().parents[1]
 PROBE = (
     "import runpy, sys; runpy.run_path(sys.argv[1], run_name='__mp_main__'); "
     "print('matplotlib' in sys.modules)"

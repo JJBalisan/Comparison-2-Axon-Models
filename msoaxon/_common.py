@@ -1,10 +1,8 @@
 """Stimulus and argument handling shared by both models (from TwoCpt.m)."""
 
-from types import SimpleNamespace
+import types
 
-from . import constants as C
-from ._solve import input_end, settled_event, spike_event
-from .synaptic import synaptic
+from msoaxon import _solve, constants as C, synaptic
 
 STIM_TYPES = (
     "step",
@@ -56,13 +54,13 @@ def check_args(
 
 def stimulus(stim_type, start, stop, I, t_end, syn):
     """Bundle stimulus settings (what TwoCpt.m stored on P)."""
-    s = SimpleNamespace(
+    s = types.SimpleNamespace(
         start=start, stop=stop, I=I, t_end=t_end, epsg_tau=tuple(syn.epsg_tau)
     )
     if stim_type == "sine":
         s.f = syn.f
     if stim_type in ("Synaptic", "SynapticPair"):
-        s.t_syn, s.g_syn = synaptic(syn)
+        s.t_syn, s.g_syn = synaptic.synaptic(syn)
         s.VsynE, s.diff = syn.VsynE, syn.diff
     return s
 
@@ -76,11 +74,13 @@ def _stops(rhs, axon_col, stop_on_spike, stop_when_settled, stim_type, s, n_v):
         if stop_when_settled:
             raise ValueError("stop_when_settled needs stop_on_spike")
         return None
-    events = [spike_event(axon_col, stop_on_spike)]
+    events = [_solve.spike_event(axon_col, stop_on_spike)]
     if stop_when_settled:
-        t_off = input_end(stim_type, s.start, s.stop, s.t_end, s.epsg_tau)
+        t_off = _solve.input_end(
+            stim_type, s.start, s.stop, s.t_end, s.epsg_tau
+        )
         if t_off < s.t_end:
             events.append(
-                settled_event(rhs, t_off, axon_col, stop_on_spike, n_v)
+                _solve.settled_event(rhs, t_off, axon_col, stop_on_spike, n_v)
             )
     return events

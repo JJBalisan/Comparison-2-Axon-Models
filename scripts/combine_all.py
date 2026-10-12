@@ -7,9 +7,8 @@ import argparse
 
 import matplotlib.pyplot as plt
 
-from msoaxon import SynParams, mso_axon, two_cpt
-from msoaxon.plotting import graphing
-from msoaxon.spiking import count_rising_edges, spiking
+import msoaxon
+from msoaxon import plotting, spiking
 
 # per-stimulus defaults from Combine_all.m: (stop, I)
 DEFAULTS = {
@@ -69,19 +68,27 @@ def main():
     stop, I = DEFAULTS[a.stim]
     stop = a.stop if a.stop is not None else stop
     I = a.I if a.I is not None else I
-    syn = SynParams(t_end=a.t_end, random_in=1396, diff=1.0, f=200.0)
+    syn = msoaxon.SynParams(t_end=a.t_end, random_in=1396, diff=1.0, f=200.0)
 
     args = (a.stim, a.start, stop, I)
-    t1, y = mso_axon(*args, a.node, a.type, a.t_end, a.v0, a.input_node, syn)
-    t2, x = two_cpt(*args, a.node, a.type, a.t_end, a.v0, a.input_node, syn)
+    t1, y = msoaxon.mso_axon(
+        *args, a.node, a.type, a.t_end, a.v0, a.input_node, syn
+    )
+    t2, x = msoaxon.two_cpt(
+        *args, a.node, a.type, a.t_end, a.v0, a.input_node, syn
+    )
     # Combine_all.m ran TwoCpt twice with identical arguments for the node-3/node-5
     # panels; here the second run uses node 5 so those panels mean what they say.
-    t3, z = two_cpt(*args, 5, a.type, a.t_end, a.v0, a.input_node, syn)
+    t3, z = msoaxon.two_cpt(*args, 5, a.type, a.t_end, a.v0, a.input_node, syn)
 
     # Combine_all.m counted column 1 of the 2-CPT markers (soma minus soma, always 0);
     # column 2 is the axon compartment it meant.
-    n_two = count_rising_edges(spiking(x, a.factor, "Two")[:, 1])
-    n_multi = count_rising_edges(spiking(y, a.factor, "Mult")[:, a.node - 1])
+    n_two = spiking.count_rising_edges(
+        spiking.spiking(x, a.factor, "Two")[:, 1]
+    )
+    n_multi = spiking.count_rising_edges(
+        spiking.spiking(y, a.factor, "Mult")[:, a.node - 1]
+    )
     print(
         f"spikes at node {a.node}: multi-compartment {n_multi}, two-compartment {n_two}"
     )
@@ -97,7 +104,7 @@ def main():
         I=I,
         Syn=syn,
     )
-    fig = graphing(graph, t1, y, t2, x, t3, z)
+    fig = plotting.graphing(graph, t1, y, t2, x, t3, z)
     if a.out:
         fig.savefig(a.out, dpi=150)
         print(f"saved {a.out}")

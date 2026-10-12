@@ -20,10 +20,7 @@ bracketing bisection rather than BinarySearch.m's halving search.
 
 import numpy as np
 
-from ._bisect import crossing, smallest_crossing
-from ._dispatch import response
-from ._parallel import map_tasks
-from .synaptic import EPSG_TAU, SynParams
+from msoaxon import _bisect, _dispatch, _parallel, synaptic
 
 START = 5.0
 T_END = 20.0
@@ -37,10 +34,10 @@ def _respond(model, I, delay, node, v0, epsg_tau, site, model_kw, start=START):
     input_node, input_node2).
     """
     stim, input_node, input_node2 = site
-    syn = SynParams(t_end=T_END, epsg_tau=tuple(epsg_tau))
+    syn = synaptic.SynParams(t_end=T_END, epsg_tau=tuple(epsg_tau))
     if input_node2 is not None:
         model_kw = {**model_kw, "input_node2": input_node2}
-    return response(
+    return _dispatch.response(
         model,
         stim,
         start,
@@ -67,7 +64,7 @@ def threshold(
     delay,
     node=3,
     v0=-68.0,
-    epsg_tau=EPSG_TAU,
+    epsg_tau=synaptic.EPSG_TAU,
     model_kw=None,
     rel_tol=1e-4,
     guess=50.0,
@@ -88,7 +85,7 @@ def threshold(
     Returns inf if nothing up to `ceiling` spikes.
     """
     site, model_kw = (stim, input_node, input_node2), model_kw or {}
-    return smallest_crossing(
+    return _bisect.smallest_crossing(
         lambda I: _respond(model, I, delay, node, v0, epsg_tau, site, model_kw),
         guess,
         ceiling,
@@ -107,7 +104,7 @@ def threshold_curve(
     delays,
     node=3,
     v0=-68.0,
-    epsg_tau=EPSG_TAU,
+    epsg_tau=synaptic.EPSG_TAU,
     model_kw=None,
     rel_tol=1e-4,
     workers=None,
@@ -137,7 +134,9 @@ def threshold_curve(
         )
         for d in delays
     ]
-    return np.array(map_tasks(_threshold_task, tasks, workers, executor))
+    return np.array(
+        _parallel.map_tasks(_threshold_task, tasks, workers, executor)
+    )
 
 
 def half_width(delays, thresholds, margin):
@@ -168,7 +167,7 @@ def window(
     margin,
     node=3,
     v0=-68.0,
-    epsg_tau=EPSG_TAU,
+    epsg_tau=synaptic.EPSG_TAU,
     model_kw=None,
     rel_tol=1e-4,
     delay_tol=1e-4,
@@ -220,7 +219,7 @@ def window(
         return np.nan, th0
     # amp > th0, so it spikes at delay 0; the peak falls smoothly through FACTOR as
     # the delay grows, so the same interpolation as in threshold() applies
-    far, near = crossing(
+    far, near = _bisect.crossing(
         respond,
         max_delay,
         0.0,
@@ -256,7 +255,7 @@ def probability_trials(
     jitter=0.015,
     node=3,
     v0=-68.0,
-    epsg_tau=EPSG_TAU,
+    epsg_tau=synaptic.EPSG_TAU,
     model_kw=None,
     seed=0,
     workers=None,
@@ -293,5 +292,5 @@ def probability_trials(
                     model_kw or {},
                 )
             )
-    hits = map_tasks(_trial, tasks, workers, executor, chunksize=16)
+    hits = _parallel.map_tasks(_trial, tasks, workers, executor, chunksize=16)
     return np.array(hits, float).reshape(len(delays), n_trials).mean(axis=1)

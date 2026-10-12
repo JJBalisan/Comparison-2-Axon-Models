@@ -1,22 +1,22 @@
 """benchmark_search.py --check must compare every yes/no the searches make.
 
 The EPSG-pair, bilateral-dendrite and window searches decide through
-_dispatch.response (imported by name into coincidence.py), not spikes(), so
+_dispatch.response, not spikes(), so
 --check has to wrap response too or it reports "mismatches 0" without having
 compared anything. A fake model whose spike decision depends on the settled
 stop must be counted as a mismatch on both paths.
 """
 
+import collections
 import importlib.util
-from collections import defaultdict
-from pathlib import Path
+import pathlib
 
 import numpy as np
 import pytest
 
-from msoaxon import _dispatch, coincidence, somatic, threshold as threshold_mod
+from msoaxon import _dispatch, coincidence, synaptic
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = pathlib.Path(__file__).resolve().parents[1]
 FACTOR = coincidence.FACTOR
 T_END = 10.0
 
@@ -90,17 +90,13 @@ def instrumented(monkeypatch):
     monkeypatch.setattr(_dispatch, "STOP_WHEN_SETTLED", True)
     monkeypatch.setattr(_dispatch, "run_model", _dispatch.run_model)
     monkeypatch.setattr(_dispatch, "response", _dispatch.response)
-    monkeypatch.setattr(coincidence, "response", coincidence.response)
-    for mod in (_dispatch, coincidence, somatic, threshold_mod):
-        monkeypatch.setattr(
-            mod, "spikes", getattr(mod, "spikes", None), raising=False
-        )
+    monkeypatch.setattr(_dispatch, "spikes", _dispatch.spikes)
 
     def install(disagree, peak_differs=False):
         monkeypatch.setattr(
             _dispatch, "run_model", _fake_run_model(disagree, peak_differs)
         )
-        stats = defaultdict(float)
+        stats = collections.defaultdict(float)
         bench.instrument(stats, True)
         return stats
 
@@ -115,7 +111,7 @@ def _epsg_pair_decision():
         0.1,
         3,
         -68.0,
-        coincidence.EPSG_TAU,
+        synaptic.EPSG_TAU,
         ("EPSGpair", 1, None),
         {},
     )

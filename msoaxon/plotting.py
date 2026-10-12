@@ -7,8 +7,7 @@ stimType, inputNode, start, stop, I, Syn.
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ._common import stimulus
-from .two import applied_current
+from msoaxon import _common, two
 
 
 def _panel(ax, t, V, title, labels, t_end, ylabel="Voltage (mV)"):
@@ -27,7 +26,7 @@ def input_trace(graph, t2, x):
     the 2-CPT voltage with the multi-compartment time index); here it reuses the
     model's own stimulus function evaluated on the 2-CPT run instead.
     """
-    s = stimulus(
+    s = _common.stimulus(
         graph["stimType"],
         graph["start"],
         graph["stop"],
@@ -37,7 +36,7 @@ def input_trace(graph, t2, x):
     )
     return np.array(
         [
-            applied_current(t, V1, graph["stimType"], s)
+            two.applied_current(t, V1, graph["stimType"], s)
             for t, V1 in zip(t2, x[:, 0])
         ]
     )

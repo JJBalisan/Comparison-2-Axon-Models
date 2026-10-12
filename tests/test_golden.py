@@ -19,7 +19,8 @@ import pathlib
 import numpy as np
 import pytest
 
-from msoaxon import SynParams, mso_axon, multi, two, two_cpt
+import msoaxon
+from msoaxon import multi, two
 
 GOLDEN = pathlib.Path(__file__).resolve().parent / "golden_traces.json"
 TIMES = (1.0, 5.1, 5.3, 5.6, 6.0, 7.0, 9.0, 12.0)
@@ -65,8 +66,8 @@ def _run(
     input_node=1,
     **kw,
 ):
-    syn = SynParams(t_end=t_end, **syn_kw)
-    fn = mso_axon if model == "multi" else two_cpt
+    syn = msoaxon.SynParams(t_end=t_end, **syn_kw)
+    fn = msoaxon.mso_axon if model == "multi" else msoaxon.two_cpt
     return fn(
         stim,
         start,

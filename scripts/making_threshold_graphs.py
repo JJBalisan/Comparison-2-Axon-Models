@@ -8,12 +8,11 @@ across all CPUs unless --workers says otherwise.
 """
 
 import argparse
-from pathlib import Path
+import pathlib
 
 import numpy as np
 
-from msoaxon._parallel import process_pool
-from msoaxon.threshold import binary_search, sweep_x
+from msoaxon import _parallel, threshold
 
 # stimType: (n_points, factor, max, title, xlabel); x-values come from threshold.sweep_x
 SWEEPS = {
@@ -51,7 +50,7 @@ def main():
     if a.workers == 1:  # in-process, as binary_search(workers=1) does
         run(a, None)
     else:
-        with process_pool(a.workers) as pool:  # shared by every sweep
+        with _parallel.process_pool(a.workers) as pool:  # shared by every sweep
             run(a, pool)
 
 
@@ -60,7 +59,7 @@ def run(a, pool):
     # and only the main process draws (msoaxon.plotting imports matplotlib)
     import matplotlib.pyplot as plt
 
-    from msoaxon.plotting import threshold_figure
+    from msoaxon import plotting
 
     for stim in a.only or SWEEPS:
         n, factor, max_I, title, xlabel = SWEEPS[stim]
@@ -70,8 +69,10 @@ def run(a, pool):
             n = 11 if a.jpg_grid else n
             kw = dict(epsg_pair_dt=dt, rounded=not a.jpg_grid)
         n = min(n, a.points) if a.points else n
-        x_values = np.array([sweep_x(stim, i, dt) for i in range(1, n + 1)])
-        multi, two = binary_search(
+        x_values = np.array(
+            [threshold.sweep_x(stim, i, dt) for i in range(1, n + 1)]
+        )
+        multi, two = threshold.binary_search(
             stim,
             n,
             a.node,
@@ -82,7 +83,7 @@ def run(a, pool):
             **kw,
         )
         print(f"{stim}: multi={multi}\n{' ' * len(stim)}  two  ={two}")
-        fig = threshold_figure(
+        fig = plotting.threshold_figure(
             x_values,
             multi,
             two,
@@ -90,8 +91,10 @@ def run(a, pool):
             xlabel,
         )
         if a.out_dir:
-            Path(a.out_dir).mkdir(parents=True, exist_ok=True)
-            path = Path(a.out_dir) / f"{stim}_thresholds_cpt{a.node}.png"
+            pathlib.Path(a.out_dir).mkdir(parents=True, exist_ok=True)
+            path = (
+                pathlib.Path(a.out_dir) / f"{stim}_thresholds_cpt{a.node}.png"
+            )
             fig.savefig(path, dpi=150)
             print(f"saved {path}")
     if not a.out_dir:

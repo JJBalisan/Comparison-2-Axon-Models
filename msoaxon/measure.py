@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from ._dispatch import run_model
+from msoaxon import _dispatch
 
 
 def soma_on_grid(t, x, v0, t0, t1, dt=0.001):
@@ -21,7 +21,7 @@ def passive_step(
     ends exactly at switch-off is evaluated with the current already off, so that
     one point has decayed a little. model_kw go to run_model (mem, morph, r1, ...).
     """
-    t, x = run_model(
+    t, x = _dispatch.run_model(
         model, "step", 5, 45, I, 3, 50, v0, 1, model_type=model_type, **model_kw
     )
     g = np.linspace(5, 44.9, n_grid)

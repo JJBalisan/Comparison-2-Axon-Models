@@ -9,7 +9,7 @@ MATLAB code (1-indexed) is index k-1 here.
 """
 
 import json
-from pathlib import Path
+import pathlib
 
 import numpy as np
 
@@ -155,7 +155,7 @@ XA_CM = XA * 1e-8  # [cm^2]
 
 # --- Coupling constants (Coupling.mat) ----------------------------------------------
 _coupling = json.loads(
-    (Path(__file__).parent / "data" / "coupling.json").read_text()
+    (pathlib.Path(__file__).parent / "data" / "coupling.json").read_text()
 )
 COUPLING1 = np.array(_coupling["coupling1"])  # forward, length 44, index node-2
 COUPLING2 = np.array(_coupling["coupling2"])  # backward

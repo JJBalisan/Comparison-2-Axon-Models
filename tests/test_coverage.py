@@ -1,8 +1,8 @@
 """Stimulus branches, input validation, synaptic input, threshold search, plotting, scripts."""
 
+import pathlib
 import subprocess
 import sys
-from pathlib import Path
 
 import matplotlib
 
@@ -11,13 +11,20 @@ matplotlib.use("Agg")
 import numpy as np
 import pytest
 
-from msoaxon import SynParams, mso_axon, two_cpt
-from msoaxon.plotting import graphing, threshold_figure
-from msoaxon.spiking import spiking
-from msoaxon.synaptic import synaptic
-from msoaxon.threshold import binary_search
+import msoaxon
+from msoaxon import (
+    _bisect,
+    _dispatch,
+    _parallel,
+    _solve,
+    coincidence,
+    plotting,
+    spiking,
+    synaptic,
+    threshold as threshold_mod,
+)
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = pathlib.Path(__file__).resolve().parents[1]
 Q = 150 / 128  # EPSGpair search grid
 
 # (stimType, start, stop, I) that make both models fire at node 3
@@ -31,20 +38,20 @@ FIRING = {
 }
 
 
-@pytest.mark.parametrize("model", [two_cpt, mso_axon])
+@pytest.mark.parametrize("model", [msoaxon.two_cpt, msoaxon.mso_axon])
 @pytest.mark.parametrize("stim", sorted(FIRING))
 def test_every_stimulus_fires(model, stim):
     start, stop, I = FIRING[stim]
     t, x = model(stim, start, stop, I, 3, "active-full", 20, -68, 1)
-    axon = 1 if model is two_cpt else 2
+    axon = 1 if model is msoaxon.two_cpt else 2
     assert np.isfinite(x).all() and t[0] == 0 and t[-1] == 20
     assert (x[:, axon] - x[:, 0]).max() > 30
 
 
-@pytest.mark.parametrize("model", [two_cpt, mso_axon])
+@pytest.mark.parametrize("model", [msoaxon.two_cpt, msoaxon.mso_axon])
 @pytest.mark.parametrize("stim", ["Synaptic", "SynapticPair"])
 def test_synaptic_inputs_depolarise(model, stim):
-    syn = SynParams(t_end=20, random_in=1396, diff=1.0)
+    syn = msoaxon.SynParams(t_end=20, random_in=1396, diff=1.0)
     _, x = model(stim, 5, 15, 0, 3, "active-full", 20, -68, 1, syn)
     assert np.isfinite(x).all()
     assert x[:, 0].max() > -67  # noise-driven EPSPs lift the soma above rest
@@ -52,8 +59,8 @@ def test_synaptic_inputs_depolarise(model, stim):
 
 def test_synaptic_pair_near_t_end_stays_finite():
     # t + diff runs past the conductance table; MATLAB's interp1q gave NaN here
-    syn = SynParams(t_end=20, diff=3.0)
-    for model in (two_cpt, mso_axon):
+    syn = msoaxon.SynParams(t_end=20, diff=3.0)
+    for model in (msoaxon.two_cpt, msoaxon.mso_axon):
         _, x = model(
             "SynapticPair", 5, 20, 0, 3, "active-full", 20, -68, 1, syn
         )
@@ -61,29 +68,31 @@ def test_synaptic_pair_near_t_end_stays_finite():
 
 
 def test_synaptic_conductance_shape_and_seed():
-    t, g = synaptic(SynParams(t_end=20, random_in=7))
+    t, g = synaptic.synaptic(msoaxon.SynParams(t_end=20, random_in=7))
     assert len(t) == len(g) == 2001 and np.isclose(t[-1], 20)
     assert (g >= 0).all() and g.max() > 0
     np.testing.assert_array_equal(
-        g, synaptic(SynParams(t_end=20, random_in=7))[1]
+        g, synaptic.synaptic(msoaxon.SynParams(t_end=20, random_in=7))[1]
     )
-    assert not np.array_equal(g, synaptic(SynParams(t_end=20, random_in=8))[1])
+    assert not np.array_equal(
+        g, synaptic.synaptic(msoaxon.SynParams(t_end=20, random_in=8))[1]
+    )
 
 
 def test_input_to_axon_compartment():
     # input_node != 1 routes the 2-CPT input into compartment 2
-    _, x = two_cpt("EPSGpair", 5, 5, 100, 3, "active-full", 20, -68, 3)
+    _, x = msoaxon.two_cpt("EPSGpair", 5, 5, 100, 3, "active-full", 20, -68, 3)
     assert x[:, 1].max() > x[:, 0].max()
 
 
 @pytest.mark.parametrize(
     "model,node,input_node",
     [
-        (two_cpt, 1, 1),  # node 1 is the soma; would read coupling[-1]
-        (two_cpt, 46, 1),
-        (two_cpt, 3, 0),
-        (mso_axon, 3, 0),  # would inject into compartment 45
-        (mso_axon, 3, 46),
+        (msoaxon.two_cpt, 1, 1),  # node 1 is the soma; would read coupling[-1]
+        (msoaxon.two_cpt, 46, 1),
+        (msoaxon.two_cpt, 3, 0),
+        (msoaxon.mso_axon, 3, 0),  # would inject into compartment 45
+        (msoaxon.mso_axon, 3, 46),
     ],
 )
 def test_out_of_range_nodes_are_rejected(model, node, input_node):
@@ -91,7 +100,7 @@ def test_out_of_range_nodes_are_rejected(model, node, input_node):
         model("EPSGpair", 5, 5, 100, node, "active-full", 20, -68, input_node)
 
 
-@pytest.mark.parametrize("model", [two_cpt, mso_axon])
+@pytest.mark.parametrize("model", [msoaxon.two_cpt, msoaxon.mso_axon])
 def test_unknown_names_are_rejected(model):
     with pytest.raises(ValueError, match="model type"):
         model("EPSGpair", 5, 5, 100, 3, "active-ful", 20, -68, 1)
@@ -109,7 +118,7 @@ def test_every_model_type_runs():
         "active-KHT",
         "active-full",
     ):
-        for model in (two_cpt, mso_axon):
+        for model in (msoaxon.two_cpt, msoaxon.mso_axon):
             _, x = model("EPSG", 5, 10, 50, 3, mt, 10, -68, 1)
             assert np.isfinite(x).all(), (model.__name__, mt)
 
@@ -120,14 +129,14 @@ def test_spiking_reset_carries_across_columns_mult():
     x = np.zeros((4, 315))
     x[:, 1] = [0, 50, 50, 50]
     x[:, 2] = [50, 50, 0, 50]
-    s = spiking(x, 30, "Mult")
+    s = spiking.spiking(x, 30, "Mult")
     np.testing.assert_array_equal(s[:, 1], [0, 1, 0, 0])
     np.testing.assert_array_equal(s[:, 2], [0, 0, 0, 1])
 
 
 def test_epsgpair_thresholds_match_repo_jpg():
     """Delays 0 and 0.3 ms at node 3: both models read 41q and 55q off EPSGpair_Thresholds_CPT3.jpg."""
-    multi, two = binary_search(
+    multi, two = threshold_mod.binary_search(
         "EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, rounded=False
     )
     assert [round(v / Q) for v in multi] == [41, 55]
@@ -135,20 +144,20 @@ def test_epsgpair_thresholds_match_repo_jpg():
 
 
 def test_binary_search_rounding_and_ceiling():
-    multi, two = binary_search("step", 1, 3, 30, 15000, workers=1)
+    multi, two = threshold_mod.binary_search("step", 1, 3, 30, 15000, workers=1)
     assert all(v % 10 == 0 and 0 < v < 15000 for v in multi + two)
     # a stimulus that never fires reports the ceiling, as BinarySearch.m does
-    multi, _ = binary_search("EPSG", 1, 3, 30, 15000, workers=1)
+    multi, _ = threshold_mod.binary_search("EPSG", 1, 3, 30, 15000, workers=1)
     assert multi == [15000]
 
 
 @pytest.fixture(scope="module")
 def runs():
-    syn = SynParams(t_end=20)
+    syn = msoaxon.SynParams(t_end=20)
     args = ("EPSGpair", 5, 5, 100)
-    t1, y = mso_axon(*args, 3, "active-full", 20, -68, 1, syn)
-    t2, x = two_cpt(*args, 3, "active-full", 20, -68, 1, syn)
-    t3, z = two_cpt(*args, 5, "active-full", 20, -68, 1, syn)
+    t1, y = msoaxon.mso_axon(*args, 3, "active-full", 20, -68, 1, syn)
+    t2, x = msoaxon.two_cpt(*args, 3, "active-full", 20, -68, 1, syn)
+    t3, z = msoaxon.two_cpt(*args, 5, "active-full", 20, -68, 1, syn)
     graph = dict(
         node=3,
         tEnd=20,
@@ -176,7 +185,7 @@ def runs():
 )
 def test_graph_types_render(runs, kind):
     graph, data = runs
-    fig = graphing({**graph, "Type": kind}, *data)
+    fig = plotting.graphing({**graph, "Type": kind}, *data)
     assert fig.axes
     matplotlib.pyplot.close(fig)
 
@@ -184,11 +193,13 @@ def test_graph_types_render(runs, kind):
 def test_two_compartment_graph_and_unknown_type(runs):
     graph, (_, _, t2, x, _, _) = runs
     matplotlib.pyplot.close(
-        graphing({**graph, "Type": "TwoCompartment"}, t2, x)
+        plotting.graphing({**graph, "Type": "TwoCompartment"}, t2, x)
     )
     with pytest.raises(ValueError):
-        graphing({**graph, "Type": "Nope"}, t2, x)
-    matplotlib.pyplot.close(threshold_figure([0, 1], [1, 2], [1, 2], "t", "x"))
+        plotting.graphing({**graph, "Type": "Nope"}, t2, x)
+    matplotlib.pyplot.close(
+        plotting.threshold_figure([0, 1], [1, 2], [1, 2], "t", "x")
+    )
 
 
 def test_combine_all_script(tmp_path):
@@ -215,9 +226,8 @@ def test_combine_all_script(tmp_path):
     )
 
 
-@pytest.mark.parametrize("model", [two_cpt, mso_axon])
+@pytest.mark.parametrize("model", [msoaxon.two_cpt, msoaxon.mso_axon])
 def test_pre_stimulus_cache_does_not_change_results(model):
-    from msoaxon import _solve
 
     _solve._QUIET_CACHE.clear()
     t1, x1 = model("EPSGpair", 5, 5.3, 70, 3, "active-full", 20, -68, 1)
@@ -233,7 +243,9 @@ def test_pre_stimulus_cache_does_not_change_results(model):
     np.testing.assert_array_equal(x2, x3)
 
 
-@pytest.mark.parametrize("model,axon", [(two_cpt, 1), (mso_axon, 2)])
+@pytest.mark.parametrize(
+    "model,axon", [(msoaxon.two_cpt, 1), (msoaxon.mso_axon, 2)]
+)
 def test_stop_on_spike_truncates_the_full_run(model, axon):
     args = ("EPSGpair", 5, 5.3, 70, 3, "active-full", 20, -68, 1)
     t, x = model(*args)
@@ -249,66 +261,66 @@ def test_stop_on_spike_truncates_the_full_run(model, axon):
 
 def test_stop_on_spike_leaves_non_spiking_runs_alone():
     args = ("EPSGpair", 5, 5, 40, 3, "active-full", 20, -68, 1)
-    t, x = mso_axon(*args)
-    te, xe = mso_axon(*args, stop_on_spike=10)
+    t, x = msoaxon.mso_axon(*args)
+    te, xe = msoaxon.mso_axon(*args, stop_on_spike=10)
     np.testing.assert_array_equal(t, te)
     np.testing.assert_array_equal(x, xe)
 
 
 def test_model_modules_are_importable():
     # the re-exported functions used to shadow their own submodules
-    import msoaxon
-    import msoaxon.multi as multi
-    import msoaxon.two as two
+    from msoaxon import multi, two  # noqa: PLC0415 (the import is the test)
 
     assert multi.mso_axon is msoaxon.mso_axon and two.two_cpt is msoaxon.two_cpt
 
 
 def test_parallel_runs_match_serial():
-    from msoaxon._parallel import process_pool
-    from msoaxon.coincidence import threshold_curve
 
-    serial = binary_search(
+    serial = threshold_mod.binary_search(
         "EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=1
     )
     assert (
-        binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=2)
+        threshold_mod.binary_search(
+            "EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=2
+        )
         == serial
     )
-    curve = threshold_curve("two", [0.0, 0.2], workers=1)
-    with process_pool(2) as pool:  # one pool reused across calls
+    curve = coincidence.threshold_curve("two", [0.0, 0.2], workers=1)
+    with _parallel.process_pool(2) as pool:  # one pool reused across calls
         assert (
-            binary_search(
+            threshold_mod.binary_search(
                 "EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, executor=pool
             )
             == serial
         )
         np.testing.assert_array_equal(
-            threshold_curve("two", [0.0, 0.2], executor=pool), curve
+            coincidence.threshold_curve("two", [0.0, 0.2], executor=pool), curve
         )
 
 
 def test_smallest_firing():
-    from msoaxon._bisect import smallest_firing
 
-    assert smallest_firing(
+    assert _bisect.smallest_firing(
         lambda x: x >= 3.0, 1.0, 100.0, 1e-6
     ) == pytest.approx(3.0, rel=1e-6)
     assert (
-        smallest_firing(lambda x: x >= 3.0, 1.0, 100.0, 1e-6) >= 3.0
+        _bisect.smallest_firing(lambda x: x >= 3.0, 1.0, 100.0, 1e-6) >= 3.0
     )  # returns a firing value
-    assert smallest_firing(lambda x: False, 1.0, 100.0, 1e-3) == np.inf
+    assert _bisect.smallest_firing(lambda x: False, 1.0, 100.0, 1e-3) == np.inf
     # the ceiling bounds the doubling: 64 is tested, 128 exceeds 100, so 90 is never reached
-    assert smallest_firing(lambda x: x >= 90.0, 1.0, 100.0, 1e-3) == np.inf
+    assert (
+        _bisect.smallest_firing(lambda x: x >= 90.0, 1.0, 100.0, 1e-3) == np.inf
+    )
 
 
 def test_run_model_rejects_multi_only_keywords_for_two():
-    from msoaxon._dispatch import run_model
 
     with pytest.raises(ValueError, match="mem only apply"):
-        run_model("two", "step", 5, 10, 100.0, 3, 10, -68.0, 1, mem=object())
+        _dispatch.run_model(
+            "two", "step", 5, 10, 100.0, 3, 10, -68.0, 1, mem=object()
+        )
     with pytest.raises(ValueError, match='"multi" or "two"'):
-        run_model("Two", "step", 5, 10, 100.0, 3, 10, -68.0, 1)
+        _dispatch.run_model("Two", "step", 5, 10, 100.0, 3, 10, -68.0, 1)
 
 
 def _smooth_response(threshold, level=10.0):
@@ -326,10 +338,9 @@ def _smooth_response(threshold, level=10.0):
 
 @pytest.mark.parametrize("threshold", [3.7, 47.72, 48.0, 190.0, 1500.0])
 def test_smallest_crossing_keeps_bisections_guarantee(threshold):
-    from msoaxon._bisect import smallest_crossing, smallest_firing
 
     respond, calls = _smooth_response(threshold)
-    hi = smallest_crossing(respond, 50.0, 2000.0, 1e-4, 10.0)
+    hi = _bisect.smallest_crossing(respond, 50.0, 2000.0, 1e-4, 10.0)
     assert (
         threshold <= hi <= threshold * (1 + 1e-4)
     )  # spikes, and within rel_tol
@@ -339,20 +350,20 @@ def test_smallest_crossing_keeps_bisections_guarantee(threshold):
         n_bisect[0] += 1
         return x >= threshold
 
-    smallest_firing(fires, 50.0, 2000.0, 1e-4)
+    _bisect.smallest_firing(fires, 50.0, 2000.0, 1e-4)
     assert len(calls) < n_bisect[0]  # and in fewer runs than bisection
 
 
 def test_smallest_crossing_gives_up_past_the_ceiling():
-    from msoaxon._bisect import smallest_crossing
 
     respond, _ = _smooth_response(5000.0)
-    assert smallest_crossing(respond, 50.0, 2000.0, 1e-4, 10.0) == np.inf
+    assert (
+        _bisect.smallest_crossing(respond, 50.0, 2000.0, 1e-4, 10.0) == np.inf
+    )
 
 
 def test_crossing_works_in_either_direction():
     # window() searches delay, where the spiking side is the smaller value
-    from msoaxon._bisect import crossing
 
     def respond(
         d,
@@ -360,7 +371,7 @@ def test_crossing_works_in_either_direction():
         peak = 10.0 * np.exp(-(d - 0.1) * 8)
         return peak >= 10.0, min(peak, 10.0)
 
-    far, near = crossing(
+    far, near = _bisect.crossing(
         respond, 1.0, 0.0, lambda n, y: 1e-4, 10.0, [(1.0, respond(1.0)[1])]
     )
     assert near <= 0.1 <= far and far - near <= 1e-4

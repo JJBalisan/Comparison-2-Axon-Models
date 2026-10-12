@@ -13,8 +13,7 @@ the charging transient and shortly before the axonal spike.
 
 import numpy as np
 
-from ._bisect import smallest_firing
-from ._dispatch import run_model, spikes
+from msoaxon import _bisect, _dispatch
 
 START, STOP, T_END = 5.0, 105.0, 110.0
 FACTOR = 10.0  # spike = axon rises this far above soma
@@ -24,7 +23,7 @@ LOOKBACK = 0.5  # ms before the spike-detection time searched for the takeoff
 
 def fires(model, I, node=3, v0=-68.0, mem=None):
     """Whether a 100 ms somatic step of I [pA] makes compartment `node` spike."""
-    return spikes(
+    return _dispatch.spikes(
         model,
         "step",
         START,
@@ -41,7 +40,7 @@ def fires(model, I, node=3, v0=-68.0, mem=None):
 
 def rheobase(model, node=3, v0=-68.0, mem=None, rel_tol=1e-4, guess=2000.0):
     """Smallest 100 ms somatic step [pA] that fires, by bisection (inf above 1e6)."""
-    return smallest_firing(
+    return _bisect.smallest_firing(
         lambda I: fires(model, I, node, v0, mem), guess, 1e6, rel_tol
     )
 
@@ -53,7 +52,7 @@ def spike_amplitude(model, I, node=3, v0=-68.0, mem=None):
     trace), where trace = (t, x) is the finely sampled run up to 2 ms after the
     spike, or None if the step doesn't fire.
     """
-    t0, _ = run_model(
+    t0, _ = _dispatch.run_model(
         model,
         "step",
         START,
@@ -69,7 +68,7 @@ def spike_amplitude(model, I, node=3, v0=-68.0, mem=None):
     ts = t0[-1]
     if ts >= T_END:
         return None
-    t, x = run_model(
+    t, x = _dispatch.run_model(
         model,
         "step",
         START,

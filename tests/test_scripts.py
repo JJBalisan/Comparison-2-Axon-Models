@@ -8,13 +8,13 @@ the full-mode numbers are documented in PYTHON.md.
 
 import json
 import math
+import pathlib
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = pathlib.Path(__file__).resolve().parents[1]
 
 # about 60 s locally, ~4 min on a CI runner; the scripts don't depend on the Python
 # version, so CI runs these on 3.12 only (deselect locally with -m "not slow")

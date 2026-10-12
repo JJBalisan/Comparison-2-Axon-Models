@@ -12,15 +12,12 @@ appended after the axon, so compartments 1-45 keep their meaning; the state then
 has 7 blocks of n = 45 + dendrite compartments.
 """
 
-from types import SimpleNamespace
+import types
 
 import numpy as np
-from scipy.sparse import bmat, coo_matrix, diags, eye
+from scipy import sparse
 
-from . import constants as C
-from ._common import STIM_TYPES, _stops, check_args, stimulus
-from ._solve import breakpoints, integrate, pre_stimulus_is_quiet
-from .synaptic import SynParams, epsg_unitary, interp_g
+from msoaxon import _common, _solve, constants as C, synaptic
 
 N = C.N_CPT
 
@@ -32,7 +29,7 @@ R_AXIAL = 100.0  # specific axial resistivity [Ohm cm]
 # conductance between neighbouring compartments i and i+1 (the (2/R)/(...) term)
 _G_AX = (2 / R_AXIAL) / (C.L_CM[:-1] / C.XA_CM[:-1] + C.L_CM[1:] / C.XA_CM[1:])
 
-MSO_STIM_TYPES = STIM_TYPES + ("EPSGbilateral",)
+MSO_STIM_TYPES = _common.STIM_TYPES + ("EPSGbilateral",)
 
 
 # which gating blocks (m, h, p, w, z, a) evolve for each model type
@@ -52,20 +49,20 @@ _GATE0 = (0.12, 0.67, 0.0, 0.28, 0.67, 0.22)
 
 def _chain_jac_sparsity():
     """Jacobian pattern: dV to neighbouring V and its gates, each gate to its V."""
-    I = eye(N)
-    tri = diags([1.0, 1.0, 1.0], [-1, 0, 1], shape=(N, N))
+    I = sparse.eye(N)
+    tri = sparse.diags([1.0, 1.0, 1.0], [-1, 0, 1], shape=(N, N))
     blocks = [[tri] + [I] * 6] + [
         [I] + [I if j == i else None for j in range(6)] for i in range(6)
     ]
-    return bmat(blocks).tocsc()
+    return sparse.bmat(blocks).tocsc()
 
 
 def _tree_jac_sparsity(n, parent, child):
     """_chain_jac_sparsity for any tree: dV couples to its own V, to each V it shares
     an edge (parent[k], child[k]) with, and to its own gates; each gate to its own V.
     """
-    I = eye(n, format="csr")
-    adj = coo_matrix(
+    I = sparse.eye(n, format="csr")
+    adj = sparse.coo_matrix(
         (
             np.ones(2 * len(parent)),
             (np.r_[parent, child], np.r_[child, parent]),
@@ -77,7 +74,7 @@ def _tree_jac_sparsity(n, parent, child):
     blocks = [[couple] + [I] * 6] + [
         [I] + [I if j == i else None for j in range(6)] for i in range(6)
     ]
-    return bmat(blocks).tocsc()
+    return sparse.bmat(blocks).tocsc()
 
 
 # A morphology is a SimpleNamespace with these fields (LUMPED and with_dendrites()):
@@ -98,7 +95,7 @@ def _tree_jac_sparsity(n, parent, child):
 #             1-indexed compartment numbers of each dendrite, proximal to distal
 #
 # The unbranched 45-compartment chain of msoAxon.m (soma, 2 AIS, 21 internode/node pairs)
-LUMPED = SimpleNamespace(
+LUMPED = types.SimpleNamespace(
     key="lumped",
     n=N,
     sa=C.SA,
@@ -213,7 +210,7 @@ def with_dendrites(
         + ["lateral dendrite"] * n_seg
         + ["medial dendrite"] * n_seg
     )
-    return SimpleNamespace(
+    return types.SimpleNamespace(
         key=(
             "dendrites",
             float(length),
@@ -311,26 +308,26 @@ def external_current(t, V, stim_type, s, input_node, sa=C.SA):
             return k, -(s.I * wave * (wave > 0)) / sa[0]
     elif stim_type == "Synaptic":
         if s.start < t <= s.stop:
-            g = interp_g(s.t_syn, s.g_syn, t)
+            g = synaptic.interp_g(s.t_syn, s.g_syn, t)
             return k, g * (V[0] - s.VsynE) / sa[0]
     elif stim_type == "SynapticPair":
         if s.start < t <= s.stop:
-            g = interp_g(s.t_syn, s.g_syn, t) + interp_g(
+            g = synaptic.interp_g(s.t_syn, s.g_syn, t) + synaptic.interp_g(
                 s.t_syn, s.g_syn, t + s.diff
             )
             return k, g * (V[0] - s.VsynE) / sa[0]
     elif stim_type == "EPSG":
         te = t - s.start
         if s.start < t <= s.stop:
-            return k, s.I * (0 - V[k]) * float(te >= 0) * epsg_unitary(
+            return k, s.I * (0 - V[k]) * float(te >= 0) * synaptic.epsg_unitary(
                 te, s.epsg_tau
             ) / -sa[k]
     elif stim_type == "EPSGpair":
         te = t - s.start
         td = s.stop - s.start
-        wave = float(te >= 0) * epsg_unitary(te, s.epsg_tau) + float(
+        wave = float(te >= 0) * synaptic.epsg_unitary(te, s.epsg_tau) + float(
             te >= td
-        ) * epsg_unitary(te - td, s.epsg_tau)
+        ) * synaptic.epsg_unitary(te - td, s.epsg_tau)
         return k, s.I * (0 - V[k]) * wave / -sa[k]
     return 0, 0.0
 
@@ -343,14 +340,14 @@ def bilateral_current(t, V, s, a, b, sa):
         s.I
         * (0 - V[a])
         * float(te >= 0)
-        * epsg_unitary(te, s.epsg_tau)
+        * synaptic.epsg_unitary(te, s.epsg_tau)
         / -sa[a]
     )
     ib = (
         s.I
         * (0 - V[b])
         * float(te >= td)
-        * epsg_unitary(te - td, s.epsg_tau)
+        * synaptic.epsg_unitary(te - td, s.epsg_tau)
         / -sa[b]
     )
     return (a, ia), (b, ib)
@@ -388,7 +385,7 @@ def membrane(
         )
     # v0 is in the key because the leak reversals (vlk) are built from it: without
     # it, membrane(-60) and membrane(-68) would share a pre-stimulus cache entry
-    m = SimpleNamespace(
+    m = types.SimpleNamespace(
         key=(
             float(v0),
             float(soma_klt_scale),
@@ -487,7 +484,7 @@ def mso_axon(
     t_end,
     v0,
     input_node,
-    syn: SynParams | None = None,
+    syn: synaptic.SynParams | None = None,
     max_step=None,
     stop_on_spike=None,
     mem=None,
@@ -527,7 +524,7 @@ def mso_axon(
     each dendrite.
     """
     morph = morph or (mem.morph if mem is not None else LUMPED)
-    check_args(
+    _common.check_args(
         stim_type,
         model_type,
         node,
@@ -544,9 +541,9 @@ def mso_axon(
         )
     if model_type not in ACTIVE_GATES:
         raise ValueError(f"unknown model type {model_type!r}")
-    syn = syn or SynParams(t_end=t_end)
+    syn = syn or synaptic.SynParams(t_end=t_end)
 
-    s = stimulus(stim_type, start, stop, I, t_end, syn)
+    s = _common.stimulus(stim_type, start, stop, I, t_end, syn)
     active = tuple(bool(g) for g in ACTIVE_GATES[model_type])
     mem = mem or membrane(v0, morph=morph)
     if mem.morph_key != morph.key:
@@ -560,12 +557,12 @@ def mso_axon(
         )
     else:
         y0 = np.concatenate([np.full(n, float(v0)), *mem.y0_gates])
-    cuts = breakpoints(stim_type, start, stop, t_end)
+    cuts = _solve.breakpoints(stim_type, start, stop, t_end)
     quiet = None
     # unlike two_cpt, step shares the prefix: msoAxon.m switches stimuli on for
     # t > start (the EPSG waveforms are zero at onset), so the equations at
     # t == start are still stimulus-free
-    if pre_stimulus_is_quiet(cuts, start, stop):
+    if _solve.pre_stimulus_is_quiet(cuts, start, stop):
         quiet = (
             ("mso", model_type, float(v0), mem.key, morph.key),
             lambda t, x: _rhs(t, x, "none", s, input_node, active, mem, morph),
@@ -574,7 +571,7 @@ def mso_axon(
     rhs = lambda t, x: _rhs(  # noqa: E731
         t, x, stim_type, s, input_node, active, mem, morph, input_node2
     )
-    return integrate(
+    return _solve.integrate(
         rhs,
         y0,
         t_end,
@@ -584,7 +581,7 @@ def mso_axon(
         max_step=max_step or 0.1 * t_end,
         jac_sparsity=morph.jac,
         quiet=quiet,
-        stop_event=_stops(
+        stop_event=_common._stops(
             rhs, node - 1, stop_on_spike, stop_when_settled, stim_type, s, n
         ),
     )

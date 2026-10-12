@@ -2,7 +2,7 @@
 
 import multiprocessing
 import os
-from concurrent.futures import ProcessPoolExecutor
+from concurrent import futures
 
 # every module whose functions run in pool workers
 _PRELOAD = [
@@ -36,7 +36,7 @@ def pool_context(method=None):
 
 def process_pool(max_workers=None):
     """A ProcessPoolExecutor using pool_context(). Use this for every worker pool."""
-    return ProcessPoolExecutor(
+    return futures.ProcessPoolExecutor(
         max_workers=max_workers, mp_context=pool_context()
     )
 

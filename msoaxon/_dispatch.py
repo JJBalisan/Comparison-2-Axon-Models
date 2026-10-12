@@ -1,7 +1,6 @@
 """One entry point for both models, used by the analysis code (model="multi" / "two")."""
 
-from .multi import mso_axon
-from .two import two_cpt
+from msoaxon import multi, two
 
 
 def run_model(
@@ -28,7 +27,7 @@ def run_model(
     stop_on_spike, r1, tau_est, ...) go to the model unchanged.
     """
     if model == "multi":
-        return mso_axon(
+        return multi.mso_axon(
             stim,
             start,
             stop,
@@ -59,7 +58,7 @@ def run_model(
         raise ValueError(
             f"{', '.join(given)} only apply to the multi-compartment model"
         )
-    return two_cpt(
+    return two.two_cpt(
         stim, start, stop, I, node, model_type, t_end, v0, input_node, syn, **kw
     )
 

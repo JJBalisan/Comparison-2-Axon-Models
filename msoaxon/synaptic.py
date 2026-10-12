@@ -1,6 +1,6 @@
 """Synaptic input conductance (port of Synaptic.m)."""
 
-from dataclasses import dataclass
+import dataclasses
 
 import numpy as np
 
@@ -24,7 +24,7 @@ def epsg_unitary(t, tau=EPSG_TAU):
     return (1 / peak) * (t > 0) * (np.exp(-t / decay) - np.exp(-t / rise))
 
 
-@dataclass
+@dataclasses.dataclass
 class SynParams:
     """Stand-in for the MATLAB `Syn` struct.
 

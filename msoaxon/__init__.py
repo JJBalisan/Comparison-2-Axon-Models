@@ -5,8 +5,9 @@ The models live in msoaxon.multi and msoaxon.two (named after the model="multi" 
 points, mso_axon and two_cpt.
 """
 
-from .multi import mso_axon
-from .synaptic import SynParams
-from .two import two_cpt
+# the package's public API: re-exported names, so `msoaxon.mso_axon` works
+from msoaxon.multi import mso_axon
+from msoaxon.synaptic import SynParams
+from msoaxon.two import two_cpt
 
 __all__ = ["mso_axon", "two_cpt", "SynParams"]

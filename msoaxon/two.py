@@ -5,14 +5,11 @@ MATLAB code, so x[:, 0] is the soma and x[:, 1] the axon compartment.
 Currents are in pA, conductances in nS, capacitances in pF, time in ms.
 """
 
-from types import SimpleNamespace
+import types
 
 import numpy as np
 
-from . import constants as C
-from ._common import _stops, check_args, stimulus
-from ._solve import breakpoints, integrate, pre_stimulus_is_quiet
-from .synaptic import SynParams, epsg_unitary, interp_g
+from msoaxon import _common, _solve, constants as C, synaptic
 
 # Passive targets of Goldwyn, Remme & Rinzel 2019 (PLoS Comput Biol 15:e1006476), the
 # paper this model's coupling-constant framework comes from. TwoCpt.m still carries
@@ -26,7 +23,7 @@ def get_params(v0, node, input_node, model_type, r1=10.0, tau_est=0.71):
     r1: soma input resistance of the passive model [MOhm]; tau_est: its soma
     voltage decay time constant [ms]. Defaults are TwoCpt.m's values.
     """
-    P = SimpleNamespace()
+    P = types.SimpleNamespace()
     P.couple12 = C.COUPLING1[node - 2]  # forward coupling
     P.couple21 = C.COUPLING2[node - 2]  # backward coupling
 
@@ -117,19 +114,24 @@ def applied_current(t, V1, stim_type, s):
         wave = np.sin(2 * np.pi * s.f * (t - s.start) / 1000)
         return float(s.start <= t <= s.stop) * s.I * wave * (wave > 0)
     if stim_type == "Synaptic":
-        g = interp_g(s.t_syn, s.g_syn, t)
+        g = synaptic.interp_g(s.t_syn, s.g_syn, t)
         return -float(s.start <= t <= s.stop) * g * (V1 - s.VsynE)
     if stim_type == "SynapticPair":
-        g1 = interp_g(s.t_syn, s.g_syn, t)
+        g1 = synaptic.interp_g(s.t_syn, s.g_syn, t)
         g2 = (
-            interp_g(s.t_syn, s.g_syn, t + s.diff)
+            synaptic.interp_g(s.t_syn, s.g_syn, t + s.diff)
             if t + s.diff < s.t_end
             else 0.0
         )
         return -float(s.start <= t <= s.stop) * (g1 + g2) * (V1 - s.VsynE)
     if stim_type == "EPSG":
         te = t - s.start
-        return s.I * (0 - V1) * float(te >= 0) * epsg_unitary(te, s.epsg_tau)
+        return (
+            s.I
+            * (0 - V1)
+            * float(te >= 0)
+            * synaptic.epsg_unitary(te, s.epsg_tau)
+        )
     if stim_type == "EPSGpair":
         te = t - s.start
         td = s.stop - s.start
@@ -137,8 +139,8 @@ def applied_current(t, V1, stim_type, s):
             s.I
             * (0 - V1)
             * (
-                float(te >= 0) * epsg_unitary(te, s.epsg_tau)
-                + float(te >= td) * epsg_unitary(te - td, s.epsg_tau)
+                float(te >= 0) * synaptic.epsg_unitary(te, s.epsg_tau)
+                + float(te >= td) * synaptic.epsg_unitary(te - td, s.epsg_tau)
             )
         )
     raise ValueError(f"unknown stimType {stim_type!r}")
@@ -194,7 +196,7 @@ def two_cpt(
     t_end,
     v0,
     input_node,
-    syn: SynParams | None = None,
+    syn: synaptic.SynParams | None = None,
     stop_on_spike=None,
     r1=10.0,
     tau_est=0.71,
@@ -221,12 +223,12 @@ def two_cpt(
     stop_on_spike: if given (mV), stop as soon as the axon compartment rises that
     far above the soma; t then ends before t_end.
     """
-    check_args(
+    _common.check_args(
         stim_type, model_type, node, input_node, min_node=2
     )  # node 1 is the soma
-    syn = syn or SynParams(t_end=t_end)
+    syn = syn or synaptic.SynParams(t_end=t_end)
     P = get_params(v0, node, input_node, model_type, r1=r1, tau_est=tau_est)
-    s = stimulus(stim_type, start, stop, I, t_end, syn)
+    s = _common.stimulus(stim_type, start, stop, I, t_end, syn)
     Vr = P.Vrest
     x0 = [
         Vr,
@@ -241,7 +243,7 @@ def two_cpt(
         C.ainf(Vr),
         C.ainf(Vr),
     ]
-    cuts = breakpoints(stim_type, start, stop, t_end)
+    cuts = _solve.breakpoints(stim_type, start, stop, t_end)
     quiet = None
     # step and the synaptic inputs are already on at t == start (TwoCptODE uses
     # t >= start), and the first segment's last step evaluates there, so sharing a
@@ -250,13 +252,13 @@ def two_cpt(
         "step",
         "Synaptic",
         "SynapticPair",
-    ) and pre_stimulus_is_quiet(cuts, start, stop):
+    ) and _solve.pre_stimulus_is_quiet(cuts, start, stop):
         quiet = (
             ("two", node, model_type, float(v0), input_node, r1, tau_est),
             lambda t, x: _rhs(t, x, P, "none", s),
         )
     rhs = lambda t, x: _rhs(t, x, P, stim_type, s)  # noqa: E731
-    return integrate(
+    return _solve.integrate(
         rhs,
         x0,
         t_end,
@@ -265,7 +267,7 @@ def two_cpt(
         atol=1e-6,
         max_step=max_step,
         quiet=quiet,
-        stop_event=_stops(
+        stop_event=_common._stops(
             rhs, 1, stop_on_spike, stop_when_settled, stim_type, s, 2
         ),
     )

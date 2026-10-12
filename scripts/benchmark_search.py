@@ -14,18 +14,20 @@ calls, which the EPSG-pair searches use, are compared on the spiked flag only.
 """
 
 import argparse
+import collections
 import json
+import pathlib
 import time
-from collections import defaultdict
-from pathlib import Path
 
-from msoaxon import _dispatch, coincidence, somatic, threshold as threshold_mod
-from msoaxon.coincidence import threshold
-from msoaxon.multi import membrane, with_dendrites
-from msoaxon.somatic import rheobase
-from msoaxon.threshold import binary_search
+from msoaxon import (
+    _dispatch,
+    coincidence,
+    multi,
+    somatic,
+    threshold as threshold_mod,
+)
 
-D = with_dendrites()
+D = multi.with_dendrites()
 MID_L, MID_M = int(D.lateral[2]), int(D.medial[2])
 
 
@@ -40,7 +42,9 @@ def cases():
                 (
                     f"EPSG pair {model}, delay {d}",
                     "EPSGpair",
-                    lambda tol, m=model, d=d: threshold(m, d, rel_tol=tol),
+                    lambda tol, m=model, d=d: coincidence.threshold(
+                        m, d, rel_tol=tol
+                    ),
                 )
             )
     for d in (0.0, 0.3):
@@ -48,7 +52,7 @@ def cases():
             (
                 f"EPSG bilateral dendrites, delay {d}",
                 "EPSGbilateral",
-                lambda tol, d=d: threshold(
+                lambda tol, d=d: coincidence.threshold(
                     "multi",
                     d,
                     rel_tol=tol,
@@ -59,7 +63,7 @@ def cases():
                 ),
             )
         )
-    dtx = membrane(
+    dtx = multi.membrane(
         -68.0, soma_klt_scale=0, ais_klt_scale=0, rebalance_rest=True
     )
     for label, model, mem in (
@@ -71,7 +75,9 @@ def cases():
             (
                 f"rheobase {label}",
                 "step (100 ms)",
-                lambda tol, m=model, mem=mem: rheobase(m, mem=mem, rel_tol=tol),
+                lambda tol, m=model, mem=mem: somatic.rheobase(
+                    m, mem=mem, rel_tol=tol
+                ),
             )
         )
     for stim, n, factor, max_I, kw in (
@@ -86,7 +92,9 @@ def cases():
                 f"BinarySearch.m {stim}",
                 stim,
                 lambda tol, s=stim, n=n, f=factor, M=max_I, kw=kw: (
-                    binary_search(s, n, 3, f, M, workers=1, rounded=False, **kw)
+                    threshold_mod.binary_search(
+                        s, n, 3, f, M, workers=1, rounded=False, **kw
+                    )
                 ),
             )
         )
@@ -140,12 +148,11 @@ def instrument(stats, check):
                 _dispatch.STOP_WHEN_SETTLED = saved
         return answer
 
-    # the analysis modules imported spikes by name, so replace it there too;
-    # coincidence imported response, which calls run_model, not spikes
+    # the analysis modules call these through _dispatch, so replacing them
+    # there covers every search; response() calls run_model, not spikes()
     _dispatch.run_model = counted
-    for mod in (_dispatch, coincidence, somatic, threshold_mod):
-        mod.spikes = checked
-    _dispatch.response = coincidence.response = checked_response
+    _dispatch.spikes = checked
+    _dispatch.response = checked_response
 
 
 def as_list(v):
@@ -173,7 +180,7 @@ def main():
     )
     ap.add_argument("--out", default="figures/benchmark")
     a = ap.parse_args()
-    out = Path(a.out)
+    out = pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     ref_path = out / "reference.json"
     todo = cases()
@@ -188,9 +195,12 @@ def main():
     ref = json.loads(ref_path.read_text())
 
     _dispatch.STOP_WHEN_SETTLED = not a.no_settled_stop
-    stats = defaultdict(float)
+    stats = collections.defaultdict(float)
     instrument(stats, a.check)
-    rows, by_stim = [], defaultdict(lambda: defaultdict(float))
+    rows, by_stim = (
+        [],
+        collections.defaultdict(lambda: collections.defaultdict(float)),
+    )
     for name, stim, search in todo:
         before = dict(stats)
         t0 = time.perf_counter()

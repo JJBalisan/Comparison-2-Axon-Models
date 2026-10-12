@@ -23,17 +23,12 @@ lumped results they are compared with.
 
 import argparse
 import json
-from pathlib import Path
+import pathlib
 
 import numpy as np
 
-from msoaxon import mso_axon
-from msoaxon._parallel import process_pool
-from msoaxon.coincidence import threshold, window
-from msoaxon.measure import passive_step, soma_on_grid
-from msoaxon.multi import LUMPED, membrane, with_dendrites
-from msoaxon.somatic import rheobase, spike_amplitude
-from msoaxon.synaptic import EPSG_TAU
+import msoaxon
+from msoaxon import _parallel, coincidence, measure, multi, somatic, synaptic
 
 V0 = -68.0
 UNITARY = 26.7  # "unitary EPSG" of the MATLAB code
@@ -43,7 +38,7 @@ MYOGA_US = 221
 def epsp(morph, site, mem, amp=UNITARY, site2=None, t_end=12.0):
     """Somatic voltage change for an EPSG (or a bilateral pair at 0 delay)."""
     if site2 is None:
-        t, y = mso_axon(
+        t, y = msoaxon.mso_axon(
             "EPSG",
             5,
             10,
@@ -58,7 +53,7 @@ def epsp(morph, site, mem, amp=UNITARY, site2=None, t_end=12.0):
             max_step=0.01,
         )
     else:
-        t, y = mso_axon(
+        t, y = msoaxon.mso_axon(
             "EPSGbilateral",
             5,
             5,
@@ -73,7 +68,7 @@ def epsp(morph, site, mem, amp=UNITARY, site2=None, t_end=12.0):
             input_node2=site2,
             max_step=0.01,
         )
-    return soma_on_grid(t, y, V0, 4.9, t_end)
+    return measure.soma_on_grid(t, y, V0, 4.9, t_end)
 
 
 def shape(g, v):
@@ -88,7 +83,7 @@ def shape(g, v):
 
 
 def rin_tau(morph, mem):
-    r = passive_step("multi", V0, morph=morph, mem=mem)
+    r = measure.passive_step("multi", V0, morph=morph, mem=mem)
     return dict(
         rin_steady=float(r["rin_steady"]),
         rin_peak=float(r["rin_peak"]),
@@ -120,14 +115,16 @@ def main():
         help="axial resistivity of the dendrites [Ohm cm] (Mathews et al 2010: 200)",
     )
     a = ap.parse_args()
-    with process_pool() as pool:  # one pool for every parallel call below
+    with (
+        _parallel.process_pool() as pool
+    ):  # one pool for every parallel call below
         run(a, pool)
 
 
 def run(a, pool):
-    out = Path(a.out_dir)
+    out = pathlib.Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    D = with_dendrites(
+    D = multi.with_dendrites(
         conserve_totals=not a.klt_from_soma, dendrite_ra=a.dendrite_ra
     )
     mid_l, mid_m, dist_l = (
@@ -141,9 +138,9 @@ def run(a, pool):
     # Every threshold search (C, E, F) and the rheobase (G) is independent of the rest,
     # so all of them go to the pool now, in one batch, and run while A, B and D are
     # computed here. Each search is deterministic, so the results don't depend on this.
-    def th_job(delay, tau=EPSG_TAU, **kw):
+    def th_job(delay, tau=synaptic.EPSG_TAU, **kw):
         return pool.submit(
-            threshold,
+            coincidence.threshold,
             "multi",
             float(delay),
             epsg_tau=tuple(tau),
@@ -158,9 +155,9 @@ def run(a, pool):
     bil = dict(
         stim="EPSGbilateral", input_node=mid_l, input_node2=mid_m, **dend
     )
-    mem_d = membrane(V0, morph=D)
+    mem_d = multi.membrane(V0, morph=D)
     rb_job = pool.submit(
-        rheobase, "multi", mem=mem_d, rel_tol=tol
+        somatic.rheobase, "multi", mem=mem_d, rel_tol=tol
     )  # the longest single job
     C_jobs = {
         "bilateral (one EPSG per dendrite)": th_job(0.0, **bil),
@@ -175,14 +172,14 @@ def run(a, pool):
         "both at the soma, lumped model": th_job(0.0),
     }
     kinetics = (
-        ("model EPSG (0.18 ms)", EPSG_TAU),
+        ("model EPSG (0.18 ms)", synaptic.EPSG_TAU),
         ("Myoga EPSG (0.3 ms)", (0.1, 0.3)),
     )
     # E's widths come from window() (fixed input, bisection over delay); its curves
     # are only drawn, so they use a 50 us grid
     W_jobs = {
         (kname, m): pool.submit(
-            window,
+            coincidence.window,
             "multi",
             m,
             epsg_tau=tau,
@@ -206,14 +203,14 @@ def run(a, pool):
 
     # A. passive
     reb = {
-        "lumped": membrane(V0, rebalance_rest=True),
-        "dendritic": membrane(V0, rebalance_rest=True, morph=D),
-        "dendritic, no dendritic KLT": membrane(
+        "lumped": multi.membrane(V0, rebalance_rest=True),
+        "dendritic": multi.membrane(V0, rebalance_rest=True, morph=D),
+        "dendritic, no dendritic KLT": multi.membrane(
             V0, rebalance_rest=True, morph=D, dendrite_klt_scale=0
         ),
     }
     morphs = {
-        "lumped": LUMPED,
+        "lumped": multi.LUMPED,
         "dendritic": D,
         "dendritic, no dendritic KLT": D,
     }
@@ -225,7 +222,7 @@ def run(a, pool):
     # B. EPSP shapes
     B, traces = {}, {}
     for label, morph, site, mem in [
-        ("lumped, EPSG at soma", LUMPED, 1, reb["lumped"]),
+        ("lumped, EPSG at soma", multi.LUMPED, 1, reb["lumped"]),
         ("dendritic, EPSG at soma", D, 1, reb["dendritic"]),
         ("dendritic, EPSG mid-dendrite (100 um)", D, mid_l, reb["dendritic"]),
         ("dendritic, EPSG distal (180 um)", D, dist_l, reb["dendritic"]),
@@ -289,7 +286,7 @@ def run(a, pool):
     rb = rb_job.result()
     mults = (1.5, 3.0) if a.quick else (1.5, 2.0, 3.0)
     amp_jobs = {
-        k: pool.submit(spike_amplitude, "multi", rb * k, mem=mem_d)
+        k: pool.submit(somatic.spike_amplitude, "multi", rb * k, mem=mem_d)
         for k in mults
     }
     res["G_somatic_spike"] = dict(

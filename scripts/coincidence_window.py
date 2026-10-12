@@ -11,14 +11,11 @@ against noisy trials. Threshold curves are drawn on a 50 us grid.
 
 import argparse
 import json
-from pathlib import Path
+import pathlib
 
 import numpy as np
 
-from msoaxon._parallel import process_pool
-from msoaxon.coincidence import probability_trials, threshold_curve, window
-from msoaxon.synaptic import EPSG_TAU
-from msoaxon.two import GOLDWYN_2019
+from msoaxon import _parallel, coincidence, synaptic, two
 
 MYOGA_US = (
     221  # AP-probability half-width without inhibition (Myoga et al 2014)
@@ -28,16 +25,16 @@ MARGINS = (
     0.03,
 )  # inputs this far above coincident threshold (Myoga: "200 pS (~3%)")
 KINETICS = {
-    "model EPSG (decay 0.18 ms)": EPSG_TAU,
+    "model EPSG (decay 0.18 ms)": synaptic.EPSG_TAU,
     "Myoga EPSG (decay 0.3 ms)": (0.1, 0.3),
 }
-_goldwyn = {k: v for k, v in GOLDWYN_2019.items() if k != "v0"}
+_goldwyn = {k: v for k, v in two.GOLDWYN_2019.items() if k != "v0"}
 CONFIGS = {
     "45-compartment": ("multi", -68.0, {}),
     "2-cpt, TwoCpt.m (10 MOhm, 0.71 ms, -68 mV)": ("two", -68.0, {}),
     "2-cpt, Goldwyn 2019 (8.5 MOhm, 0.34 ms, -58 mV)": (
         "two",
-        GOLDWYN_2019["v0"],
+        two.GOLDWYN_2019["v0"],
         _goldwyn,
     ),
 }
@@ -62,12 +59,14 @@ def main():
         help="coarse grids and 1%% threshold tolerance: a smoke test, not results",
     )
     a = ap.parse_args()
-    with process_pool() as pool:  # one pool for every parallel call below
+    with (
+        _parallel.process_pool() as pool
+    ):  # one pool for every parallel call below
         run(a, pool)
 
 
 def run(a, pool):
-    out = Path(a.out_dir)
+    out = pathlib.Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
     tol = 1e-2 if a.quick else 1e-4  # threshold tolerance
@@ -79,7 +78,7 @@ def run(a, pool):
         model, v0, kw = CONFIGS[cname]
         for m in MARGINS:
             win_jobs[cname, kname, m] = pool.submit(
-                window,
+                coincidence.window,
                 model,
                 m,
                 node=a.node,
@@ -93,7 +92,7 @@ def run(a, pool):
     curves, rows, direct = {}, [], {}
     for cname, kname in combos:
         model, v0, kw = CONFIGS[cname]
-        th = curves[cname, kname] = threshold_curve(
+        th = curves[cname, kname] = coincidence.threshold_curve(
             model,
             delays,
             node=a.node,
@@ -123,7 +122,7 @@ def run(a, pool):
     mc_delays = np.round(np.arange(0, 0.3001, 0.1 if a.quick else 0.02), 4)
     # small noise so probability peaks near 100%, as in Myoga's protocol; 1% amplitude
     # jitter plus 5 us onset jitter per EPSG (a noise source window() ignores)
-    prob = probability_trials(
+    prob = coincidence.probability_trials(
         model,
         mc_delays,
         amp,

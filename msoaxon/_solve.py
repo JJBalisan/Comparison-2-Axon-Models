@@ -1,7 +1,7 @@
 """ode15s stand-in: scipy BDF, split at stimulus breakpoints."""
 
 import numpy as np
-from scipy.integrate import solve_ivp
+from scipy import integrate as scipy_integrate
 
 _QUIET_CACHE = {}
 _QUIET_CACHE_SIZE = 64
@@ -43,7 +43,7 @@ def pre_stimulus_is_quiet(cuts, start, stop):
 
 def _segment(rhs, a, b, y, rtol, atol, max_step, jac_sparsity, events=None):
     """One solve; returns (t, y, stopped) where stopped means a terminal event fired."""
-    sol = solve_ivp(
+    sol = scipy_integrate.solve_ivp(
         rhs,
         (a, b),
         y,
