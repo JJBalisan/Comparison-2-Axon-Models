@@ -1,6 +1,0 @@
-{
- "sys_platform": "darwin",
- "machine": "arm64",
- "numpy": "2.5.3",
- "scipy": "1.18.1"
-}

@@ -58,16 +58,17 @@ def test_sweep_settings_follow_binarysearch_m():
 
 
 def test_sine_sweep_point_regression():
-    # in-process (workers=1) so the halving search itself runs under the test;
-    # values from the current code, which reproduces the MATLAB-faithful
-    # baseline
+    # in-process (workers=1) so the halving search itself runs under the test.
+    # Its result is the last value tested; a flipped next-to-last decision
+    # moves that by 15000 / 2**13 ~ 1.83 (1.7e-4 relative), which cross-
+    # platform solver drift could do, so rel 2e-4 allows that one step and
+    # nothing more
 
-    assert threshold.binary_search(
+    multi, two = threshold.binary_search(
         "sine", 1, 3, 30, 15000, workers=1, rounded=False
-    ) == (
-        [11054.0771484375],
-        [11541.1376953125],
     )
+    assert multi == pytest.approx([11054.0771484375], rel=2e-4)
+    assert two == pytest.approx([11541.1376953125], rel=2e-4)
 
 
 # --- coincidence trials (coincidence.py) --------------------------------------
