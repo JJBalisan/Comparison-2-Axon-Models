@@ -45,5 +45,5 @@ def count_spikes(soma, axon, factor):
 
 def matlab_round(x, digits=0):
     """MATLAB round(x, n): half away from zero (Python's round is half-to-even)."""
-    scale = 10.0 ** digits
-    return math.copysign(math.floor(abs(x) * scale + 0.5), x) * 10.0 ** -digits
+    scale = 10.0**digits
+    return math.copysign(math.floor(abs(x) * scale + 0.5), x) * 10.0**-digits

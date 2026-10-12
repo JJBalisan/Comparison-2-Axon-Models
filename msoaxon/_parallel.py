@@ -4,9 +4,13 @@ import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
 
-
 # every module whose functions run in pool workers
-_PRELOAD = ["msoaxon.coincidence", "msoaxon.somatic", "msoaxon.threshold", "msoaxon.measure"]
+_PRELOAD = [
+    "msoaxon.coincidence",
+    "msoaxon.somatic",
+    "msoaxon.threshold",
+    "msoaxon.measure",
+]
 
 
 def pool_context(method=None):
@@ -32,7 +36,9 @@ def pool_context(method=None):
 
 def process_pool(max_workers=None):
     """A ProcessPoolExecutor using pool_context(). Use this for every worker pool."""
-    return ProcessPoolExecutor(max_workers=max_workers, mp_context=pool_context())
+    return ProcessPoolExecutor(
+        max_workers=max_workers, mp_context=pool_context()
+    )
 
 
 def map_tasks(fn, tasks, workers=None, executor=None, chunksize=1):
@@ -47,7 +53,9 @@ def map_tasks(fn, tasks, workers=None, executor=None, chunksize=1):
     if executor is not None:
         return list(executor.map(fn, tasks, chunksize=chunksize))
     workers = min(workers or os.cpu_count() or 1, len(tasks))
-    if workers <= 1:  # also no tasks at all, which a pool of 0 workers would reject
+    if (
+        workers <= 1
+    ):  # also no tasks at all, which a pool of 0 workers would reject
         return [fn(t) for t in tasks]
     with process_pool(workers) as pool:
         return list(pool.map(fn, tasks, chunksize=chunksize))

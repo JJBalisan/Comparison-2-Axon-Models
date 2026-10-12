@@ -17,15 +17,24 @@ def test_map_tasks_handles_no_tasks():
 
 # --- threshold sweeps (threshold.py) --------------------------------------------------
 
+
 def test_sweep_settings_follow_binarysearch_m():
     from msoaxon.threshold import START, sweep_setting, sweep_x
 
-    assert sweep_setting("step", 3)[0] == 15.0 and sweep_setting("EPSG", 3)[0] == 10.0
+    assert (
+        sweep_setting("step", 3)[0] == 15.0
+        and sweep_setting("EPSG", 3)[0] == 10.0
+    )
     assert sweep_setting("ramp", 4)[0] == 5.4 and sweep_x("ramp", 4) == 5.4
     stop, syn, _ = sweep_setting("sine", 2)
-    assert syn.f == 200 and stop == START + 1000 / 400  # the positive half-cycle
+    assert (
+        syn.f == 200 and stop == START + 1000 / 400
+    )  # the positive half-cycle
     assert sweep_x("sine", 2) == 200
-    assert sweep_setting("EPSGpair", 3, 0.1)[0] == START + 0.2 and sweep_x("EPSGpair", 3, 0.1) == 0.2
+    assert (
+        sweep_setting("EPSGpair", 3, 0.1)[0] == START + 0.2
+        and sweep_x("EPSGpair", 3, 0.1) == 0.2
+    )
     stop, syn, I = sweep_setting("Synaptic", 1)
     assert (stop, syn.random_in, I) == (15.0, 13986, 0.0)
     with pytest.raises(ValueError, match="not supported"):
@@ -40,10 +49,13 @@ def test_sine_sweep_point_regression():
     from msoaxon.threshold import binary_search
 
     assert binary_search("sine", 1, 3, 30, 15000, workers=1, rounded=False) == (
-        [11054.0771484375], [11541.1376953125])
+        [11054.0771484375],
+        [11541.1376953125],
+    )
 
 
 # --- coincidence trials (coincidence.py) ----------------------------------------------
+
 
 def test_noise_free_trials_agree_with_the_threshold_curve():
     from msoaxon.coincidence import probability_trials
@@ -51,8 +63,12 @@ def test_noise_free_trials_agree_with_the_threshold_curve():
     delays = [0.0, 0.1, 0.6]
     th = threshold_curve("two", delays, workers=1)
     amp = 1.05 * th[0]
-    assert np.all(np.abs(th / amp - 1) > 1e-3)  # no threshold within rel_tol of amp
-    prob = probability_trials("two", delays, amp, n_trials=2, amp_cv=0.0, jitter=0.0, workers=1)
+    assert np.all(
+        np.abs(th / amp - 1) > 1e-3
+    )  # no threshold within rel_tol of amp
+    prob = probability_trials(
+        "two", delays, amp, n_trials=2, amp_cv=0.0, jitter=0.0, workers=1
+    )
     np.testing.assert_array_equal(prob, (th <= amp).astype(float))
     assert prob[0] == 1.0 and prob[-1] == 0.0
 
@@ -62,18 +78,26 @@ def test_noisy_trials_are_seeded_probabilities():
 
     kw = dict(n_trials=6, amp_cv=0.05, jitter=0.02, workers=1)
     p1 = probability_trials("two", [0.0, 0.5], 52.0, seed=3, **kw)
-    np.testing.assert_array_equal(p1, probability_trials("two", [0.0, 0.5], 52.0, seed=3, **kw))
+    np.testing.assert_array_equal(
+        p1, probability_trials("two", [0.0, 0.5], 52.0, seed=3, **kw)
+    )
     assert np.all((p1 >= 0) & (p1 <= 1)) and p1[0] >= p1[1]
 
 
 # --- model entry points and solver ----------------------------------------------------
 
+
 def test_spikes_is_an_early_stop():
     from msoaxon._dispatch import run_model, spikes
 
     for I, expected in ((150.0, True), (20.0, False)):
-        assert spikes("two", "EPSGpair", 5, 5, I, 3, 20, -68.0, 1, factor=10) is expected
-        t, _ = run_model("two", "EPSGpair", 5, 5, I, 3, 20, -68.0, 1, stop_on_spike=10)
+        assert (
+            spikes("two", "EPSGpair", 5, 5, I, 3, 20, -68.0, 1, factor=10)
+            is expected
+        )
+        t, _ = run_model(
+            "two", "EPSGpair", 5, 5, I, 3, 20, -68.0, 1, stop_on_spike=10
+        )
         assert bool(t[-1] < 20) is expected
 
 
@@ -82,14 +106,29 @@ def test_bilateral_at_one_site_is_an_epsg_pair():
     from msoaxon import mso_axon
 
     t1, y1 = mso_axon("EPSGpair", 5, 5.2, 30, 3, "active-full", 8, -68.0, 1)
-    t2, y2 = mso_axon("EPSGbilateral", 5, 5.2, 30, 3, "active-full", 8, -68.0, 1, input_node2=1)
+    t2, y2 = mso_axon(
+        "EPSGbilateral",
+        5,
+        5.2,
+        30,
+        3,
+        "active-full",
+        8,
+        -68.0,
+        1,
+        input_node2=1,
+    )
     g = np.linspace(0, 8, 801)
-    np.testing.assert_allclose(np.interp(g, t2, y2[:, 0]), np.interp(g, t1, y1[:, 0]), atol=1e-6)
+    np.testing.assert_allclose(
+        np.interp(g, t2, y2[:, 0]), np.interp(g, t1, y1[:, 0]), atol=1e-6
+    )
 
 
 def test_solver_failure_is_reported():
     with pytest.raises(RuntimeError, match="integration failed"):
-        _solve.integrate(lambda t, y: y ** 2, [1.0], 2.0, [], 1e-6, 1e-6, 0.1)  # blows up at t = 1
+        _solve.integrate(
+            lambda t, y: y**2, [1.0], 2.0, [], 1e-6, 1e-6, 0.1
+        )  # blows up at t = 1
 
 
 def test_quiet_cache_is_bounded():
@@ -97,10 +136,15 @@ def test_quiet_cache_is_bounded():
     rhs = lambda t, y: -y  # noqa: E731
     n = _solve._QUIET_CACHE_SIZE + 5
     for i in range(n):
-        _solve.integrate(rhs, [1.0], 2.0, [1.0], 1e-6, 1e-6, 0.5, quiet=(("test", i), rhs))
+        _solve.integrate(
+            rhs, [1.0], 2.0, [1.0], 1e-6, 1e-6, 0.5, quiet=(("test", i), rhs)
+        )
     assert len(_solve._QUIET_CACHE) == _solve._QUIET_CACHE_SIZE
     keys = [k[0] for k in _solve._QUIET_CACHE]
-    assert ("test", 0) not in keys and ("test", n - 1) in keys  # oldest out first
+    assert ("test", 0) not in keys and (
+        "test",
+        n - 1,
+    ) in keys  # oldest out first
     _solve._QUIET_CACHE.clear()
 
 
@@ -120,6 +164,7 @@ def test_remaining_argument_errors():
 
 # --- somatic and passive measurements -------------------------------------------------
 
+
 def test_subthreshold_step_has_no_spike_amplitude():
     from msoaxon.somatic import fires, spike_amplitude
 
@@ -133,7 +178,9 @@ def test_spike_amplitude_trace_is_the_measured_run():
     r = spike_amplitude("two", 6000.0)
     t, x = r["trace"]
     assert np.isclose(t[-1], r["t_spike"] + 2.0)
-    assert np.isclose(np.interp(r["t_inflection"], t, x[:, 0]), r["v_inflection"], atol=0.05)
+    assert np.isclose(
+        np.interp(r["t_inflection"], t, x[:, 0]), r["v_inflection"], atol=0.05
+    )
 
 
 def test_passive_step_matches_the_dendrites_table():
@@ -151,7 +198,9 @@ def test_count_rising_edges():
     from msoaxon.spiking import count_rising_edges
 
     assert count_rising_edges([0, 1, 1, 0, 1, 0, 0, 1]) == 3
-    assert count_rising_edges([1, 1, 0]) == 0  # a marker at the first sample isn't an edge
+    assert (
+        count_rising_edges([1, 1, 0]) == 0
+    )  # a marker at the first sample isn't an edge
 
 
 def test_stimulus_at_time_zero_skips_the_prestimulus_cache():
@@ -178,15 +227,22 @@ def test_pools_never_fork():
 
 # --- settled stop (_solve.settled_event, search-speed A1) --------------------------
 
+
 def test_input_end_per_stimulus():
     from msoaxon._solve import input_end
 
     tau = (0.1, 0.18)
-    assert input_end("EPSG", 5, 10, 20, tau) == pytest.approx(5 + 3.6)  # onset, not the cut-off
+    assert input_end("EPSG", 5, 10, 20, tau) == pytest.approx(
+        5 + 3.6
+    )  # onset, not the cut-off
     assert input_end("EPSGpair", 5, 5.3, 20, tau) == pytest.approx(5.3 + 3.6)
-    assert input_end("EPSGbilateral", 5, 5.3, 20, (0.1, 0.3)) == pytest.approx(5.3 + 6.0)
+    assert input_end("EPSGbilateral", 5, 5.3, 20, (0.1, 0.3)) == pytest.approx(
+        5.3 + 6.0
+    )
     assert input_end("step", 5, 105, 110, tau) == 105
-    assert input_end("ramp2", 5, 5.5, 20, tau) == 20  # holds its current: never ends
+    assert (
+        input_end("ramp2", 5, 5.5, 20, tau) == 20
+    )  # holds its current: never ends
 
 
 @pytest.mark.parametrize("model", ["multi", "two"])
@@ -194,7 +250,17 @@ def test_settled_stop_ends_quiet_runs_early_with_the_same_answer(model):
     from msoaxon._dispatch import run_model, spikes
     from msoaxon._solve import input_end
 
-    args = (model, "EPSGpair", 5, 5.3, 20.0, 3, 20, -68.0, 1)  # far below threshold
+    args = (
+        model,
+        "EPSGpair",
+        5,
+        5.3,
+        20.0,
+        3,
+        20,
+        -68.0,
+        1,
+    )  # far below threshold
     t_full, _ = run_model(*args, stop_on_spike=10)
     t, x = run_model(*args, stop_on_spike=10, stop_when_settled=True)
     t_off = input_end("EPSGpair", 5, 5.3, 20, (0.1, 0.18))
@@ -202,9 +268,11 @@ def test_settled_stop_ends_quiet_runs_early_with_the_same_answer(model):
     # when the condition already holds at t_off, where the event switches)
     assert t_full[-1] == 20 and t_off - 1e-9 <= t[-1] < 20
     axon = 2 if model == "multi" else 1
-    assert x[-1, axon] - x[-1, 0] < 5  # below factor / 2: a settled stop, not a spike
+    assert (
+        x[-1, axon] - x[-1, 0] < 5
+    )  # below factor / 2: a settled stop, not a spike
     # identical solver steps up to the stop (the last point is the event time itself)
-    np.testing.assert_array_equal(t[:-1], t_full[:len(t) - 1])
+    np.testing.assert_array_equal(t[:-1], t_full[: len(t) - 1])
     assert spikes(*args, factor=10) is False
 
 
@@ -225,7 +293,17 @@ def test_spike_stops_are_still_spikes(model):
 def test_runs_that_never_settle_are_unchanged():
     from msoaxon._dispatch import run_model
 
-    args = ("multi", "ramp2", 5, 5.5, 3000.0, 3, 20, -68.0, 1)  # ramp2 never ends
+    args = (
+        "multi",
+        "ramp2",
+        5,
+        5.5,
+        3000.0,
+        3,
+        20,
+        -68.0,
+        1,
+    )  # ramp2 never ends
     t1, y1 = run_model(*args, stop_on_spike=30)
     t2, y2 = run_model(*args, stop_on_spike=30, stop_when_settled=True)
     np.testing.assert_array_equal(y1, y2)
@@ -235,14 +313,19 @@ def test_runs_that_never_settle_are_unchanged():
 
 # --- coincidence windows found directly (coincidence.window, search-speed C1) --------
 
+
 def test_window_brackets_the_spike_boundary():
     from msoaxon.coincidence import _spikes, window
 
     w, th0 = window("two", 0.03)
     amp, d = 1.03 * th0, w / 2
     site = ("EPSGpair", 1, None)
-    assert _spikes("two", amp, d - 2e-4, 3, -68.0, EPSG_TAU, site, {})  # still spikes just inside
-    assert not _spikes("two", amp, d + 2e-4, 3, -68.0, EPSG_TAU, site, {})  # not just outside
+    assert _spikes(
+        "two", amp, d - 2e-4, 3, -68.0, EPSG_TAU, site, {}
+    )  # still spikes just inside
+    assert not _spikes(
+        "two", amp, d + 2e-4, 3, -68.0, EPSG_TAU, site, {}
+    )  # not just outside
     assert 0.19 < w < 0.21  # PYTHON.md: ~199 us for TwoCpt.m at 3%
 
 
@@ -262,5 +345,7 @@ def test_window_reuses_threshold0_and_reports_no_window():
 
     w, th0 = window("two", 0.03)
     assert window("two", 0.03, threshold0=th0) == (w, th0)
-    w_big, _ = window("two", 1.5, threshold0=th0)  # 2.5x th0 spikes even on the plateau
+    w_big, _ = window(
+        "two", 1.5, threshold0=th0
+    )  # 2.5x th0 spikes even on the plateau
     assert np.isnan(w_big)

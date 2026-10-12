@@ -1,6 +1,6 @@
 """Run both models on one stimulus and plot them (port of Combine_all.m).
 
-    uv run scripts/combine_all.py --stim EPSGpair --node 3 --out comparison.png
+uv run scripts/combine_all.py --stim EPSGpair --node 3 --out comparison.png
 """
 
 import argparse
@@ -14,7 +14,10 @@ from msoaxon.spiking import count_rising_edges, spiking
 # per-stimulus defaults from Combine_all.m: (stop, I)
 DEFAULTS = {
     "step": (10.0, 8500.0),
-    "ramp": (5.5, 8500.0),  # Combine_all.m has stop == start (5), a zero-length ramp
+    "ramp": (
+        5.5,
+        8500.0,
+    ),  # Combine_all.m has stop == start (5), a zero-length ramp
     "ramp2": (5.5, 8500.0),
     "sine": (5 + 1000 / (2 * 200), 8500.0),
     "EPSG": (10.0, 108.0),
@@ -25,20 +28,41 @@ DEFAULTS = {
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument("--stim", default="EPSGpair", choices=DEFAULTS)
-    ap.add_argument("--type", default="active-full",
-                    help="passive, active-KLT, active-H, active-KLT+H, active-sodium, active-KHT, active-full")
-    ap.add_argument("--node", type=int, default=3, help="axon compartment to compare (1-indexed)")
+    ap.add_argument(
+        "--type",
+        default="active-full",
+        help="passive, active-KLT, active-H, active-KLT+H, active-sodium, active-KHT, active-full",
+    )
+    ap.add_argument(
+        "--node",
+        type=int,
+        default=3,
+        help="axon compartment to compare (1-indexed)",
+    )
     ap.add_argument("--input-node", type=int, default=1)
     ap.add_argument("--t-end", type=float, default=20.0)
     ap.add_argument("--v0", type=float, default=-68.0)
     ap.add_argument("--start", type=float, default=5.0)
-    ap.add_argument("--stop", type=float, help="override the per-stimulus default")
+    ap.add_argument(
+        "--stop", type=float, help="override the per-stimulus default"
+    )
     ap.add_argument("--I", type=float, help="override the per-stimulus default")
-    ap.add_argument("--factor", type=float, default=30.0, help="mV above soma counted as a spike")
-    ap.add_argument("--graph", default="ModelComparison",
-                    help="ModelComparison, NodeComparison, MultiCompartment, Contour, Input, Multigraph, ModelComparison2")
+    ap.add_argument(
+        "--factor",
+        type=float,
+        default=30.0,
+        help="mV above soma counted as a spike",
+    )
+    ap.add_argument(
+        "--graph",
+        default="ModelComparison",
+        help="ModelComparison, NodeComparison, MultiCompartment, Contour, Input, Multigraph, ModelComparison2",
+    )
     ap.add_argument("--out", help="save the figure here instead of showing it")
     a = ap.parse_args()
 
@@ -58,10 +82,21 @@ def main():
     # column 2 is the axon compartment it meant.
     n_two = count_rising_edges(spiking(x, a.factor, "Two")[:, 1])
     n_multi = count_rising_edges(spiking(y, a.factor, "Mult")[:, a.node - 1])
-    print(f"spikes at node {a.node}: multi-compartment {n_multi}, two-compartment {n_two}")
+    print(
+        f"spikes at node {a.node}: multi-compartment {n_multi}, two-compartment {n_two}"
+    )
 
-    graph = dict(Type=a.graph, node=a.node, tEnd=a.t_end, stimType=a.stim,
-                 inputNode=a.input_node, start=a.start, stop=stop, I=I, Syn=syn)
+    graph = dict(
+        Type=a.graph,
+        node=a.node,
+        tEnd=a.t_end,
+        stimType=a.stim,
+        inputNode=a.input_node,
+        start=a.start,
+        stop=stop,
+        I=I,
+        Syn=syn,
+    )
     fig = graphing(graph, t1, y, t2, x, t3, z)
     if a.out:
         fig.savefig(a.out, dpi=150)

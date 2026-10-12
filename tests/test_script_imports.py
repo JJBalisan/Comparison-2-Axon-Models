@@ -10,14 +10,26 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
-PROBE = ("import runpy, sys; runpy.run_path(sys.argv[1], run_name='__mp_main__'); "
-         "print('matplotlib' in sys.modules)")
+PROBE = (
+    "import runpy, sys; runpy.run_path(sys.argv[1], run_name='__mp_main__'); "
+    "print('matplotlib' in sys.modules)"
+)
 
 
-@pytest.mark.parametrize("script", ["dendrites.py", "coincidence_window.py",
-                                    "making_threshold_graphs.py", "somatic_spike.py"])
+@pytest.mark.parametrize(
+    "script",
+    [
+        "dendrites.py",
+        "coincidence_window.py",
+        "making_threshold_graphs.py",
+        "somatic_spike.py",
+    ],
+)
 def test_analysis_scripts_import_without_matplotlib(script):
-    r = subprocess.run([sys.executable, "-c", PROBE, str(REPO / "scripts" / script)],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        [sys.executable, "-c", PROBE, str(REPO / "scripts" / script)],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == "False"

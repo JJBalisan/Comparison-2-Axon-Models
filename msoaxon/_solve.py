@@ -43,8 +43,17 @@ def pre_stimulus_is_quiet(cuts, start, stop):
 
 def _segment(rhs, a, b, y, rtol, atol, max_step, jac_sparsity, events=None):
     """One solve; returns (t, y, stopped) where stopped means a terminal event fired."""
-    sol = solve_ivp(rhs, (a, b), y, method="BDF", rtol=rtol, atol=atol,
-                    max_step=max_step, jac_sparsity=jac_sparsity, events=events)
+    sol = solve_ivp(
+        rhs,
+        (a, b),
+        y,
+        method="BDF",
+        rtol=rtol,
+        atol=atol,
+        max_step=max_step,
+        jac_sparsity=jac_sparsity,
+        events=events,
+    )
     if not sol.success:
         raise RuntimeError(f"integration failed on [{a}, {b}]: {sol.message}")
     return sol.t, sol.y, sol.status == 1
@@ -55,8 +64,10 @@ def spike_event(axon_col, factor):
 
     The continuous-time version of count_spikes' first detection.
     """
+
     def event(t, x):
         return x[axon_col] - x[0] - factor
+
     event.terminal = True
     event.direction = 1
     return event
@@ -80,11 +91,15 @@ def settled_event(rhs, t_off, axon_col, factor, n_v):
     spikes() tells the two stops apart by the final state: a spike stop ends with
     axon - soma at factor, a settled stop at or below factor / 2.
     """
+
     def event(t, x):
         if t < t_off or x[axon_col] - x[0] >= factor / 2:
             return -1.0
-        dv = np.asarray(rhs(t, x)[:n_v])  # voltages come first in both models' state
+        dv = np.asarray(
+            rhs(t, x)[:n_v]
+        )  # voltages come first in both models' state
         return 1.0 if np.all(dv < 0) else -1.0
+
     event.terminal = True
     event.direction = 1
     return event
@@ -92,7 +107,14 @@ def settled_event(rhs, t_off, axon_col, factor, n_v):
 
 def _quiet_prefix(key, rhs, b, y0, rtol, atol, max_step, jac_sparsity):
     """Solution on [0, b] with no stimulus, computed once per (model settings, y0, b)."""
-    full_key = (key, np.asarray(y0, dtype=float).tobytes(), b, rtol, atol, max_step)
+    full_key = (
+        key,
+        np.asarray(y0, dtype=float).tobytes(),
+        b,
+        rtol,
+        atol,
+        max_step,
+    )
     hit = _QUIET_CACHE.get(full_key)
     if hit is None:
         hit = _segment(rhs, 0.0, b, y0, rtol, atol, max_step, jac_sparsity)[:2]
@@ -102,8 +124,18 @@ def _quiet_prefix(key, rhs, b, y0, rtol, atol, max_step, jac_sparsity):
     return hit
 
 
-def integrate(rhs, y0, t_end, cuts, rtol, atol, max_step, jac_sparsity=None, quiet=None,
-              stop_event=None):
+def integrate(
+    rhs,
+    y0,
+    t_end,
+    cuts,
+    rtol,
+    atol,
+    max_step,
+    jac_sparsity=None,
+    quiet=None,
+    stop_event=None,
+):
     """Integrate 0..t_end in pieces; return (t, y) with y shaped (n_times, n_states).
 
     Like ode15s without a tspan vector, the output is every accepted solver step.
@@ -123,15 +155,25 @@ def integrate(rhs, y0, t_end, cuts, rtol, atol, max_step, jac_sparsity=None, qui
     ts, ys = [], []
     first = 0
     if quiet is not None and cuts:
-        t, sol_y = _quiet_prefix(quiet[0], quiet[1], cuts[0], y, rtol, atol, max_step,
-                                 jac_sparsity)
+        t, sol_y = _quiet_prefix(
+            quiet[0], quiet[1], cuts[0], y, rtol, atol, max_step, jac_sparsity
+        )
         ts.append(t)
         ys.append(sol_y)
         y = sol_y[:, -1]
         first = 1
     for i in range(first, len(edges) - 1):
-        t, sol_y, stopped = _segment(rhs, edges[i], edges[i + 1], y, rtol, atol, max_step,
-                                     jac_sparsity, stop_event)
+        t, sol_y, stopped = _segment(
+            rhs,
+            edges[i],
+            edges[i + 1],
+            y,
+            rtol,
+            atol,
+            max_step,
+            jac_sparsity,
+            stop_event,
+        )
         skip = 0 if i == 0 else 1  # drop the duplicated segment start
         ts.append(t[skip:])
         ys.append(sol_y[:, skip:])

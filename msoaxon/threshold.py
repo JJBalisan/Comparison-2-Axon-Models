@@ -25,23 +25,32 @@ def sweep_setting(stim_type, i, epsg_pair_dt=1 / 25):
     if stim_type == "EPSG":
         return 10.0, syn, None
     if stim_type == "EPSGpair":
-        return START + (i - 1) * epsg_pair_dt, syn, None  # stop = second EPSG onset
+        return (
+            START + (i - 1) * epsg_pair_dt,
+            syn,
+            None,
+        )  # stop = second EPSG onset
     if stim_type == "Synaptic":
         syn.random_in = 13986
         return 15.0, syn, 0.0
-    raise ValueError(f"stimType {stim_type!r} is not supported by the threshold search")
+    raise ValueError(
+        f"stimType {stim_type!r} is not supported by the threshold search"
+    )
 
 
 def sweep_x(stim_type, i, epsg_pair_dt=1 / 25):
     """What sweep point i varies, for plotting: the ramp top, the sine frequency, or
-    the delay between the two EPSGs."""
+    the delay between the two EPSGs.
+    """
     stop, syn, _ = sweep_setting(stim_type, i, epsg_pair_dt)
     if stim_type in ("ramp", "ramp2"):
         return stop
     if stim_type == "sine":
         return syn.f
     if stim_type == "EPSGpair":
-        return (i - 1) * epsg_pair_dt  # stop - START, without the rounding of the subtraction
+        return (
+            (i - 1) * epsg_pair_dt
+        )  # stop - START, without the rounding of the subtraction
     raise ValueError(f"no x-axis for stimType {stim_type!r}")
 
 
@@ -66,14 +75,40 @@ def _search(spiked_at, stim_type, i, factor, max_I, zoom, epsg_pair_dt):
 def _point(task):
     """One sweep point for one model; module-level so worker processes can import it."""
     model, stim_type, i, node, factor, max_I, zoom, epsg_pair_dt = task
-    def spiked_at(stim, start, stop, I, syn, factor):  # the search only needs yes/no
-        return spikes(model, stim, start, stop, I, node, T_END, V0, INPUT_NODE, syn,
-                      model_type=MODEL_TYPE, factor=factor)
+
+    def spiked_at(
+        stim, start, stop, I, syn, factor
+    ):  # the search only needs yes/no
+        return spikes(
+            model,
+            stim,
+            start,
+            stop,
+            I,
+            node,
+            T_END,
+            V0,
+            INPUT_NODE,
+            syn,
+            model_type=MODEL_TYPE,
+            factor=factor,
+        )
+
     return _search(spiked_at, stim_type, i, factor, max_I, zoom, epsg_pair_dt)
 
 
-def binary_search(stim_type, n_points, node, factor, max_I, zoom=1.0,
-                  epsg_pair_dt=1 / 25, rounded=True, workers=None, executor=None):
+def binary_search(
+    stim_type,
+    n_points,
+    node,
+    factor,
+    max_I,
+    zoom=1.0,
+    epsg_pair_dt=1 / 25,
+    rounded=True,
+    workers=None,
+    executor=None,
+):
     """Return (thresholds_multi, thresholds_two), one value per sweep point.
 
     epsg_pair_dt: spacing of the second-EPSG delay. BinarySearch.m uses 1/25;
@@ -90,8 +125,11 @@ def binary_search(stim_type, n_points, node, factor, max_I, zoom=1.0,
     """
     # multi-compartment points first: they take ~10x longer, so starting them early
     # keeps the pool busy while the cheap two-compartment points fill the gaps
-    tasks = [(model, stim_type, i, node, factor, max_I, zoom, epsg_pair_dt)
-             for model in ("multi", "two") for i in range(1, n_points + 1)]
+    tasks = [
+        (model, stim_type, i, node, factor, max_I, zoom, epsg_pair_dt)
+        for model in ("multi", "two")
+        for i in range(1, n_points + 1)
+    ]
     results = map_tasks(_point, tasks, workers, executor)
 
     digits = 0 if stim_type == "EPSGpair" else -1

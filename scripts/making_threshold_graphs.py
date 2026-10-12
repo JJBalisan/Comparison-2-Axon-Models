@@ -25,14 +25,28 @@ SWEEPS = {
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument("--node", type=int, default=3)
-    ap.add_argument("--only", choices=SWEEPS, action="append", help="run just these sweeps")
-    ap.add_argument("--jpg-grid", action="store_true",
-                    help="EPSGpair on the grid the repo's jpgs used: 11 points 0.1 ms apart, unrounded")
+    ap.add_argument(
+        "--only", choices=SWEEPS, action="append", help="run just these sweeps"
+    )
+    ap.add_argument(
+        "--jpg-grid",
+        action="store_true",
+        help="EPSGpair on the grid the repo's jpgs used: 11 points 0.1 ms apart, unrounded",
+    )
     ap.add_argument("--out-dir", help="save PNGs here instead of showing them")
-    ap.add_argument("--workers", type=int, help="processes for sweep points (default: all CPUs)")
-    ap.add_argument("--points", type=int, help="run only the first N points of each sweep")
+    ap.add_argument(
+        "--workers",
+        type=int,
+        help="processes for sweep points (default: all CPUs)",
+    )
+    ap.add_argument(
+        "--points", type=int, help="run only the first N points of each sweep"
+    )
     a = ap.parse_args()
     if a.workers == 1:  # in-process, as binary_search(workers=1) does
         run(a, None)
@@ -57,10 +71,24 @@ def run(a, pool):
             kw = dict(epsg_pair_dt=dt, rounded=not a.jpg_grid)
         n = min(n, a.points) if a.points else n
         x_values = np.array([sweep_x(stim, i, dt) for i in range(1, n + 1)])
-        multi, two = binary_search(stim, n, a.node, factor, max_I, workers=a.workers,
-                                   executor=pool, **kw)
+        multi, two = binary_search(
+            stim,
+            n,
+            a.node,
+            factor,
+            max_I,
+            workers=a.workers,
+            executor=pool,
+            **kw,
+        )
         print(f"{stim}: multi={multi}\n{' ' * len(stim)}  two  ={two}")
-        fig = threshold_figure(x_values, multi, two, f"{title} Thresholds Compartment {a.node}", xlabel)
+        fig = threshold_figure(
+            x_values,
+            multi,
+            two,
+            f"{title} Thresholds Compartment {a.node}",
+            xlabel,
+        )
         if a.out_dir:
             Path(a.out_dir).mkdir(parents=True, exist_ok=True)
             path = Path(a.out_dir) / f"{stim}_thresholds_cpt{a.node}.png"

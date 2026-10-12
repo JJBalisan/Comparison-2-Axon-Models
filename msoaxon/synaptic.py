@@ -4,7 +4,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-EPSG_TAU = (0.1, 0.18)  # (rise, decay) [ms], the Franken et al 2015 waveform used by the MATLAB
+EPSG_TAU = (
+    0.1,
+    0.18,
+)  # (rise, decay) [ms], the Franken et al 2015 waveform used by the MATLAB
 
 
 def epsg_unitary(t, tau=EPSG_TAU):
@@ -19,7 +22,6 @@ def epsg_unitary(t, tau=EPSG_TAU):
     t_peak = np.log(decay / rise) * rise * decay / (decay - rise)
     peak = np.exp(-t_peak / decay) - np.exp(-t_peak / rise)
     return (1 / peak) * (t > 0) * (np.exp(-t / decay) - np.exp(-t / rise))
-
 
 
 @dataclass
@@ -52,11 +54,18 @@ def synaptic(syn: SynParams):
 
     wc = syn.freq * 2 * np.pi / 1000  # center frequency
     gw = 24.7 * (4.37 * wc / (2 * np.pi) + 1)
-    gam_filter = (t / 1000) ** 4 * np.exp(-2 * np.pi * t * gw / 1000) * np.cos(t * wc)
+    gam_filter = (
+        (t / 1000) ** 4 * np.exp(-2 * np.pi * t * gw / 1000) * np.cos(t * wc)
+    )
     rect_gam = np.maximum(np.convolve(gam_filter, n)[:nt], 0)
 
     # 17.57 normalises so max is G, 37 is the unitary epsg amplitude (Lehnert et al)
-    epsg = syn.gE * 37 * 17.57 * ((1 - np.exp(-t / 1.0)) ** 1.3 * np.exp(-t / 0.27))
+    epsg = (
+        syn.gE
+        * 37
+        * 17.57
+        * ((1 - np.exp(-t / 1.0)) ** 1.3 * np.exp(-t / 0.27))
+    )
     g = np.convolve(rect_gam, epsg)[:nt]
     return t, g
 

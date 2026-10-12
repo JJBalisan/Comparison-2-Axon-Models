@@ -79,12 +79,19 @@ def _predict(pts, level, f, finv):
     ~ 6 (after the B4 experiments, scripts in the search-speed work). None if
     there is nothing to go on.
     """
-    near = sorted((abs(h), f(x), h) for x, p in pts for h in [np.log(max(p, 1e-3) / level)])[:3]
+    near = sorted(
+        (abs(h), f(x), h)
+        for x, p in pts
+        for h in [np.log(max(p, 1e-3) / level)]
+    )[:3]
     xs, hs = [x for _, x, _ in near], [h for _, _, h in near]
     if len(near) == 3 and len(set(hs)) == 3:
         (x0, x1, x2), (h0, h1, h2) = xs, hs
-        est = (x0 * h1 * h2 / ((h0 - h1) * (h0 - h2)) + x1 * h0 * h2 / ((h1 - h0) * (h1 - h2))
-               + x2 * h0 * h1 / ((h2 - h0) * (h2 - h1)))
+        est = (
+            x0 * h1 * h2 / ((h0 - h1) * (h0 - h2))
+            + x1 * h0 * h2 / ((h1 - h0) * (h1 - h2))
+            + x2 * h0 * h1 / ((h2 - h0) * (h2 - h1))
+        )
     elif len(near) >= 2 and hs[0] != hs[1]:
         est = xs[0] - hs[0] * (xs[1] - xs[0]) / (hs[1] - hs[0])
     elif len(near) == 1 and f is np.log:
@@ -118,8 +125,15 @@ def smallest_crossing(respond, guess, ceiling, rel_tol, level):
             lo = x if lo is None else max(lo, x)
             pts.append((x, peak))
         if hi is None:  # nothing spikes yet: go up
-            x = min(max(_predict(pts, level, np.log, np.exp) or 2 * lo, 1.01 * lo), 2 * lo)
-        elif lo is None:  # everything spikes: come down, 1.25x first, then halving
+            x = min(
+                max(_predict(pts, level, np.log, np.exp) or 2 * lo, 1.01 * lo),
+                2 * lo,
+            )
+        elif (
+            lo is None
+        ):  # everything spikes: come down, 1.25x first, then halving
             x = hi / 1.25 if hi == guess else hi / 2
-    _, hi = crossing(respond, lo, hi, lambda n, y: rel_tol * y, level, pts, log=True)
+    _, hi = crossing(
+        respond, lo, hi, lambda n, y: rel_tol * y, level, pts, log=True
+    )
     return hi

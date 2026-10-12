@@ -18,10 +18,27 @@ def test_default_membrane_is_msoaxon_m():
     np.testing.assert_array_equal(y1, y2)
 
 
-@pytest.mark.parametrize("knobs", [dict(rebalance_rest=True), DTX,
-                                   dict(soma_klt_scale=3, soma_na_vhalf=-77, rebalance_rest=True)])
+@pytest.mark.parametrize(
+    "knobs",
+    [
+        dict(rebalance_rest=True),
+        DTX,
+        dict(soma_klt_scale=3, soma_na_vhalf=-77, rebalance_rest=True),
+    ],
+)
 def test_rebalanced_rest_holds(knobs):
-    _, y = mso_axon("step", 5, 10, 0.0, 3, "active-full", 30, -68.0, 1, mem=membrane(-68.0, **knobs))
+    _, y = mso_axon(
+        "step",
+        5,
+        10,
+        0.0,
+        3,
+        "active-full",
+        30,
+        -68.0,
+        1,
+        mem=membrane(-68.0, **knobs),
+    )
     assert np.abs(y[:, :45] + 68).max() < 1e-6
 
 
@@ -43,9 +60,13 @@ def test_prestimulus_cache_separates_membranes():
 
 
 def test_somatic_spike_is_mature_and_klt_sets_it():
-    rb = rheobase("multi", rel_tol=1e-2)  # the margins below are far wider than 1%
+    rb = rheobase(
+        "multi", rel_tol=1e-2
+    )  # the margins below are far wider than 1%
     control = spike_amplitude("multi", 2 * rb)["amplitude"]
-    assert 10 < control < 19  # Scott et al 2005: 17 +/- 2 mV mature, 5-15 near threshold
+    assert (
+        10 < control < 19
+    )  # Scott et al 2005: 17 +/- 2 mV mature, 5-15 near threshold
 
     mem = membrane(-68.0, **DTX)
     rb_dtx = rheobase("multi", mem=mem, rel_tol=1e-2)

@@ -3,11 +3,10 @@
 import numpy as np
 import pytest
 
-from msoaxon import SynParams, two_cpt
-from msoaxon import _solve
-from msoaxon.synaptic import epsg_unitary
+from msoaxon import SynParams, _solve, two_cpt
 from msoaxon.coincidence import half_width, threshold
 from msoaxon.measure import passive_step
+from msoaxon.synaptic import epsg_unitary
 from msoaxon.two import GOLDWYN_2019
 
 GOLDWYN_KW = {k: v for k, v in GOLDWYN_2019.items() if k != "v0"}
@@ -61,12 +60,16 @@ def test_threshold_is_the_spike_boundary():
     th = threshold("two", 0.1, rel_tol=1e-4)
     syn = SynParams(t_end=20)
     for amp, expect in ((th * 1.001, True), (th * 0.999, False)):
-        t, x = two_cpt("EPSGpair", 5, 5.1, amp, 3, "active-full", 20, -68, 1, syn)
+        t, x = two_cpt(
+            "EPSGpair", 5, 5.1, amp, 3, "active-full", 20, -68, 1, syn
+        )
         assert ((x[:, 1] - x[:, 0]) > 10).any() == expect
 
 
 def test_half_width_on_a_known_curve():
     delays = np.linspace(0, 0.5, 51)
-    thresholds = 50 * (1 + delays ** 2)  # crosses 1.03x at sqrt(0.03)
-    assert np.isclose(half_width(delays, thresholds, 0.03), 2 * np.sqrt(0.03), atol=2e-3)
+    thresholds = 50 * (1 + delays**2)  # crosses 1.03x at sqrt(0.03)
+    assert np.isclose(
+        half_width(delays, thresholds, 0.03), 2 * np.sqrt(0.03), atol=2e-3
+    )
     assert np.isnan(half_width(delays, thresholds, 5.0))

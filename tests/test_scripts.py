@@ -22,29 +22,51 @@ pytestmark = pytest.mark.slow
 
 
 def run_script(name, *args):
-    r = subprocess.run([sys.executable, str(REPO / "scripts" / name), *map(str, args)],
-                       capture_output=True, text=True, env={"MPLBACKEND": "Agg", "PATH": ""})
+    r = subprocess.run(
+        [sys.executable, str(REPO / "scripts" / name), *map(str, args)],
+        capture_output=True,
+        text=True,
+        env={"MPLBACKEND": "Agg", "PATH": ""},
+    )
     assert r.returncode == 0, r.stderr
     return r.stdout
 
 
-@pytest.mark.parametrize("flags, rin_range", [
-    ((), (2.0, 3.5)),  # totals conserved (default): 2.6 MOhm
-    (("--klt-from-soma", "--dendrite-ra", 200), (4.0, 6.0)),  # 5.0 MOhm
-], ids=["default", "klt-from-soma-ra200"])
+@pytest.mark.parametrize(
+    "flags, rin_range",
+    [
+        ((), (2.0, 3.5)),  # totals conserved (default): 2.6 MOhm
+        (("--klt-from-soma", "--dendrite-ra", 200), (4.0, 6.0)),  # 5.0 MOhm
+    ],
+    ids=["default", "klt-from-soma-ra200"],
+)
 def test_dendrites_script(tmp_path, flags, rin_range):
     run_script("dendrites.py", "--quick", "--out-dir", tmp_path, *flags)
     res = json.loads((tmp_path / "dendrites.json").read_text())
     assert (tmp_path / "dendrites.png").stat().st_size > 0
 
-    assert rin_range[0] < res["A_rin_tau"]["dendritic"]["rin_steady"] < rin_range[1]
-    B = res["B_epsp"]  # attenuation along the cable, sharpening by dendritic KLT
-    assert B["dendritic, EPSG distal (180 um)"]["amp"] < B["dendritic, EPSG mid-dendrite (100 um)"]["amp"] \
+    assert (
+        rin_range[0]
+        < res["A_rin_tau"]["dendritic"]["rin_steady"]
+        < rin_range[1]
+    )
+    B = res[
+        "B_epsp"
+    ]  # attenuation along the cable, sharpening by dendritic KLT
+    assert (
+        B["dendritic, EPSG distal (180 um)"]["amp"]
+        < B["dendritic, EPSG mid-dendrite (100 um)"]["amp"]
         < B["dendritic, EPSG at soma"]["amp"]
-    assert B["mid-dendrite, dendritic KLT removed"]["half_width_us"] \
+    )
+    assert (
+        B["mid-dendrite, dendritic KLT removed"]["half_width_us"]
         > B["dendritic, EPSG mid-dendrite (100 um)"]["half_width_us"]
+    )
     C = res["C_threshold"]  # Scott et al 2010: bilateral beats unilateral
-    assert C["bilateral (one EPSG per dendrite)"] < C["unilateral (both on the lateral dendrite)"]
+    assert (
+        C["bilateral (one EPSG per dendrite)"]
+        < C["unilateral (both on the lateral dendrite)"]
+    )
     assert math.isclose(C["both at the soma, lumped model"], 48.0, rel_tol=0.02)
     assert 0.9 < res["D_summation"]["ratio"] < 1.1  # near-linear summation
     for widths in res["E_window_bilateral_dendritic_us"].values():
@@ -55,7 +77,9 @@ def test_dendrites_script(tmp_path, flags, rin_range):
 
 
 def test_coincidence_window_script(tmp_path):
-    run_script("coincidence_window.py", "--quick", "--trials", 8, "--out-dir", tmp_path)
+    run_script(
+        "coincidence_window.py", "--quick", "--trials", 8, "--out-dir", tmp_path
+    )
     res = json.loads((tmp_path / "coincidence_window.json").read_text())
     assert (tmp_path / "coincidence_window.png").stat().st_size > 0
 
@@ -65,7 +89,9 @@ def test_coincidence_window_script(tmp_path):
     assert math.isclose(lumped["threshold0"], 48.0, rel_tol=0.02)
     for r in rows.values():
         assert 50 < r["margin_0.03"] < 400
-        assert r["margin_0.005"] < r["margin_0.03"]  # larger inputs stay above threshold longer
+        assert (
+            r["margin_0.005"] < r["margin_0.03"]
+        )  # larger inputs stay above threshold longer
     noisy = res["noisy_check"]
     assert 0 < noisy["peak_probability"] <= 1
     # nan when the few quick trials never fall below half: must still be written
@@ -90,8 +116,15 @@ def test_somatic_spike_script(tmp_path):
 
 
 def test_making_threshold_graphs_script(tmp_path):
-    out = run_script("making_threshold_graphs.py", "--only", "sine", "--points", 1,
-                     "--out-dir", tmp_path)
+    out = run_script(
+        "making_threshold_graphs.py",
+        "--only",
+        "sine",
+        "--points",
+        1,
+        "--out-dir",
+        tmp_path,
+    )
     # one sweep point, BinarySearch.m's rounding to 10 (unrounded: 11054.08 / 11541.14)
     assert "sine: multi=[11050.0]" in out and "two  =[11540.0]" in out
     assert (tmp_path / "sine_thresholds_cpt3.png").stat().st_size > 0

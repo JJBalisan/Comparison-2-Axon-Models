@@ -18,7 +18,7 @@ import numpy as np
 from scipy.sparse import bmat, coo_matrix, diags, eye
 
 from . import constants as C
-from ._common import _stops, STIM_TYPES, check_args, stimulus
+from ._common import STIM_TYPES, _stops, check_args, stimulus
 from ._solve import breakpoints, integrate, pre_stimulus_is_quiet
 from .synaptic import SynParams, epsg_unitary, interp_g
 
@@ -37,13 +37,13 @@ MSO_STIM_TYPES = STIM_TYPES + ("EPSGbilateral",)
 
 # which gating blocks (m, h, p, w, z, a) evolve for each model type
 ACTIVE_GATES = {
-    "active-KLT":    (0, 0, 0, 1, 1, 0),
-    "active-H":      (0, 0, 0, 0, 0, 1),
-    "active-KLT+H":  (0, 0, 0, 1, 1, 1),
-    "passive":       (0, 0, 0, 0, 0, 0),
+    "active-KLT": (0, 0, 0, 1, 1, 0),
+    "active-H": (0, 0, 0, 0, 0, 1),
+    "active-KLT+H": (0, 0, 0, 1, 1, 1),
+    "passive": (0, 0, 0, 0, 0, 0),
     "active-sodium": (1, 1, 0, 0, 0, 0),
-    "active-full":   (1, 1, 1, 1, 1, 1),
-    "active-KHT":    (0, 0, 1, 0, 0, 0),
+    "active-full": (1, 1, 1, 1, 1, 1),
+    "active-KHT": (0, 0, 1, 0, 0, 0),
 }
 
 # initial gating values (steady state at -68 mV, as in msoAxon.m)
@@ -51,24 +51,32 @@ _GATE0 = (0.12, 0.67, 0.0, 0.28, 0.67, 0.22)
 
 
 def _chain_jac_sparsity():
-    """dV couples to neighbouring V and its own gates; each gate to its own V."""
+    """Jacobian pattern: dV to neighbouring V and its gates, each gate to its V."""
     I = eye(N)
     tri = diags([1.0, 1.0, 1.0], [-1, 0, 1], shape=(N, N))
-    blocks = [[tri] + [I] * 6] + [[I] + [I if j == i else None for j in range(6)]
-                                  for i in range(6)]
+    blocks = [[tri] + [I] * 6] + [
+        [I] + [I if j == i else None for j in range(6)] for i in range(6)
+    ]
     return bmat(blocks).tocsc()
 
 
 def _tree_jac_sparsity(n, parent, child):
     """_chain_jac_sparsity for any tree: dV couples to its own V, to each V it shares
-    an edge (parent[k], child[k]) with, and to its own gates; each gate to its own V."""
+    an edge (parent[k], child[k]) with, and to its own gates; each gate to its own V.
+    """
     I = eye(n, format="csr")
-    adj = coo_matrix((np.ones(2 * len(parent)), (np.r_[parent, child], np.r_[child, parent])),
-                     shape=(n, n))
+    adj = coo_matrix(
+        (
+            np.ones(2 * len(parent)),
+            (np.r_[parent, child], np.r_[child, parent]),
+        ),
+        shape=(n, n),
+    )
     couple = (I + adj).tocsr()
     couple.data[:] = 1.0
-    blocks = [[couple] + [I] * 6] + [[I] + [I if j == i else None for j in range(6)]
-                                     for i in range(6)]
+    blocks = [[couple] + [I] * 6] + [
+        [I] + [I if j == i else None for j in range(6)] for i in range(6)
+    ]
     return bmat(blocks).tocsc()
 
 
@@ -91,15 +99,39 @@ def _tree_jac_sparsity(n, parent, child):
 #
 # The unbranched 45-compartment chain of msoAxon.m (soma, 2 AIS, 21 internode/node pairs)
 LUMPED = SimpleNamespace(
-    key="lumped", n=N, sa=C.SA, cap=CAP, g_na=C.G_NA, g_kht=C.G_KHT, g_klt=C.G_KLT,
-    g_h=C.G_H, g_lk=C.G_LK, parent=np.arange(N - 1), child=np.arange(1, N), g_ax=_G_AX,
-    chain=True, jac=_chain_jac_sparsity(), labels=["soma", "AIS", "AIS"] + ["internode", "node"] * 21)
-for _a in (CAP, _G_AX, LUMPED.parent, LUMPED.child):  # read-only, as in constants.py
+    key="lumped",
+    n=N,
+    sa=C.SA,
+    cap=CAP,
+    g_na=C.G_NA,
+    g_kht=C.G_KHT,
+    g_klt=C.G_KLT,
+    g_h=C.G_H,
+    g_lk=C.G_LK,
+    parent=np.arange(N - 1),
+    child=np.arange(1, N),
+    g_ax=_G_AX,
+    chain=True,
+    jac=_chain_jac_sparsity(),
+    labels=["soma", "AIS", "AIS"] + ["internode", "node"] * 21,
+)
+for _a in (
+    CAP,
+    _G_AX,
+    LUMPED.parent,
+    LUMPED.child,
+):  # read-only, as in constants.py
     _a.flags.writeable = False
 
 
-def with_dendrites(length=200.0, diameter=5.0, n_seg=5, klt_lambda=74.0, conserve_totals=True,
-                   dendrite_ra=R_AXIAL):
+def with_dendrites(
+    length=200.0,
+    diameter=5.0,
+    n_seg=5,
+    klt_lambda=74.0,
+    conserve_totals=True,
+    dendrite_ra=R_AXIAL,
+):
     """Lehnert et al 2014's dendritic variant (their Fig. 8), appended to the axon.
 
     Two identical unbranched dendrites (lateral = ipsilateral input, medial =
@@ -127,19 +159,27 @@ def with_dendrites(length=200.0, diameter=5.0, n_seg=5, klt_lambda=74.0, conserv
     n_d = 2 * n_seg
     n = N + n_d
     seg = length / n_seg
-    x_mid = (np.arange(n_seg) + 0.5) * seg  # distance of each compartment's centre [um]
+    x_mid = (
+        np.arange(n_seg) + 0.5
+    ) * seg  # distance of each compartment's centre [um]
     sa_d = np.pi * diameter * seg
     soma_sa = C.SA[0] - 2 * n_seg * sa_d
     if soma_sa <= 0:
-        raise ValueError("dendrites larger than the lumped soma+dendrite membrane")
+        raise ValueError(
+            "dendrites larger than the lumped soma+dendrite membrane"
+        )
 
     sa = np.concatenate([[soma_sa], C.SA[1:], np.full(n_d, sa_d)])
-    L = np.concatenate([[np.sqrt(soma_sa / np.pi)], C.L[1:], np.full(n_d, seg)])  # soma: as Constants.m
+    L = np.concatenate(
+        [[np.sqrt(soma_sa / np.pi)], C.L[1:], np.full(n_d, seg)]
+    )  # soma: as Constants.m
     r_cyl = sa / (2 * np.pi * L)
-    xa_cm, l_cm = np.pi * r_cyl ** 2 * 1e-8, L * 1e-4
+    xa_cm, l_cm = np.pi * r_cyl**2 * 1e-8, L * 1e-4
     decay = np.tile(np.exp(-x_mid / klt_lambda), 2)
 
-    g_na = np.concatenate([[C.G_NA[0] * C.SA[0] / soma_sa], C.G_NA[1:], np.zeros(n_d)])
+    g_na = np.concatenate(
+        [[C.G_NA[0] * C.SA[0] / soma_sa], C.G_NA[1:], np.zeros(n_d)]
+    )
     g_kht = np.concatenate([C.G_KHT, np.zeros(n_d)])
     g_klt = np.concatenate([C.G_KLT, C.G_KLT[0] * decay])
     g_h = np.concatenate([C.G_H, C.G_H[0] * decay])
@@ -154,22 +194,52 @@ def with_dendrites(length=200.0, diameter=5.0, n_seg=5, klt_lambda=74.0, conserv
     med = N + n_seg + np.arange(n_seg)
     parent = np.concatenate([np.arange(N - 1), [0], lat[:-1], [0], med[:-1]])
     child = np.concatenate([np.arange(1, N), lat, med])
-    g_ax = (2 / R_AXIAL) / (l_cm[parent] / xa_cm[parent] + l_cm[child] / xa_cm[child])
+    g_ax = (2 / R_AXIAL) / (
+        l_cm[parent] / xa_cm[parent] + l_cm[child] / xa_cm[child]
+    )
     if dendrite_ra != R_AXIAL:
         # only edges into a dendrite compartment change, so the axon's conductances
         # stay bit-identical; each half-compartment uses its own resistivity
-        ra = np.concatenate([np.full(N, R_AXIAL), np.full(n_d, float(dendrite_ra))])
+        ra = np.concatenate(
+            [np.full(N, R_AXIAL), np.full(n_d, float(dendrite_ra))]
+        )
         into = child >= N
         p, c = parent[into], child[into]
-        g_ax[into] = 2 / (ra[p] * l_cm[p] / xa_cm[p] + ra[c] * l_cm[c] / xa_cm[c])
-    labels = LUMPED.labels + ["lateral dendrite"] * n_seg + ["medial dendrite"] * n_seg
+        g_ax[into] = 2 / (
+            ra[p] * l_cm[p] / xa_cm[p] + ra[c] * l_cm[c] / xa_cm[c]
+        )
+    labels = (
+        LUMPED.labels
+        + ["lateral dendrite"] * n_seg
+        + ["medial dendrite"] * n_seg
+    )
     return SimpleNamespace(
-        key=("dendrites", float(length), float(diameter), int(n_seg), float(klt_lambda),
-             bool(conserve_totals), float(dendrite_ra)),
-        n=n, sa=sa, cap=cap, g_na=g_na, g_kht=g_kht, g_klt=g_klt, g_h=g_h, g_lk=g_lk,
-        parent=parent, child=child, g_ax=g_ax, chain=False,
-        jac=_tree_jac_sparsity(n, parent, child), labels=labels,
-        lateral=lat + 1, medial=med + 1)  # 1-indexed compartment numbers
+        key=(
+            "dendrites",
+            float(length),
+            float(diameter),
+            int(n_seg),
+            float(klt_lambda),
+            bool(conserve_totals),
+            float(dendrite_ra),
+        ),
+        n=n,
+        sa=sa,
+        cap=cap,
+        g_na=g_na,
+        g_kht=g_kht,
+        g_klt=g_klt,
+        g_h=g_h,
+        g_lk=g_lk,
+        parent=parent,
+        child=child,
+        g_ax=g_ax,
+        chain=False,
+        jac=_tree_jac_sparsity(n, parent, child),
+        labels=labels,
+        lateral=lat + 1,
+        medial=med + 1,
+    )  # 1-indexed compartment numbers
 
 
 def axial_current(V, morph=LUMPED):
@@ -228,7 +298,9 @@ def external_current(t, V, stim_type, s, input_node, sa=C.SA):
             return k, -I0 * 1e3 / sa[0]
     elif stim_type == "ramp2":
         slope = 1 / (s.stop - s.start)
-        I0 = min(float(t >= s.start) * s.I * (t - s.start) * slope / 1000, s.I / 1000)
+        I0 = min(
+            float(t >= s.start) * s.I * (t - s.start) * slope / 1000, s.I / 1000
+        )
         return k, -I0 * 1e3 / sa[0]
     elif stim_type == "step":
         if s.start < t <= s.stop:
@@ -243,17 +315,22 @@ def external_current(t, V, stim_type, s, input_node, sa=C.SA):
             return k, g * (V[0] - s.VsynE) / sa[0]
     elif stim_type == "SynapticPair":
         if s.start < t <= s.stop:
-            g = interp_g(s.t_syn, s.g_syn, t) + interp_g(s.t_syn, s.g_syn, t + s.diff)
+            g = interp_g(s.t_syn, s.g_syn, t) + interp_g(
+                s.t_syn, s.g_syn, t + s.diff
+            )
             return k, g * (V[0] - s.VsynE) / sa[0]
     elif stim_type == "EPSG":
         te = t - s.start
         if s.start < t <= s.stop:
-            return k, s.I * (0 - V[k]) * float(te >= 0) * epsg_unitary(te, s.epsg_tau) / -sa[k]
+            return k, s.I * (0 - V[k]) * float(te >= 0) * epsg_unitary(
+                te, s.epsg_tau
+            ) / -sa[k]
     elif stim_type == "EPSGpair":
         te = t - s.start
         td = s.stop - s.start
-        wave = (float(te >= 0) * epsg_unitary(te, s.epsg_tau)
-                + float(te >= td) * epsg_unitary(te - td, s.epsg_tau))
+        wave = float(te >= 0) * epsg_unitary(te, s.epsg_tau) + float(
+            te >= td
+        ) * epsg_unitary(te - td, s.epsg_tau)
         return k, s.I * (0 - V[k]) * wave / -sa[k]
     return 0, 0.0
 
@@ -262,13 +339,32 @@ def bilateral_current(t, V, s, a, b, sa):
     """EPSGbilateral: first EPSG at compartment a (0-based) at s.start, second at b at s.stop."""
     te = t - s.start
     td = s.stop - s.start
-    ia = s.I * (0 - V[a]) * float(te >= 0) * epsg_unitary(te, s.epsg_tau) / -sa[a]
-    ib = s.I * (0 - V[b]) * float(te >= td) * epsg_unitary(te - td, s.epsg_tau) / -sa[b]
+    ia = (
+        s.I
+        * (0 - V[a])
+        * float(te >= 0)
+        * epsg_unitary(te, s.epsg_tau)
+        / -sa[a]
+    )
+    ib = (
+        s.I
+        * (0 - V[b])
+        * float(te >= td)
+        * epsg_unitary(te - td, s.epsg_tau)
+        / -sa[b]
+    )
     return (a, ia), (b, ib)
 
 
-def membrane(v0, soma_klt_scale=1.0, ais_klt_scale=1.0, soma_na_vhalf=-62.5,
-             rebalance_rest=False, morph=None, dendrite_klt_scale=1.0):
+def membrane(
+    v0,
+    soma_klt_scale=1.0,
+    ais_klt_scale=1.0,
+    soma_na_vhalf=-62.5,
+    rebalance_rest=False,
+    morph=None,
+    dendrite_klt_scale=1.0,
+):
     """Per-compartment channel overrides for the multi-compartment model.
 
     Defaults reproduce msoAxon.m exactly. The knobs are the ones the mature-MSO
@@ -287,12 +383,23 @@ def membrane(v0, soma_klt_scale=1.0, ais_klt_scale=1.0, soma_na_vhalf=-62.5,
     """
     morph = morph or LUMPED
     if dendrite_klt_scale != 1.0 and morph.n == N:
-        raise ValueError("dendrite_klt_scale needs a morphology with dendrites (morph=with_dendrites())")
+        raise ValueError(
+            "dendrite_klt_scale needs a morphology with dendrites (morph=with_dendrites())"
+        )
     # v0 is in the key because the leak reversals (vlk) are built from it: without
     # it, membrane(-60) and membrane(-68) would share a pre-stimulus cache entry
-    m = SimpleNamespace(key=(float(v0), float(soma_klt_scale), float(ais_klt_scale),
-                             float(soma_na_vhalf), bool(rebalance_rest), float(dendrite_klt_scale)),
-                        morph_key=morph.key, morph=morph)
+    m = SimpleNamespace(
+        key=(
+            float(v0),
+            float(soma_klt_scale),
+            float(ais_klt_scale),
+            float(soma_na_vhalf),
+            bool(rebalance_rest),
+            float(dendrite_klt_scale),
+        ),
+        morph_key=morph.key,
+        morph=morph,
+    )
     m.g_na = morph.g_na
     m.g_klt = morph.g_klt.copy()
     m.g_klt[0] *= soma_klt_scale
@@ -305,36 +412,52 @@ def membrane(v0, soma_klt_scale=1.0, ais_klt_scale=1.0, soma_na_vhalf=-62.5,
     m.y0_gates = None
     if rebalance_rest:
         V = np.full(morph.n, float(v0))
-        gates = (C.minf(V), C.hinf(V, m.na_vhalf), C.pinf(V),
-                 C.winf(V), C.zinf(V), C.ainf(V))
+        gates = (
+            C.minf(V),
+            C.hinf(V, m.na_vhalf),
+            C.pinf(V),
+            C.winf(V),
+            C.zinf(V),
+            C.ainf(V),
+        )
         mi, hi, pi, wi, zi, ai = gates
-        I_ion = (m.g_na * mi ** 4 * (0.993 * hi + 0.007) * (V - V_NA)
-                 + morph.g_kht * pi * (V - V_K) + m.g_klt * wi ** 4 * zi * (V - V_K)
-                 + morph.g_h * ai * (V - V_H))
+        I_ion = (
+            m.g_na * mi**4 * (0.993 * hi + 0.007) * (V - V_NA)
+            + morph.g_kht * pi * (V - V_K)
+            + m.g_klt * wi**4 * zi * (V - V_K)
+            + morph.g_h * ai * (V - V_H)
+        )
         m.vlk = V + I_ion / morph.g_lk
         m.y0_gates = gates
     return m
 
 
-def _rhs(t, x, stim_type, s, input_node, active, mem, morph=LUMPED, input_node2=None):
+def _rhs(
+    t, x, stim_type, s, input_node, active, mem, morph=LUMPED, input_node2=None
+):
     """Right-hand side. Arithmetic is kept expression-for-expression identical to
     msoAxon.m's order so results are bit-for-bit stable; the speed comes from
-    writing into one output array and skipping gates that are switched off."""
+    writing into one output array and skipping gates that are switched off.
+    """
     n = morph.n
     V, m, h, p, w, z, a = x.reshape(7, n)
     out = np.empty_like(x)
     d = out.reshape(7, n)
 
-    INa = mem.g_na * m ** 4 * (0.993 * h + 0.007) * (V - V_NA)
+    INa = mem.g_na * m**4 * (0.993 * h + 0.007) * (V - V_NA)
     IKHT = morph.g_kht * p * (V - V_K)
-    IKLT = mem.g_klt * w ** 4 * z * (V - V_K)
+    IKLT = mem.g_klt * w**4 * z * (V - V_K)
     # linear in activation, as in RM03 (no power given in Lehnert or Baumann)
     Ih = morph.g_h * a * (V - V_H)
-    Ilk = morph.g_lk * (V - mem.vlk)  # leak reversal = resting potential by default
+    Ilk = morph.g_lk * (
+        V - mem.vlk
+    )  # leak reversal = resting potential by default
 
     total = INa + IKHT + IKLT + Ih + Ilk
     if stim_type == "EPSGbilateral":
-        for k, iext in bilateral_current(t, V, s, input_node - 1, input_node2 - 1, morph.sa):
+        for k, iext in bilateral_current(
+            t, V, s, input_node - 1, input_node2 - 1, morph.sa
+        ):
             total[k] += iext
     else:
         k, iext = external_current(t, V, stim_type, s, input_node, morph.sa)
@@ -344,7 +467,9 @@ def _rhs(t, x, stim_type, s, input_node, active, mem, morph=LUMPED, input_node2=
     act_m, act_h, act_p, act_w, act_z, act_a = active
     # sources for each time constant are in constants.py
     d[1] = (C.minf(V) - m) / C.taum(V) if act_m else 0.0
-    d[2] = (C.hinf(V, mem.na_vhalf) - h) / C.tauh(V) if act_h else 0.0  # per-compartment midpoint
+    d[2] = (
+        (C.hinf(V, mem.na_vhalf) - h) / C.tauh(V) if act_h else 0.0
+    )  # per-compartment midpoint
     d[3] = (C.pinf(V) - p) / C.taup(V) if act_p else 0.0
     d[4] = (C.winf(V) - w) / C.tauw(V) if act_w else 0.0
     d[5] = (C.zinf(V) - z) / C.tauz(V) if act_z else 0.0
@@ -352,9 +477,24 @@ def _rhs(t, x, stim_type, s, input_node, active, mem, morph=LUMPED, input_node2=
     return out
 
 
-def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
-             syn: SynParams | None = None, max_step=None, stop_on_spike=None, mem=None,
-             morph=None, input_node2=None, stop_when_settled=False):
+def mso_axon(
+    stim_type,
+    start,
+    stop,
+    I,
+    node,
+    model_type,
+    t_end,
+    v0,
+    input_node,
+    syn: SynParams | None = None,
+    max_step=None,
+    stop_on_spike=None,
+    mem=None,
+    morph=None,
+    input_node2=None,
+    stop_when_settled=False,
+):
     """Run the multi-compartment model. Returns (t, y) with y shaped (n_times, 7*n).
 
     Arguments shared with two_cpt (compartments are 1-indexed, times in ms):
@@ -387,10 +527,21 @@ def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
     each dendrite.
     """
     morph = morph or (mem.morph if mem is not None else LUMPED)
-    check_args(stim_type, model_type, node, input_node, min_node=1,
-               stim_types=MSO_STIM_TYPES, n_max=morph.n)
-    if stim_type == "EPSGbilateral" and not (input_node2 and 1 <= input_node2 <= morph.n):
-        raise ValueError(f"EPSGbilateral needs input_node2 in 1..{morph.n}, got {input_node2}")
+    check_args(
+        stim_type,
+        model_type,
+        node,
+        input_node,
+        min_node=1,
+        stim_types=MSO_STIM_TYPES,
+        n_max=morph.n,
+    )
+    if stim_type == "EPSGbilateral" and not (
+        input_node2 and 1 <= input_node2 <= morph.n
+    ):
+        raise ValueError(
+            f"EPSGbilateral needs input_node2 in 1..{morph.n}, got {input_node2}"
+        )
     if model_type not in ACTIVE_GATES:
         raise ValueError(f"unknown model type {model_type!r}")
     syn = syn or SynParams(t_end=t_end)
@@ -399,10 +550,14 @@ def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
     active = tuple(bool(g) for g in ACTIVE_GATES[model_type])
     mem = mem or membrane(v0, morph=morph)
     if mem.morph_key != morph.key:
-        raise ValueError("mem was built for a different morphology; pass morph= to membrane()")
+        raise ValueError(
+            "mem was built for a different morphology; pass morph= to membrane()"
+        )
     n = morph.n
     if mem.y0_gates is None:
-        y0 = np.concatenate([np.full(n, float(v0))] + [np.full(n, g) for g in _GATE0])
+        y0 = np.concatenate(
+            [np.full(n, float(v0))] + [np.full(n, g) for g in _GATE0]
+        )
     else:
         y0 = np.concatenate([np.full(n, float(v0)), *mem.y0_gates])
     cuts = breakpoints(stim_type, start, stop, t_end)
@@ -411,11 +566,25 @@ def mso_axon(stim_type, start, stop, I, node, model_type, t_end, v0, input_node,
     # t > start (the EPSG waveforms are zero at onset), so the equations at
     # t == start are still stimulus-free
     if pre_stimulus_is_quiet(cuts, start, stop):
-        quiet = (("mso", model_type, float(v0), mem.key, morph.key),
-                 lambda t, x: _rhs(t, x, "none", s, input_node, active, mem, morph))
+        quiet = (
+            ("mso", model_type, float(v0), mem.key, morph.key),
+            lambda t, x: _rhs(t, x, "none", s, input_node, active, mem, morph),
+        )
 
-    rhs = lambda t, x: _rhs(t, x, stim_type, s, input_node, active, mem, morph, input_node2)  # noqa: E731
-    return integrate(rhs, y0, t_end, cuts, rtol=1e-8, atol=1e-8,
-                     max_step=max_step or 0.1 * t_end, jac_sparsity=morph.jac,
-                     quiet=quiet, stop_event=_stops(rhs, node - 1, stop_on_spike,
-                                                   stop_when_settled, stim_type, s, n))
+    rhs = lambda t, x: _rhs(  # noqa: E731
+        t, x, stim_type, s, input_node, active, mem, morph, input_node2
+    )
+    return integrate(
+        rhs,
+        y0,
+        t_end,
+        cuts,
+        rtol=1e-8,
+        atol=1e-8,
+        max_step=max_step or 0.1 * t_end,
+        jac_sparsity=morph.jac,
+        quiet=quiet,
+        stop_event=_stops(
+            rhs, node - 1, stop_on_spike, stop_when_settled, stim_type, s, n
+        ),
+    )

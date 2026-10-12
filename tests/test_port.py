@@ -6,8 +6,7 @@ import h5py
 import numpy as np
 import pytest
 
-from msoaxon import constants as C
-from msoaxon import mso_axon, two_cpt
+from msoaxon import constants as C, mso_axon, two_cpt
 from msoaxon.spiking import count_spikes, matlab_round
 
 REPO = Path(__file__).resolve().parents[1]
@@ -20,9 +19,16 @@ def _mat(name):
 
 def test_area_matches_constants_m_output():
     m = _mat("Area.mat")
-    for key, ours in [("SA", C.SA), ("SAcm", C.SA_CM), ("areaRatio", C.AREA_RATIO),
-                      ("L", C.L), ("Lcm", C.L_CM), ("Rcyl", C.R_CYL), ("XA", C.XA),
-                      ("XAcm", C.XA_CM)]:
+    for key, ours in [
+        ("SA", C.SA),
+        ("SAcm", C.SA_CM),
+        ("areaRatio", C.AREA_RATIO),
+        ("L", C.L),
+        ("Lcm", C.L_CM),
+        ("Rcyl", C.R_CYL),
+        ("XA", C.XA),
+        ("XAcm", C.XA_CM),
+    ]:
         np.testing.assert_allclose(ours, m[key], rtol=1e-12, err_msg=key)
 
 
@@ -62,4 +68,3 @@ def test_strong_epsg_pair_spikes(model):
 def test_matlab_round_is_half_away_from_zero():
     assert matlab_round(2.5) == 3 and matlab_round(-2.5) == -3
     assert matlab_round(15, -1) == 20 and matlab_round(25, -1) == 30
-

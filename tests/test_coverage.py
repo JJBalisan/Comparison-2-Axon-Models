@@ -54,7 +54,9 @@ def test_synaptic_pair_near_t_end_stays_finite():
     # t + diff runs past the conductance table; MATLAB's interp1q gave NaN here
     syn = SynParams(t_end=20, diff=3.0)
     for model in (two_cpt, mso_axon):
-        _, x = model("SynapticPair", 5, 20, 0, 3, "active-full", 20, -68, 1, syn)
+        _, x = model(
+            "SynapticPair", 5, 20, 0, 3, "active-full", 20, -68, 1, syn
+        )
         assert np.isfinite(x).all()
 
 
@@ -62,7 +64,9 @@ def test_synaptic_conductance_shape_and_seed():
     t, g = synaptic(SynParams(t_end=20, random_in=7))
     assert len(t) == len(g) == 2001 and np.isclose(t[-1], 20)
     assert (g >= 0).all() and g.max() > 0
-    np.testing.assert_array_equal(g, synaptic(SynParams(t_end=20, random_in=7))[1])
+    np.testing.assert_array_equal(
+        g, synaptic(SynParams(t_end=20, random_in=7))[1]
+    )
     assert not np.array_equal(g, synaptic(SynParams(t_end=20, random_in=8))[1])
 
 
@@ -72,13 +76,16 @@ def test_input_to_axon_compartment():
     assert x[:, 1].max() > x[:, 0].max()
 
 
-@pytest.mark.parametrize("model,node,input_node", [
-    (two_cpt, 1, 1),    # node 1 is the soma; would read coupling[-1]
-    (two_cpt, 46, 1),
-    (two_cpt, 3, 0),
-    (mso_axon, 3, 0),   # would inject into compartment 45
-    (mso_axon, 3, 46),
-])
+@pytest.mark.parametrize(
+    "model,node,input_node",
+    [
+        (two_cpt, 1, 1),  # node 1 is the soma; would read coupling[-1]
+        (two_cpt, 46, 1),
+        (two_cpt, 3, 0),
+        (mso_axon, 3, 0),  # would inject into compartment 45
+        (mso_axon, 3, 46),
+    ],
+)
 def test_out_of_range_nodes_are_rejected(model, node, input_node):
     with pytest.raises(ValueError, match="node"):
         model("EPSGpair", 5, 5, 100, node, "active-full", 20, -68, input_node)
@@ -93,8 +100,15 @@ def test_unknown_names_are_rejected(model):
 
 
 def test_every_model_type_runs():
-    for mt in ("passive", "active-KLT", "active-H", "active-KLT+H", "active-sodium",
-               "active-KHT", "active-full"):
+    for mt in (
+        "passive",
+        "active-KLT",
+        "active-H",
+        "active-KLT+H",
+        "active-sodium",
+        "active-KHT",
+        "active-full",
+    ):
         for model in (two_cpt, mso_axon):
             _, x = model("EPSG", 5, 10, 50, 3, mt, 10, -68, 1)
             assert np.isfinite(x).all(), (model.__name__, mt)
@@ -113,7 +127,9 @@ def test_spiking_reset_carries_across_columns_mult():
 
 def test_epsgpair_thresholds_match_repo_jpg():
     """Delays 0 and 0.3 ms at node 3: both models read 41q and 55q off EPSGpair_Thresholds_CPT3.jpg."""
-    multi, two = binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, rounded=False)
+    multi, two = binary_search(
+        "EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, rounded=False
+    )
     assert [round(v / Q) for v in multi] == [41, 55]
     assert [round(v / Q) for v in two] == [41, 55]
 
@@ -133,13 +149,31 @@ def runs():
     t1, y = mso_axon(*args, 3, "active-full", 20, -68, 1, syn)
     t2, x = two_cpt(*args, 3, "active-full", 20, -68, 1, syn)
     t3, z = two_cpt(*args, 5, "active-full", 20, -68, 1, syn)
-    graph = dict(node=3, tEnd=20, stimType="EPSGpair", inputNode=1, start=5, stop=5,
-                 I=100, Syn=syn)
+    graph = dict(
+        node=3,
+        tEnd=20,
+        stimType="EPSGpair",
+        inputNode=1,
+        start=5,
+        stop=5,
+        I=100,
+        Syn=syn,
+    )
     return graph, (t1, y, t2, x, t3, z)
 
 
-@pytest.mark.parametrize("kind", ["Contour", "ModelComparison", "ModelComparison2",
-                                  "NodeComparison", "MultiCompartment", "Input", "Multigraph"])
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "Contour",
+        "ModelComparison",
+        "ModelComparison2",
+        "NodeComparison",
+        "MultiCompartment",
+        "Input",
+        "Multigraph",
+    ],
+)
 def test_graph_types_render(runs, kind):
     graph, data = runs
     fig = graphing({**graph, "Type": kind}, *data)
@@ -149,7 +183,9 @@ def test_graph_types_render(runs, kind):
 
 def test_two_compartment_graph_and_unknown_type(runs):
     graph, (_, _, t2, x, _, _) = runs
-    matplotlib.pyplot.close(graphing({**graph, "Type": "TwoCompartment"}, t2, x))
+    matplotlib.pyplot.close(
+        graphing({**graph, "Type": "TwoCompartment"}, t2, x)
+    )
     with pytest.raises(ValueError):
         graphing({**graph, "Type": "Nope"}, t2, x)
     matplotlib.pyplot.close(threshold_figure([0, 1], [1, 2], [1, 2], "t", "x"))
@@ -157,22 +193,42 @@ def test_two_compartment_graph_and_unknown_type(runs):
 
 def test_combine_all_script(tmp_path):
     out = tmp_path / "fig.png"
-    r = subprocess.run([sys.executable, str(REPO / "scripts" / "combine_all.py"),
-                        "--stim", "EPSGpair", "--I", "100", "--out", str(out)],
-                       capture_output=True, text=True, env={"MPLBACKEND": "Agg", "PATH": ""})
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(REPO / "scripts" / "combine_all.py"),
+            "--stim",
+            "EPSGpair",
+            "--I",
+            "100",
+            "--out",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        env={"MPLBACKEND": "Agg", "PATH": ""},
+    )
     assert r.returncode == 0, r.stderr
-    assert "multi-compartment 1, two-compartment 1" in r.stdout and out.stat().st_size > 0
+    assert (
+        "multi-compartment 1, two-compartment 1" in r.stdout
+        and out.stat().st_size > 0
+    )
 
 
 @pytest.mark.parametrize("model", [two_cpt, mso_axon])
 def test_pre_stimulus_cache_does_not_change_results(model):
     from msoaxon import _solve
+
     _solve._QUIET_CACHE.clear()
     t1, x1 = model("EPSGpair", 5, 5.3, 70, 3, "active-full", 20, -68, 1)
     assert _solve._QUIET_CACHE  # first run filled it
-    t2, x2 = model("EPSGpair", 5, 5.3, 90, 3, "active-full", 20, -68, 1)  # reuses it
+    t2, x2 = model(
+        "EPSGpair", 5, 5.3, 90, 3, "active-full", 20, -68, 1
+    )  # reuses it
     _solve._QUIET_CACHE.clear()
-    t3, x3 = model("EPSGpair", 5, 5.3, 90, 3, "active-full", 20, -68, 1)  # recomputes
+    t3, x3 = model(
+        "EPSGpair", 5, 5.3, 90, 3, "active-full", 20, -68, 1
+    )  # recomputes
     np.testing.assert_array_equal(t2, t3)
     np.testing.assert_array_equal(x2, x3)
 
@@ -184,8 +240,8 @@ def test_stop_on_spike_truncates_the_full_run(model, axon):
     te, xe = model(*args, stop_on_spike=10)
     assert te[-1] < 20 and np.isclose(xe[-1, axon] - xe[-1, 0], 10)
     # same accepted steps as the full run until the step where the spike is found
-    np.testing.assert_array_equal(te[:-1], t[:len(te) - 1])
-    np.testing.assert_array_equal(xe[:-1], x[:len(te) - 1])
+    np.testing.assert_array_equal(te[:-1], t[: len(te) - 1])
+    np.testing.assert_array_equal(xe[:-1], x[: len(te) - 1])
     # and the first sample above the factor in the full run comes right after
     first = np.argmax(x[:, axon] - x[:, 0] > 10)
     assert t[first - 1] <= te[-1] <= t[first]
@@ -212,19 +268,35 @@ def test_parallel_runs_match_serial():
     from msoaxon._parallel import process_pool
     from msoaxon.coincidence import threshold_curve
 
-    serial = binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=1)
-    assert binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=2) == serial
+    serial = binary_search(
+        "EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=1
+    )
+    assert (
+        binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, workers=2)
+        == serial
+    )
     curve = threshold_curve("two", [0.0, 0.2], workers=1)
     with process_pool(2) as pool:  # one pool reused across calls
-        assert binary_search("EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, executor=pool) == serial
-        np.testing.assert_array_equal(threshold_curve("two", [0.0, 0.2], executor=pool), curve)
+        assert (
+            binary_search(
+                "EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, executor=pool
+            )
+            == serial
+        )
+        np.testing.assert_array_equal(
+            threshold_curve("two", [0.0, 0.2], executor=pool), curve
+        )
 
 
 def test_smallest_firing():
     from msoaxon._bisect import smallest_firing
 
-    assert smallest_firing(lambda x: x >= 3.0, 1.0, 100.0, 1e-6) == pytest.approx(3.0, rel=1e-6)
-    assert smallest_firing(lambda x: x >= 3.0, 1.0, 100.0, 1e-6) >= 3.0  # returns a firing value
+    assert smallest_firing(
+        lambda x: x >= 3.0, 1.0, 100.0, 1e-6
+    ) == pytest.approx(3.0, rel=1e-6)
+    assert (
+        smallest_firing(lambda x: x >= 3.0, 1.0, 100.0, 1e-6) >= 3.0
+    )  # returns a firing value
     assert smallest_firing(lambda x: False, 1.0, 100.0, 1e-3) == np.inf
     # the ceiling bounds the doubling: 64 is tested, 128 exceeds 100, so 90 is never reached
     assert smallest_firing(lambda x: x >= 90.0, 1.0, 100.0, 1e-3) == np.inf
@@ -248,6 +320,7 @@ def _smooth_response(threshold, level=10.0):
         calls.append(x)
         peak = level * (x / threshold) ** 12
         return peak >= level, min(peak, level)
+
     return respond, calls
 
 
@@ -257,12 +330,15 @@ def test_smallest_crossing_keeps_bisections_guarantee(threshold):
 
     respond, calls = _smooth_response(threshold)
     hi = smallest_crossing(respond, 50.0, 2000.0, 1e-4, 10.0)
-    assert threshold <= hi <= threshold * (1 + 1e-4)  # spikes, and within rel_tol
+    assert (
+        threshold <= hi <= threshold * (1 + 1e-4)
+    )  # spikes, and within rel_tol
     n_bisect = [0]
 
     def fires(x):
         n_bisect[0] += 1
         return x >= threshold
+
     smallest_firing(fires, 50.0, 2000.0, 1e-4)
     assert len(calls) < n_bisect[0]  # and in fewer runs than bisection
 
@@ -278,8 +354,13 @@ def test_crossing_works_in_either_direction():
     # window() searches delay, where the spiking side is the smaller value
     from msoaxon._bisect import crossing
 
-    def respond(d):  # the peak falls smoothly through 10 as the delay passes 0.1
+    def respond(
+        d,
+    ):  # the peak falls smoothly through 10 as the delay passes 0.1
         peak = 10.0 * np.exp(-(d - 0.1) * 8)
         return peak >= 10.0, min(peak, 10.0)
-    far, near = crossing(respond, 1.0, 0.0, lambda n, y: 1e-4, 10.0, [(1.0, respond(1.0)[1])])
+
+    far, near = crossing(
+        respond, 1.0, 0.0, lambda n, y: 1e-4, 10.0, [(1.0, respond(1.0)[1])]
+    )
     assert near <= 0.1 <= far and far - near <= 1e-4

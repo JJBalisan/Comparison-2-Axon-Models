@@ -62,7 +62,7 @@ def zinf(V):
 
 
 def ainf(V):
-    """h activation: Baumann et al 2013."""
+    """Activation of the h current: Baumann et al 2013."""
     return 1.0 / (1.0 + np.exp(0.1 * (V + 80.4)))
 
 
@@ -85,12 +85,16 @@ def tauh(V):
 
 def taup(V):
     """KHT activation: Rothman & Manis 2003, 22 C adjusted to 35 C."""
-    return _P_TEMP * (100 / (4 * np.exp((V + 60) / 32) + 5 * np.exp(-(V + 60) / 22)) + 5)
+    return _P_TEMP * (
+        100 / (4 * np.exp((V + 60) / 32) + 5 * np.exp(-(V + 60) / 22)) + 5
+    )
 
 
 def tauw(V):
     """KLT activation: Mathews et al 2010."""
-    return 21.5 / (6 * np.exp((V + 60) / 7) + 24 * np.exp(-(V + 60) / 50.6)) + 0.35
+    return (
+        21.5 / (6 * np.exp((V + 60) / 7) + 24 * np.exp(-(V + 60) / 50.6)) + 0.35
+    )
 
 
 def tauz(V):
@@ -99,8 +103,8 @@ def tauz(V):
 
 
 def taua(V):
-    """h activation: Baumann et al 2013, 32 C adjusted to 35 C."""
-    return _A_TEMP * (79 + 417 * np.exp(-(V + 61.5) ** 2 / 800))
+    """Activation of the h current: Baumann et al 2013, 32 C adjusted to 35 C."""
+    return _A_TEMP * (79 + 417 * np.exp(-((V + 61.5) ** 2) / 800))
 
 
 # --- Conductance fractions at rest -----------------------------------------------
@@ -122,27 +126,37 @@ KLT_FRAC, H_FRAC, NA_FRAC = _fractions()
 # membrane surface area [um^2]; conical frustum for the tapered AIS, inner area for
 # myelinated internodes. The 1.66/3 term is reproduced as written in Constants.m
 # (likely meant 0.66/2) because the stored Area.mat was built from it.
-SA = np.concatenate([
-    [8750.0,
-     np.pi * (1.64 / 2 + 0.66 / 2) * np.sqrt((1.64 / 2 - 1.66 / 3) ** 2 + 10 ** 2),
-     np.pi * 10 * 0.66],
-    _alternating(np.pi * 100 * 0.66, np.pi * 1 * 0.66),
-])
+SA = np.concatenate(
+    [
+        [
+            8750.0,
+            np.pi
+            * (1.64 / 2 + 0.66 / 2)
+            * np.sqrt((1.64 / 2 - 1.66 / 3) ** 2 + 10**2),
+            np.pi * 10 * 0.66,
+        ],
+        _alternating(np.pi * 100 * 0.66, np.pi * 1 * 0.66),
+    ]
+)
 SA_CM = SA * 1e-8  # [cm^2]
 AREA_RATIO = SA_CM / SA_CM[0]
 
 # compartment length [um]; soma treated as a cylinder as long as the sphere's diameter
-L = np.concatenate([[np.sqrt(8750 / np.pi), 10.0, 10.0], _alternating(100.0, 1.0)])
+L = np.concatenate(
+    [[np.sqrt(8750 / np.pi), 10.0, 10.0], _alternating(100.0, 1.0)]
+)
 L_CM = L * 1e-4  # [cm]
 
 # cross-sectional area [um^2], every compartment treated as a cylinder with the same SA
 R_CYL = SA / (2 * np.pi * L)
-XA = np.pi * R_CYL ** 2
+XA = np.pi * R_CYL**2
 XA_CM = XA * 1e-8  # [cm^2]
 
 
 # --- Coupling constants (Coupling.mat) ----------------------------------------------
-_coupling = json.loads((Path(__file__).parent / "data" / "coupling.json").read_text())
+_coupling = json.loads(
+    (Path(__file__).parent / "data" / "coupling.json").read_text()
+)
 COUPLING1 = np.array(_coupling["coupling1"])  # forward, length 44, index node-2
 COUPLING2 = np.array(_coupling["coupling2"])  # backward
 
