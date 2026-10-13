@@ -5,6 +5,19 @@ package is the reference: a release pins the numbers the analysis produces,
 and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least.
 
+## Unreleased
+
+### Tests
+
+- A slow regression test pins all 28 EPSG-pair thresholds of the jpg grid
+  (`making_threshold_graphs.py --only EPSGpair --jpg-grid`: delays 0-0.6
+  ms, nodes 3 and 5, both models) exactly, as multiples of q = 150/128,
+  guarding `threshold.binary_search`'s halving output. It replaces the test
+  that pinned two of them. The table also records each point's value in
+  the repo's MATLAB jpgs: 20 of 28 match and the other 8 are one output
+  (2q) away, as history rather than a requirement. The script's EPSG-pair
+  grid moved into `epsgpair_grid()` so the test runs the same grid.
+
 ## 1.2.0 (13 Oct 2026)
 
 ### Changed
