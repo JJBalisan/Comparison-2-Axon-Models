@@ -4,6 +4,7 @@ Also the threshold search, plotting and the combine_all script.
 """
 
 import pathlib
+import runpy
 import subprocess
 import sys
 
@@ -137,16 +138,79 @@ def test_spiking_reset_carries_across_columns_mult():
     np.testing.assert_array_equal(s[:, 2], [0, 0, 0, 1])
 
 
-def test_epsgpair_thresholds_match_repo_jpg():
-    """Delays 0 and 0.3 ms at node 3, as read off the repo's jpg.
+# EPSGpair thresholds on the grid of the repo's EPSGpair_Thresholds_CPT*.jpg
+# (making_threshold_graphs.py --only EPSGpair --jpg-grid), delays 0-0.6 ms.
+# The halving search only returns multiples of Q, so its output is pinned
+# exactly: the closest true threshold to any probe is 8.5e-4 relative away,
+# against ~1e-14 drift across platforms and modes. The jpg column is the
+# MATLAB value read off the plot, kept as history; 20 of 28 match and the
+# other 8 are one output (2Q) away (PYTHON.md, "Validation").
+# node, model, delay [ms], threshold / Q, jpg / Q, match
+JPG_GRID = [
+    (3, "multi", 0.0, 41, 41, True),
+    (3, "multi", 0.1, 43, 43, True),
+    (3, "multi", 0.2, 47, 47, True),
+    (3, "multi", 0.3, 55, 55, True),
+    (3, "multi", 0.4, 71, 71, True),
+    (3, "multi", 0.5, 81, 81, True),
+    (3, "multi", 0.6, 81, 83, False),  # the plateau, 94.9 vs 97.3
+    (3, "two", 0.0, 41, 41, True),
+    (3, "two", 0.1, 41, 41, True),
+    (3, "two", 0.2, 47, 45, False),
+    (3, "two", 0.3, 55, 55, True),
+    (3, "two", 0.4, 75, 73, False),
+    (3, "two", 0.5, 81, 81, True),
+    (3, "two", 0.6, 81, 81, True),
+    (5, "multi", 0.0, 39, 39, True),
+    (5, "multi", 0.1, 39, 41, False),
+    (5, "multi", 0.2, 43, 43, True),
+    (5, "multi", 0.3, 51, 51, True),
+    (5, "multi", 0.4, 65, 65, True),
+    (5, "multi", 0.5, 77, 77, True),
+    (5, "multi", 0.6, 77, 77, True),
+    (5, "two", 0.0, 37, 37, True),
+    (5, "two", 0.1, 39, 39, True),
+    (5, "two", 0.2, 41, 43, False),  # one step low at four delays
+    (5, "two", 0.3, 49, 51, False),
+    (5, "two", 0.4, 67, 69, False),
+    (5, "two", 0.5, 73, 75, False),
+    (5, "two", 0.6, 75, 75, True),
+]
 
-    Both models read 41q and 55q off EPSGpair_Thresholds_CPT3.jpg.
-    """
-    multi, two = threshold_mod.binary_search(
-        "EPSGpair", 2, 3, 10, 150, epsg_pair_dt=0.3, rounded=False
+
+def test_jpg_grid_table_records_the_matlab_comparison():
+    assert len(JPG_GRID) == 28
+    assert all(match == (q == jpg) for *_, q, jpg, match in JPG_GRID)
+    assert sum(match for *_, match in JPG_GRID) == 20
+    assert all(abs(q - jpg) in (0, 2) for *_, q, jpg, _ in JPG_GRID)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("node", [3, 5])
+def test_epsgpair_jpg_grid_thresholds(node):
+    script = runpy.run_path(
+        str(REPO / "scripts" / "making_threshold_graphs.py")
     )
-    assert [round(v / Q) for v in multi] == [41, 55]
-    assert [round(v / Q) for v in two] == [41, 55]
+    _, kw = script["epsgpair_grid"](jpg_grid=True)
+    _, factor, max_I, *_ = script["SWEEPS"]["EPSGpair"]
+    rows = [r for r in JPG_GRID if r[0] == node]
+    n = len(rows) // 2  # the jpg grid's first 7 points
+    multi, two = threshold_mod.binary_search(
+        "EPSGpair", n, node, factor, max_I, workers=4, **kw
+    )
+    got = [
+        (node, model, round(d, 1), v / Q)
+        for model, values in (("multi", multi), ("two", two))
+        for d, v in zip(
+            (
+                threshold_mod.sweep_x("EPSGpair", i, kw["epsg_pair_dt"])
+                for i in range(1, n + 1)
+            ),
+            values,
+            strict=True,
+        )
+    ]
+    assert got == [r[:4] for r in rows]
 
 
 def test_binary_search_rounding_and_ceiling():

@@ -25,6 +25,25 @@ SWEEPS = {
 }
 
 
+def epsgpair_grid(jpg_grid: bool) -> tuple[int, dict[str, float | bool]]:
+    """Returns the EPSGpair sweep's grid.
+
+    tests/test_coverage.py pins the jpg grid's thresholds through this.
+
+    Args:
+        jpg_grid: Use the grid the repo's EPSGpair_Thresholds*.jpg were
+            made on (11 points 0.1 ms apart, unrounded) instead of
+            BinarySearch.m's.
+
+    Returns:
+        (n_points, keywords), the keywords being binary_search's
+        epsg_pair_dt and rounded.
+    """
+    if jpg_grid:
+        return 11, {"epsg_pair_dt": 0.1, "rounded": False}
+    return SWEEPS["EPSGpair"][0], {"epsg_pair_dt": 1 / 25, "rounded": True}
+
+
 def main() -> None:
     """Parses the command line and runs the threshold sweeps."""
     ap = argparse.ArgumentParser(
@@ -78,9 +97,8 @@ def run(
         n, factor, max_I, title, xlabel = SWEEPS[stim]
         kw, dt = {}, 1 / 25
         if stim == "EPSGpair":
-            dt = 0.1 if a.jpg_grid else dt
-            n = 11 if a.jpg_grid else n
-            kw = {"epsg_pair_dt": dt, "rounded": not a.jpg_grid}
+            n, kw = epsgpair_grid(a.jpg_grid)
+            dt = kw["epsg_pair_dt"]
         n = min(n, a.points) if a.points else n
         x_values = np.array(
             [threshold.sweep_x(stim, i, dt) for i in range(1, n + 1)]
