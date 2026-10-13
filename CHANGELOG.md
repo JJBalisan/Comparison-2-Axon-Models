@@ -9,16 +9,38 @@ minor version at least.
 
 ### Changed
 
+- The predictive (B4) search no longer bisects right after a prediction
+  overshoots: it probes a quarter of the bracket back from the overshoot
+  (`_bisect.HEDGE`), which usually lands just short of the threshold and
+  gives the next prediction a close point. The bilateral-dendrite threshold
+  at 0.3 ms delay takes 13 runs instead of 17 (bisection: 15); the twelve
+  benchmark thresholds take 125 instead of 145, and none takes more. The
+  twelve windows of coincidence_window.py take 113 instead of 120, though
+  one (45-compartment, model EPSG, 3%) takes 13 instead of 11.
+  Thresholds and windows move within their search tolerances (benchmark
+  thresholds by at most 3.2e-5 relative, rel_tol 1e-4; the twelve windows
+  of coincidence_window.py by at most 0.08 us, delay_tol 0.1 us); the
+  golden traces and single runs are unchanged (#18).
+- The settled stop computes only the voltage derivatives it checks
+  (`multi._dv`, `two._dv`), not the whole right-hand side. In exact mode a
+  check costs about 20 µs instead of 81 µs (45-CPT) and 4 µs instead of
+  13 µs (2-CPT). The settled checks fall from 11% to 3% of the 45-CPT
+  BinarySearch.m ramp point (factor 30), which runs about 7% faster; the
+  2-CPT ramp point gains about 3% and an EPSG-pair threshold search about
+  1%. Event values, stop times, trajectories, thresholds and run counts are
+  identical. `_rhs` itself is unchanged. Fast mode keeps slicing the Rust
+  right-hand side: all its settled checks cost under 2% of that ramp point,
+  too little for a Rust dV-only entry point to save a measurable amount.
 - `somatic.rheobase` uses the predictive (B4) search
   (`_bisect.smallest_crossing`) instead of yes/no bisection. Near rheobase
   the multi and two step responses rise smoothly through the 10 mV
   criterion (9.96 mV at 0.9999x, 10.02 at 1.00005x; the spike takes off
-  1-2% above), as the EPSG pairs do: rheobase takes 10 runs instead of 15
-  (multi) and 11 instead of 15 (two). With KLT blocked the response is all
+  1-2% above), as the EPSG pairs do: with the overshoot hedge above,
+  rheobase takes 10 runs instead of 15 for both multi and two. With KLT blocked the response is all
   or none (0.3 mV just below, a 15 mV spike just above); there the search
   makes exactly bisection's 19 runs, to the same value. Rheobase moves
   within rel_tol (multi 3784.180 -> 3784.101 pA, -2.1e-5; two 3845.947 ->
-  3846.015 pA, +1.7e-5; KLT blocked unchanged), and rheobase now depends on
+  3845.990 pA, +1.1e-5; KLT blocked unchanged), and rheobase now depends on
   the search, so this is a minor version (#19).
 
 ### Added

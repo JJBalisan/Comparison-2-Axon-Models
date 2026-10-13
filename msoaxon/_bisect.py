@@ -18,6 +18,10 @@ import numpy as np
 
 Response = Callable[[float], tuple[bool, float]]
 
+# after a prediction spikes, crossing probes this fraction of the bracket
+# back from it (issue #18)
+HEDGE = 0.25
+
 
 def smallest_firing(
     fires: Callable[[float], bool],
@@ -85,6 +89,17 @@ def crossing(
     outside the bracket, or when three probes in a row landed on the
     same side without halving the bracket.
 
+    A prediction that spikes has overshot, and since it adds no
+    non-spiking point the next prediction is no better. Bisecting then
+    probes far below a boundary that usually sits just under the
+    overshoot, and the search alternates overshoot, midpoint, overshoot,
+    each pair barely halving the bracket (issue #18: 17 runs against
+    bisection's 15). So the step after an overshoot probes a quarter of
+    the bracket back from it (HEDGE) instead of at the midpoint: that
+    run usually lands just short of the boundary and gives the next
+    prediction a close point. The stall test measures that step against
+    the bracket it split, not the quarter left.
+
     Args:
         respond: respond(x) -> (spiked, peak).
         x_no: A value that doesn't spike; it may be the larger one.
@@ -100,16 +115,22 @@ def crossing(
     pts = list(points)
     f, finv = (np.log, np.exp) if log else (float, float)
     same, last, mark = 0, None, abs(x_yes - x_no)
+    overshot = False  # the last probe was a prediction, and it spiked
     while abs(x_yes - x_no) > tol(x_no, x_yes):
         lo, hi, t = min(x_no, x_yes), max(x_no, x_yes), 0.4 * tol(x_no, x_yes)
-        x = _predict(pts, level, f, finv)
+        x, split, predicted = _predict(pts, level, f, finv), None, False
         if x is None or not lo < x < hi or (same >= 3 and hi - lo > mark / 2):
-            x, same, mark = (lo + hi) / 2, 0, (hi - lo) / 2
+            same, mark = 0, (hi - lo) / 2
+            if overshot:  # just short of the overshoot, not the midpoint
+                x, split = x_yes - HEDGE * (x_yes - x_no), hi - lo
+            else:
+                x = (lo + hi) / 2
         elif hi - lo <= 2 * t:
             x = (lo + hi) / 2
         else:
-            x = min(max(x, lo + t), hi - t)
+            x, predicted = min(max(x, lo + t), hi - t), True
         spiked, peak = respond(x)
+        overshot = predicted and spiked
         if spiked:
             x_yes = x
         else:
@@ -117,7 +138,7 @@ def crossing(
             pts.append((x, peak))
         same = same + 1 if spiked == last else 1
         if same == 1:
-            mark = abs(x_yes - x_no)
+            mark = abs(x_yes - x_no) if split is None else split
         last = spiked
     return x_no, x_yes
 
