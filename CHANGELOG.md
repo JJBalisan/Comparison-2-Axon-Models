@@ -5,7 +5,9 @@ package is the reference: a release pins the numbers the analysis produces,
 and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least.
 
-## Unreleased
+## 1.2.1 (13 Oct 2026)
+
+Tests and housekeeping only; results are unchanged.
 
 ### Tests
 
@@ -17,6 +19,17 @@ minor version at least.
   the repo's MATLAB jpgs: 20 of 28 match and the other 8 are one output
   (2q) away, as history rather than a requirement. The script's EPSG-pair
   grid moved into `epsgpair_grid()` so the test runs the same grid.
+
+### Notes
+
+- 1.2.0's "13 runs instead of 11" for the 45-compartment, model-EPSG 3%
+  window counts the delay search's probes; counting `window()`'s
+  `max_delay` probe as well gives 14. #41 tracks whether the hedge should
+  apply to that search.
+- `msoAxon.m~`, a tracked editor backup that differs from `msoAxon.m`, is
+  kept as part of the historical record (an earlier draft of the 45-CPT
+  model); README.md now says so, and `*~` is ignored so no new backups get
+  committed (#45).
 
 ## 1.2.0 (13 Oct 2026)
 

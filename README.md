@@ -7,6 +7,7 @@ it was ported from, kept unchanged; the Python no longer has to match them.
 45-compartment model (needs cargo), which makes its runs and searches about
 2.7 times faster; without it the package runs on numpy alone. See "Fast mode"
 in PYTHON.md for `mode="exact"`/`"fast"` and the `DriftWarning`.
+`msoAxon.m~` is an earlier draft of `msoAxon.m`, kept as part of that record.
 
 Combine_all Inputs
 
