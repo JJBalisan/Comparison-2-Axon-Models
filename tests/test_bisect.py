@@ -241,12 +241,19 @@ def test_crossing_on_a_smooth_boundary_takes_as_many_runs_as_before(power):
 
 
 @pytest.mark.parametrize(
-    "threshold, runs", [(49.9, 7), (50.0, 5), (300.0, 9), (1500.0, 11)]
+    "threshold, runs",
+    [(3.0, 13), (37.0, 10), (49.9, 8), (60.0, 7), (300.0, 11)],
 )
 def test_smallest_crossing_on_a_smooth_boundary_takes_as_many_runs_as_before(
     threshold, runs
 ):
-    fake = Fake(threshold)
+    # not the power law of Fake: in log x its predictions are exact, land on
+    # the threshold itself, and the count then turns on the last bit (it
+    # differs between platforms); this peak's never are
+    def peak(x):
+        return LEVEL * np.exp(-3 * (1 - x / threshold))
+
+    fake = Fake(threshold, peak=peak)
     _bisect.smallest_crossing(fake.respond, 50.0, 2000.0, 1e-4, LEVEL)
     assert len(fake.calls) == runs
 
