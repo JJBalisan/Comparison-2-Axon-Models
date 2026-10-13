@@ -542,6 +542,47 @@ def membrane(
     return m
 
 
+def _dv(
+    t: float,
+    x: np.ndarray,
+    stim_type: str,
+    s: types.SimpleNamespace,
+    input_node: int,
+    mem: types.SimpleNamespace,
+    morph: types.SimpleNamespace = LUMPED,
+    input_node2: int | None = None,
+) -> np.ndarray:
+    """Computes the voltage derivatives alone: _rhs's first n entries.
+
+    For the settled stop, which needs only the sign of every dV/dt: it
+    skips the gates' derivatives, most of _rhs's exp calls. A copy of
+    _rhs's voltage block in the same float order rather than a helper
+    _rhs calls, which would cost every right-hand side call about a
+    microsecond; tests/test_settled.py checks the two agree bit for bit,
+    so keep them in step. Which gates evolve doesn't matter here: the
+    currents use every gate's value.
+
+    Returns:
+        dV/dt per compartment [mV/ms].
+    """
+    V, m, h, p, w, z, a = x.reshape(7, morph.n)
+    INa = mem.g_na * m**4 * (0.993 * h + 0.007) * (V - V_NA)
+    IKHT = morph.g_kht * p * (V - V_K)
+    IKLT = mem.g_klt * w**4 * z * (V - V_K)
+    Ih = morph.g_h * a * (V - V_H)
+    Ilk = morph.g_lk * (V - mem.vlk)
+    total = INa + IKHT + IKLT + Ih + Ilk
+    if stim_type == "EPSGbilateral":
+        for k, iext in bilateral_current(
+            t, V, s, input_node - 1, input_node2 - 1, morph.sa
+        ):
+            total[k] += iext
+    else:
+        k, iext = external_current(t, V, stim_type, s, input_node, morph.sa)
+        total[k] += iext
+    return -(total + axial_current(V, morph)) / morph.cap
+
+
 def _rhs(
     t: float,
     x: np.ndarray,
@@ -722,12 +763,18 @@ def mso_axon(
             stim_type, s, input_node, active, mem, morph, input_node2
         )
         quiet_rhs = _fast.build("none", s, input_node, active, mem, morph)
+        # the settled check slices the Rust RHS: at about 3.5 us a call it
+        # costs under 2% of a ramp search, so a dV-only port would not pay
+        dv = lambda t, x: rhs(t, x)[:n]  # noqa: E731
     else:
         rhs = lambda t, x: _rhs(  # noqa: E731
             t, x, stim_type, s, input_node, active, mem, morph, input_node2
         )
         quiet_rhs = lambda t, x: _rhs(  # noqa: E731
             t, x, "none", s, input_node, active, mem, morph
+        )
+        dv = lambda t, x: _dv(  # noqa: E731
+            t, x, stim_type, s, input_node, mem, morph, input_node2
         )
     quiet = None
     # unlike two_cpt, step shares the prefix: msoAxon.m switches stimuli on for
@@ -750,6 +797,6 @@ def mso_axon(
         jac_sparsity=morph.jac,
         quiet=quiet,
         stop_event=_common._stops(
-            rhs, node - 1, stop_on_spike, stop_when_settled, stim_type, s, n
+            dv, node - 1, stop_on_spike, stop_when_settled, stim_type, s
         ),
     )

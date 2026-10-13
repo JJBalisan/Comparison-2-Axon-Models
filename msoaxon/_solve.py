@@ -140,9 +140,7 @@ def spike_event(axon_col: int, factor: float) -> Event:
     return event
 
 
-def settled_event(
-    rhs: Rhs, t_off: float, axon_col: int, factor: float, n_v: int
-) -> Event:
+def settled_event(dv: Rhs, t_off: float, axon_col: int, factor: float) -> Event:
     """Returns a terminal event: after t_off, stop once no spike can follow.
 
     Fires at the first time after t_off when axon - soma is below
@@ -162,12 +160,16 @@ def settled_event(
     final state: a spike stop ends with axon - soma at factor, a settled
     stop at or below factor / 2.
 
+    Only the voltage derivatives are needed, so the models pass a
+    function that computes those alone (multi._dv, two._dv), bit for bit
+    the leading entries of their right-hand side.
+
     Args:
-        rhs: The model's right-hand side, f(t, x).
+        dv: The model's voltage derivatives, f(t, x) -> dV/dt for every
+            compartment.
         t_off: When the input stops driving the cell (input_end) [ms].
         axon_col: The state column of the compared compartment.
         factor: The spike criterion: axon - soma [mV].
-        n_v: How many leading state entries are voltages.
 
     Returns:
         An event function for solve_ivp (terminal, rising).
@@ -176,10 +178,7 @@ def settled_event(
     def event(t: float, x: np.ndarray) -> float:
         if t < t_off or x[axon_col] - x[0] >= factor / 2:
             return -1.0
-        dv = np.asarray(
-            rhs(t, x)[:n_v]
-        )  # voltages come first in both models' state
-        return 1.0 if np.all(dv < 0) else -1.0
+        return 1.0 if np.all(np.asarray(dv(t, x)) < 0) else -1.0
 
     event.terminal = True
     event.direction = 1
