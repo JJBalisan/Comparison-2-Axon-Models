@@ -5,7 +5,7 @@ package is the reference: a release pins the numbers the analysis produces,
 and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least.
 
-## Unreleased
+## 1.2.0 (13 Oct 2026)
 
 ### Changed
 
