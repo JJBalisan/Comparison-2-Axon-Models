@@ -7,10 +7,20 @@ minor version at least.
 
 ## Unreleased
 
-A patch release: faster, with results unchanged bit for bit.
-
 ### Changed
 
+- The predictive (B4) search no longer bisects right after a prediction
+  overshoots: it probes a quarter of the bracket back from the overshoot
+  (`_bisect.HEDGE`), which usually lands just short of the threshold and
+  gives the next prediction a close point. The bilateral-dendrite threshold
+  at 0.3 ms delay takes 13 runs instead of 17 (bisection: 15); the twelve
+  benchmark thresholds take 125 instead of 145, and none takes more. The
+  twelve windows of coincidence_window.py take 113 instead of 120, though
+  one (45-compartment, model EPSG, 3%) takes 13 instead of 11.
+  Thresholds and windows move within their search tolerances (benchmark
+  thresholds by at most 3.2e-5 relative, rel_tol 1e-4; the twelve windows
+  of coincidence_window.py by at most 0.08 us, delay_tol 0.1 us); the
+  golden traces, single runs and rheobase are unchanged (#18).
 - The settled stop computes only the voltage derivatives it checks
   (`multi._dv`, `two._dv`), not the whole right-hand side. In exact mode a
   check costs about 20 µs instead of 81 µs (45-CPT) and 4 µs instead of

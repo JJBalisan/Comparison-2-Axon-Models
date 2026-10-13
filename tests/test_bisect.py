@@ -179,6 +179,85 @@ def test_crossing_predicts_a_smooth_boundary_in_few_runs():
     assert len(fake.calls) < len(_midpoints(0.5, 1.0, 1e-6))
 
 
+def _steepening(threshold):
+    """A peak whose log rises ever more steeply into the threshold.
+
+    Like the bilateral-dendrite responses of issue #18: interpolation from
+    below overshoots, each prediction lands just past the threshold, and the
+    next one (no new non-spiking point) is the same, so the search used to
+    alternate overshoot, midpoint, overshoot.
+    """
+    return lambda x: LEVEL * np.exp(-4 * max(1 - x / threshold, 0) ** 0.6)
+
+
+def test_smallest_crossing_after_an_overshoot_probes_just_short_of_it():
+    fake = Fake(94.24, peak=_steepening(94.24))
+    hi = _bisect.smallest_crossing(fake.respond, 50.0, 2000.0, 1e-4, LEVEL)
+    assert 94.24 <= hi <= 94.24 * (1 + 1e-4)
+    spiked = [x >= 94.24 for x in fake.calls]
+    # 50, 76.4 (quiet), 137 and 107 (spike), 91.6, 92.7 (quiet), then the
+    # first prediction inside the bracket, 94.47, overshoots
+    assert spiked[:7] == [False, False, True, True, False, False, True]
+    no, over = fake.calls[5], fake.calls[6]
+    assert fake.calls[7] == pytest.approx(over - _bisect.HEDGE * (over - no))
+    assert not spiked[7]  # just short of the threshold, not the midpoint
+    bisection = Fake(94.24, peak=_steepening(94.24))
+    _bisect.smallest_firing(bisection.fires, 50.0, 2000.0, 1e-4)
+    # was 18, alternating overshoot and midpoint, against bisection's 15
+    assert len(fake.calls) <= len(bisection.calls) == 15
+
+
+def test_crossing_stops_alternating_overshoot_and_midpoint():
+    fake = Fake(0.7, peak=_steepening(0.7))
+    no, yes = _bisect.crossing(
+        fake.respond,
+        0.0,
+        1.0,
+        lambda n, y: 1e-4,
+        LEVEL,
+        [(0.0, _steepening(0.7)(0.0))],
+    )
+    assert no < 0.7 <= yes and yes - no <= 1e-4
+    sides = "".join("Y" if x >= 0.7 else "." for x in fake.calls)
+    assert ".Y.Y.Y.Y" not in sides  # the issue #18 pattern
+    assert len(fake.calls) == 15  # 18 before
+
+
+@pytest.mark.parametrize("power", [4, 6, 8, 12, 20])
+def test_crossing_on_a_smooth_boundary_takes_as_many_runs_as_before(power):
+    # predictions approach a convex power-law peak from below and never
+    # overshoot, so nothing changes
+    fake = Fake(0.7, power=power)
+    no, yes = _bisect.crossing(
+        fake.respond,
+        0.5,
+        1.0,
+        lambda n, y: 1e-6,
+        LEVEL,
+        [(0.5, Fake(0.7, power=power).respond(0.5)[1])],
+    )
+    assert no < 0.7 <= yes and yes - no <= 1e-6
+    assert len(fake.calls) == 6
+
+
+@pytest.mark.parametrize(
+    "threshold, runs",
+    [(3.0, 13), (37.0, 10), (49.9, 8), (60.0, 7), (300.0, 11)],
+)
+def test_smallest_crossing_on_a_smooth_boundary_takes_as_many_runs_as_before(
+    threshold, runs
+):
+    # not the power law of Fake: in log x its predictions are exact, land on
+    # the threshold itself, and the count then turns on the last bit (it
+    # differs between platforms); this peak's never are
+    def peak(x):
+        return LEVEL * np.exp(-3 * (1 - x / threshold))
+
+    fake = Fake(threshold, peak=peak)
+    _bisect.smallest_crossing(fake.respond, 50.0, 2000.0, 1e-4, LEVEL)
+    assert len(fake.calls) == runs
+
+
 def test_crossing_stops_at_once_inside_the_tolerance():
     fake = Fake(0.7)
     assert _bisect.crossing(
