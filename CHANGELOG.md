@@ -21,6 +21,16 @@ minor version at least.
   thresholds by at most 3.2e-5 relative, rel_tol 1e-4; the twelve windows
   of coincidence_window.py by at most 0.08 us, delay_tol 0.1 us); the
   golden traces, single runs and rheobase are unchanged (#18).
+- The settled stop computes only the voltage derivatives it checks
+  (`multi._dv`, `two._dv`), not the whole right-hand side. In exact mode a
+  check costs about 20 µs instead of 81 µs (45-CPT) and 4 µs instead of
+  13 µs (2-CPT). The settled checks fall from 11% to 3% of the 45-CPT
+  BinarySearch.m ramp point (factor 30), which runs about 7% faster; the
+  2-CPT ramp point gains about 3% and an EPSG-pair threshold search about
+  1%. Event values, stop times, trajectories, thresholds and run counts are
+  identical. `_rhs` itself is unchanged. Fast mode keeps slicing the Rust
+  right-hand side: all its settled checks cost under 2% of that ramp point,
+  too little for a Rust dV-only entry point to save a measurable amount.
 
 ## 1.1.0 (12 Oct 2026)
 

@@ -183,6 +183,43 @@ def applied_current(  # noqa: PLR0911
     raise ValueError(f"unknown stimType {stim_type!r}")
 
 
+def _dv(
+    t: float,
+    x: np.ndarray,
+    P: types.SimpleNamespace,
+    stim_type: str,
+    s: types.SimpleNamespace,
+) -> list[float]:
+    """Computes the voltage derivatives alone: _rhs's first two entries.
+
+    For the settled stop, which needs only their signs. A copy of _rhs's
+    current terms in the same float order (see multi._dv for why not a
+    shared helper); tests/test_settled.py checks the two agree bit for
+    bit, so keep them in step.
+
+    Returns:
+        [dV1/dt, dV2/dt] [mV/ms].
+    """
+    V1, V2, w1, h1, w2, m1, m2, h2, p, a1, a2 = x
+    z = P.z_rest
+    IKHT = P.gKHT * p * (V1 - P.VK)
+    INa1 = P.gNa1 * m1**4 * (0.993 * h1 + 0.007) * (V1 - P.ENa) - P.INa0_1
+    Ilk1 = P.glk1 * (V1 - P.Elk)
+    IKLT1 = P.gKLT1 * w1**4 * z * (V1 - P.EK) - P.IKLT0_1
+    Ih1 = P.gh1 * a1 * (V1 - P.Vh) - P.Ih0_1
+    Ilk2 = P.glk2 * (V2 - P.Elk)
+    INa2 = P.gNa2 * m2**4 * (0.993 * h2 + 0.007) * (V2 - P.ENa) - P.INa0_2
+    IKLT2 = P.gKLT2 * w2**4 * z * (V2 - P.EK) - P.IKLT0_2
+    Ih2 = P.gh2 * a2 * (V2 - P.Vh) - P.Ih0_2
+    IC = P.gC * (V1 - V2)
+    Iapp = applied_current(t, V1, stim_type, s)
+    Iapp1, Iapp2 = (Iapp, 0.0) if P.IappLoc == 1 else (0.0, Iapp)
+    return [
+        (-Ilk1 - IKLT1 - IC + Iapp1 - INa1 - Ih1 - IKHT) / P.cap1,
+        (-Ilk2 - IKLT2 + IC + Iapp2 - INa2 - Ih2) / P.cap2,
+    ]
+
+
 def _rhs(
     t: float,
     x: np.ndarray,
@@ -329,6 +366,7 @@ def two_cpt(
             lambda t, x: _rhs(t, x, P, "none", s),
         )
     rhs = lambda t, x: _rhs(t, x, P, stim_type, s)  # noqa: E731
+    dv = lambda t, x: _dv(t, x, P, stim_type, s)  # noqa: E731
     return _solve.integrate(
         rhs,
         x0,
@@ -339,6 +377,6 @@ def two_cpt(
         max_step=max_step,
         quiet=quiet,
         stop_event=_common._stops(
-            rhs, 1, stop_on_spike, stop_when_settled, stim_type, s, 2
+            dv, 1, stop_on_spike, stop_when_settled, stim_type, s
         ),
     )
