@@ -5,6 +5,23 @@ package is the reference: a release pins the numbers the analysis produces,
 and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least.
 
+## Unreleased
+
+### Changed
+
+- The predictive (B4) search no longer bisects right after a prediction
+  overshoots: it probes a quarter of the bracket back from the overshoot
+  (`_bisect.HEDGE`), which usually lands just short of the threshold and
+  gives the next prediction a close point. The bilateral-dendrite threshold
+  at 0.3 ms delay takes 13 runs instead of 17 (bisection: 15); the twelve
+  benchmark thresholds take 125 instead of 145, and none takes more. The
+  twelve windows of coincidence_window.py take 113 instead of 120, though
+  one (45-compartment, model EPSG, 3%) takes 13 instead of 11.
+  Thresholds and windows move within their search tolerances (benchmark
+  thresholds by at most 3.2e-5 relative, rel_tol 1e-4; the twelve windows
+  of coincidence_window.py by at most 0.08 us, delay_tol 0.1 us); the
+  golden traces, single runs and rheobase are unchanged (#18).
+
 ## 1.1.0 (12 Oct 2026)
 
 ### Added
