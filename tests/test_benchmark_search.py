@@ -1,7 +1,7 @@
 """benchmark_search.py --check must compare every yes/no the searches make.
 
-The EPSG-pair, bilateral-dendrite and window searches decide through
-_dispatch.response, not spikes(), so
+The EPSG-pair, bilateral-dendrite, window and rheobase searches decide
+through _dispatch.response, not spikes(), so
 --check has to wrap response too or it reports "mismatches 0" without having
 compared anything. A fake model whose spike decision depends on the settled
 stop must be counted as a mismatch on both paths.
@@ -118,7 +118,7 @@ def _epsg_pair_decision():
 
 
 def _spikes_decision():
-    """One yes/no through _dispatch.spikes, as rheobase and BinarySearch."""
+    """One yes/no through _dispatch.spikes, as the BinarySearch.m port."""
     return _dispatch.spikes(
         "multi", "step", 0.0, 1.0, 100.0, 3, T_END, -68.0, 1, factor=FACTOR
     )

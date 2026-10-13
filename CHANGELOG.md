@@ -5,6 +5,28 @@ package is the reference: a release pins the numbers the analysis produces,
 and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least.
 
+## Unreleased
+
+### Changed
+
+- `somatic.rheobase` uses the predictive (B4) search
+  (`_bisect.smallest_crossing`) instead of yes/no bisection. Near rheobase
+  the multi and two step responses rise smoothly through the 10 mV
+  criterion (9.96 mV at 0.9999x, 10.02 at 1.00005x; the spike takes off
+  1-2% above), as the EPSG pairs do: rheobase takes 10 runs instead of 15
+  (multi) and 11 instead of 15 (two). With KLT blocked the response is all
+  or none (0.3 mV just below, a 15 mV spike just above); there the search
+  makes exactly bisection's 19 runs, to the same value. Rheobase moves
+  within rel_tol (multi 3784.180 -> 3784.101 pA, -2.1e-5; two 3845.947 ->
+  3846.015 pA, +1.7e-5; KLT blocked unchanged), and rheobase now depends on
+  the search, so this is a minor version (#19).
+
+### Added
+
+- `somatic.response()`: a step run's (spiked, peak axon - soma).
+- `descent=` on `_bisect.smallest_crossing`: the first step down when the
+  guess spikes (default 1.25, unchanged; rheobase uses 2) (#19).
+
 ## 1.1.0 (12 Oct 2026)
 
 ### Added

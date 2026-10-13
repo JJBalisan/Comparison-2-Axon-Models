@@ -49,7 +49,7 @@ Code that isn't a port of a MATLAB file:
 | `msoaxon/_solve.py` | the ode15s stand-in: segmented BDF, pre-stimulus cache, spike stop |
 | `msoaxon/_dispatch.py` | `run_model` / `spikes`: one entry point for `model="multi"` or `"two"` |
 | `msoaxon/_parallel.py` | `map_tasks`; pass one `executor=` to reuse a process pool across calls |
-| `msoaxon/_bisect.py` | the bracketing bisection behind `coincidence.threshold` and `somatic.rheobase` |
+| `msoaxon/_bisect.py` | the predictive search behind `coincidence.threshold`, `coincidence.window` and `somatic.rheobase` |
 | `msoaxon/coincidence.py` | Myoga-style coincidence windows; `stim=`, `input_node=`, `input_node2=` pick the input sites, `model_kw` passes model options such as `morph` |
 | `msoaxon/somatic.py` | rheobase and the Scott et al. 2005 somatic spike amplitude |
 | `msoaxon/measure.py` | input resistance and time constant from a current step; soma trace on a grid |
@@ -154,7 +154,7 @@ these are history; they are not reverted.
 - **`Combine_all.m`:** the 2-CPT spike count read column 1 (soma minus soma, always 0); it now reads the axon column. The second `TwoCpt` run used identical arguments; it now uses node 5 so the "Node 5" panels mean what they say. The default `ramp` stop was equal to start, a zero-length ramp; it's now 5.5.
 - **`Graphing.m`:** the `Input` panel reuses the model's own stimulus function instead of a hand-copied version that indexed 2-CPT voltages with multi-compartment time steps. The `z1`/`a` line fits (broken: `graph.graph.tEnd`, length mismatch) were not ported.
 - **EPSGpair threshold x-axis** shows the delay between the two EPSGs, like the jpgs do, rather than the second EPSG's absolute time (`5 + (i-1)/25`) that `Making_Threshold_graphs.m` plots.
-- **Thresholds and coincidence windows** come from the predictive search in `msoaxon/_bisect.py`, not a MATLAB-style bisection. Full reruns against plain bisection move windows by under 0.4 µs and thresholds by under 1e-4 (relative); one rounded value changed (Goldwyn, Myoga EPSG: 183 → 182 µs). These values are the reference. Single runs, rheobase and the somatic amplitudes never depended on the search.
+- **Thresholds and coincidence windows** come from the predictive search in `msoaxon/_bisect.py`, not a MATLAB-style bisection. Full reruns against plain bisection move windows by under 0.4 µs and thresholds by under 1e-4 (relative); one rounded value changed (Goldwyn, Myoga EPSG: 183 → 182 µs). These values are the reference. Single runs never depended on the search. Rheobase has used it since issue #19: the multi and two step responses rise smoothly through 10 mV like the EPSG pairs, so it takes 10–11 runs instead of 15 and moves by under 5e-5 (relative); with KLT blocked the response is all or none and the search makes bisection's runs, to the same value.
 - **Settled stop:** searches end a non-spiking run once the input is over and no spike can follow (`STOP_WHEN_SETTLED` in `msoaxon/_dispatch.py`; the single-run models leave it off). It stays: in the search benchmark it changed 0 of 365 spike decisions, for about 6% less solver time.
 - **`fitExp.m`** was not ported and won't be. It contains an unresolved merge conflict and fits 301 samples against a 49-point x-axis, and with MATLAB compatibility no longer a goal nothing here needs the fit. The `.m` file stays as part of the historical record.
 

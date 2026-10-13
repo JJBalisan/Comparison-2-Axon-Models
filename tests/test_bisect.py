@@ -133,6 +133,73 @@ def test_smallest_crossing_falls_back_when_peaks_say_nothing():
     assert 300.0 <= hi <= 300.0 * (1 + 1e-4)
 
 
+# --- rheobase: smallest_crossing on step responses (issue #19) ---------------
+
+RHEOBASE = 3784.1  # the 45-compartment model's [pA]
+
+
+def _step_peak(threshold):
+    """Like the multi and two step responses: smooth up to 10 mV."""
+    return lambda x: LEVEL * np.exp(-6 * (1 - x / threshold))
+
+
+def _all_or_none(threshold):
+    """Like KLT-blocked steps: ~0.3 mV just below, then a spike."""
+    return lambda x: 0.3 * (x / threshold) ** 4
+
+
+def test_smallest_crossing_descent_sets_the_first_step_down():
+    fake = Fake(300.0, peak=_step_peak(300.0))
+    _bisect.smallest_crossing(
+        fake.respond, 2000.0, 1e6, 1e-4, LEVEL, descent=2.0
+    )
+    assert fake.calls[:3] == [2000.0, 0.0, 1000.0]
+    default = Fake(300.0, peak=_step_peak(300.0))
+    _bisect.smallest_crossing(default.respond, 2000.0, 1e6, 1e-4, LEVEL)
+    assert default.calls[:3] == [2000.0, 0.0, 1600.0]  # 1.25, as before
+
+
+def test_smallest_crossing_on_an_all_or_none_response_is_bisection():
+    # the peaks below threshold are tiny and flat, so every prediction falls
+    # outside the bracket: with descent 2 the search makes bisection's runs
+    fake = Fake(199.5, peak=_all_or_none(199.5))
+    hi = _bisect.smallest_crossing(
+        fake.respond, 2000.0, 1e6, 1e-4, LEVEL, descent=2.0
+    )
+    bisection = Fake(199.5)
+    assert _bisect.smallest_firing(bisection.fires, 2000.0, 1e6, 1e-4) == hi
+    assert fake.calls == bisection.calls
+
+
+def test_smallest_crossing_finds_a_smooth_rheobase_in_fewer_runs():
+    fake = Fake(RHEOBASE, peak=_step_peak(RHEOBASE))
+    hi = _bisect.smallest_crossing(
+        fake.respond, 2000.0, 1e6, 1e-4, LEVEL, descent=2.0
+    )
+    assert RHEOBASE <= hi <= RHEOBASE * (1 + 1e-4)
+    bisection = Fake(RHEOBASE)
+    _bisect.smallest_firing(bisection.fires, 2000.0, 1e6, 1e-4)
+    assert len(fake.calls) < len(bisection.calls)
+
+
+def test_rheobase_predicts_from_the_step_responses(monkeypatch):
+    calls = []
+    peak = _step_peak(RHEOBASE)
+
+    def response(model, stim, start, stop, amp, *args, factor, **kw):
+        assert stim == "step" and factor == LEVEL
+        calls.append(amp)
+        assert len(calls) <= MAX_CALLS
+        return amp >= RHEOBASE, LEVEL if amp >= RHEOBASE else peak(amp)
+
+    monkeypatch.setattr(somatic._dispatch, "response", response)
+    rb = somatic.rheobase("two")
+    assert RHEOBASE <= rb <= RHEOBASE * (1 + 1e-4)
+    bisection = Fake(RHEOBASE)
+    _bisect.smallest_firing(bisection.fires, 2000.0, 1e6, 1e-4)
+    assert len(calls) < len(bisection.calls)
+
+
 # --- crossing: narrowing a known bracket --------------------------------------
 
 
@@ -209,12 +276,12 @@ def test_threshold_reports_a_cell_that_fires_at_rest(monkeypatch):
 def test_rheobase_reports_a_cell_that_fires_at_rest(monkeypatch):
     calls = []
 
-    def fires(model, amp, *args, **kw):
+    def response(model, amp, *args, **kw):
         calls.append(amp)
         assert len(calls) <= MAX_CALLS
-        return True
+        return True, LEVEL
 
-    monkeypatch.setattr(somatic, "fires", fires)
+    monkeypatch.setattr(somatic, "response", response)
     with pytest.raises(_bisect.FiresWithoutInputError) as err:
         somatic.rheobase("multi", v0=-60.0)
     msg = str(err.value)
