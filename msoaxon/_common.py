@@ -102,18 +102,18 @@ def stimulus(
 
 
 def _stops(
-    rhs: _solve.Rhs,
+    dv: _solve.Rhs,
     axon_col: int,
     stop_on_spike: float | None,
     stop_when_settled: bool,
     stim_type: str,
     s: types.SimpleNamespace,
-    n_v: int,
 ) -> list[_solve.Event] | None:
     """Returns the terminal events for a run: none, the spike stop, or both.
 
-    n_v: how many leading state entries are voltages (2 for two_cpt, n
-    for mso_axon).
+    dv: the model's voltage derivatives, f(t, x) -> dV/dt for every
+    compartment (the leading entries of its right-hand side); only the
+    settled stop uses it.
     """
     if stop_on_spike is None:
         if stop_when_settled:
@@ -126,6 +126,6 @@ def _stops(
         )
         if t_off < s.t_end:
             events.append(
-                _solve.settled_event(rhs, t_off, axon_col, stop_on_spike, n_v)
+                _solve.settled_event(dv, t_off, axon_col, stop_on_spike)
             )
     return events
