@@ -81,6 +81,44 @@ def fires(
     )
 
 
+def response(
+    model: str,
+    I: float,
+    node: int = 3,
+    v0: float = -68.0,
+    mem: types.SimpleNamespace | None = None,
+    *,
+    criterion: coincidence.Criterion = FACTOR,
+) -> tuple[bool, float]:
+    """Runs a 100 ms somatic step like fires(), and says how close it came.
+
+    Args:
+        model: "multi" or "two".
+        I: Step amplitude [pA].
+        node: The compartment compared with the soma, 1-indexed.
+        v0: Initial potential [mV].
+        mem: Channel overrides from multi.membrane(), or None.
+        criterion: The spike criterion (see fires()).
+
+    Returns:
+        (spiked, peak): fires()'s answer, and the largest axon - soma of
+        the run [mV] (about the criterion if it spiked).
+    """
+    return _dispatch.response(
+        model,
+        "step",
+        START,
+        STOP,
+        I,
+        node,
+        T_END,
+        v0,
+        1,
+        mem=mem,
+        factor=_factor(criterion, model, node, v0, mem),
+    )
+
+
 def rheobase(
     model: str,
     node: int = 3,
@@ -91,7 +129,16 @@ def rheobase(
     *,
     criterion: coincidence.Criterion = FACTOR,
 ) -> float:
-    """Finds the smallest 100 ms somatic step that fires, by bisection.
+    """Finds the smallest 100 ms somatic step that fires.
+
+    By the predictive search (_bisect.smallest_crossing), as for the EPSG
+    thresholds: in the multi and two models the step's peak axon - soma
+    rises smoothly through the criterion (9.96 mV at 0.9999 rheobase,
+    10.02 at 1.00005), so a few runs below it predict where it lies,
+    10-11 runs instead of bisection's 15 (issue #19). With KLT blocked the
+    response is all or none (0.3 mV just below rheobase, a 15 mV spike
+    just above): no prediction lands inside the bracket and the search,
+    halving down from `guess` (descent 2), makes exactly bisection's runs.
 
     Args:
         model: "multi" or "two".
@@ -110,11 +157,13 @@ def rheobase(
     """
     factor = _factor(criterion, model, node, v0, mem)
     try:
-        return _bisect.smallest_firing(
-            lambda I: fires(model, I, node, v0, mem, criterion=factor),
+        return _bisect.smallest_crossing(
+            lambda I: response(model, I, node, v0, mem, criterion=factor),
             guess,
             1e6,
             rel_tol,
+            factor,
+            descent=2.0,
         )
     except _bisect.FiresWithoutInputError as e:
         config = _dispatch.describe(model, node, v0, mem)

@@ -1,10 +1,10 @@
 """Searches for the smallest input that fires.
 
-New analysis code: smallest_firing (plain bisection, used by somatic.rheobase)
-and crossing / smallest_crossing (bisection helped by interpolation, used by
-coincidence.threshold and coincidence.window). The MATLAB port's own search
-(threshold._search, BinarySearch.m's halving search) is separate and must stay
-as it is.
+New analysis code: crossing / smallest_crossing (bisection helped by
+interpolation, used by coincidence.threshold, coincidence.window and
+somatic.rheobase) and smallest_firing (plain bisection, the yes/no search
+they are measured against). The MATLAB port's own search (threshold._search,
+BinarySearch.m's halving search) is separate and must stay as it is.
 
 Both searches assume zero input doesn't fire. When their first value fires
 they check that with one run at zero, and raise FiresWithoutInputError if the
@@ -186,18 +186,21 @@ def smallest_crossing(
     ceiling: float,
     rel_tol: float,
     level: float,
+    *,
+    descent: float = 1.25,
 ) -> float:
     """Does smallest_firing with the bisection replaced by prediction.
 
     Starts at `guess` like smallest_firing, but finds the bracket by
     prediction (see crossing) rather than by doubling up or halving
-    towards zero: while everything spikes it steps down (1.25x first,
-    since thresholds usually sit just below the guess, then 2x per
-    step), while nothing does it steps up (to the prediction, at most 2x
-    per step). It gives up with inf past `ceiling` and keeps the same
-    guarantee as smallest_firing; the value differs from
-    smallest_firing's within the tolerance. Like smallest_firing, it tests
-    zero once if `guess` spikes; that run is not used for prediction.
+    towards zero: while everything spikes it steps down (`descent` first,
+    1.25x by default since EPSG thresholds usually sit just below the
+    guess, then 2x per step), while nothing does it steps up (to the
+    prediction, at most 2x per step). It gives up with inf past
+    `ceiling` and keeps the same guarantee as smallest_firing; the value
+    differs from smallest_firing's within the tolerance. Like
+    smallest_firing, it tests zero once if `guess` spikes; that run is
+    not used for prediction.
 
     Args:
         respond: respond(x) -> (spiked, peak).
@@ -205,6 +208,9 @@ def smallest_crossing(
         ceiling: The largest value worth trying.
         rel_tol: The relative width of the final bracket.
         level: The peak at which a run spikes (the criterion).
+        descent: The first step down when `guess` spikes, as a ratio.
+            With 2.0 a response with nothing to predict from (an
+            all-or-none spike) gets exactly smallest_firing's runs.
 
     Returns:
         A value that spikes, with a non-spiking one within rel_tol of
@@ -235,7 +241,7 @@ def smallest_crossing(
         elif (
             lo is None
         ):  # everything spikes: come down, 1.25x first, then halving
-            x = hi / 1.25 if hi == guess else hi / 2
+            x = hi / descent if hi == guess else hi / 2
     _, hi = crossing(
         respond, lo, hi, lambda _, y: rel_tol * y, level, pts, log=True
     )

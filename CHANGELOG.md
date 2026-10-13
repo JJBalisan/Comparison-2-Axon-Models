@@ -20,7 +20,7 @@ minor version at least.
   Thresholds and windows move within their search tolerances (benchmark
   thresholds by at most 3.2e-5 relative, rel_tol 1e-4; the twelve windows
   of coincidence_window.py by at most 0.08 us, delay_tol 0.1 us); the
-  golden traces, single runs and rheobase are unchanged (#18).
+  golden traces and single runs are unchanged (#18).
 - The settled stop computes only the voltage derivatives it checks
   (`multi._dv`, `two._dv`), not the whole right-hand side. In exact mode a
   check costs about 20 µs instead of 81 µs (45-CPT) and 4 µs instead of
@@ -31,6 +31,23 @@ minor version at least.
   identical. `_rhs` itself is unchanged. Fast mode keeps slicing the Rust
   right-hand side: all its settled checks cost under 2% of that ramp point,
   too little for a Rust dV-only entry point to save a measurable amount.
+- `somatic.rheobase` uses the predictive (B4) search
+  (`_bisect.smallest_crossing`) instead of yes/no bisection. Near rheobase
+  the multi and two step responses rise smoothly through the 10 mV
+  criterion (9.96 mV at 0.9999x, 10.02 at 1.00005x; the spike takes off
+  1-2% above), as the EPSG pairs do: with the overshoot hedge above,
+  rheobase takes 10 runs instead of 15 for both multi and two. With KLT blocked the response is all
+  or none (0.3 mV just below, a 15 mV spike just above); there the search
+  makes exactly bisection's 19 runs, to the same value. Rheobase moves
+  within rel_tol (multi 3784.180 -> 3784.101 pA, -2.1e-5; two 3845.947 ->
+  3845.990 pA, +1.1e-5; KLT blocked unchanged), and rheobase now depends on
+  the search, so this is a minor version (#19).
+
+### Added
+
+- `somatic.response()`: a step run's (spiked, peak axon - soma).
+- `descent=` on `_bisect.smallest_crossing`: the first step down when the
+  guess spikes (default 1.25, unchanged; rheobase uses 2) (#19).
 
 ## 1.1.0 (12 Oct 2026)
 
