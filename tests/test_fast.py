@@ -291,8 +291,8 @@ def test_fallback_without_the_extension_is_silent(monkeypatch, no_env):
     assert not _fast.available()
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        assert _fast.resolve(None, True) == "exact"
-        assert _fast.resolve("exact", True) == "exact"
+        assert _fast.resolve(None) == "exact"
+        assert _fast.resolve("exact") == "exact"
         t, _ = multi.mso_axon(
             "EPSGpair", 5, 5.1, 30, 3, "active-full", 8, -68.0, 1
         )
@@ -308,28 +308,23 @@ def test_asking_for_fast_without_the_extension_warns(monkeypatch, no_env):
     assert record[0].filename == __file__
     monkeypatch.setenv(_fast.MODE_ENV, "fast")
     with pytest.warns(UserWarning, match="not installed"):
-        assert _fast.resolve(None, True) == "exact"
+        assert _fast.resolve(None) == "exact"
 
 
-def test_default_is_fast_when_installed_and_covered(fake_ext):
-    assert _fast.resolve(None, True) == "fast"
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        assert _fast.resolve(None, False) == "exact"  # silently
-    with pytest.warns(UserWarning, match="does not cover"):
-        assert _fast.resolve("fast", False) == "exact"
+def test_default_is_fast_when_installed(fake_ext):
+    assert _fast.resolve(None) == "fast"
     multi.mso_axon("EPSGpair", 5, 5.1, 30, 3, "active-full", 8, -68.0, 1)
     assert fake_ext == ["EPSGpair", "none"]  # run and quiet prefix
 
 
 def test_env_overrides_the_default_not_the_argument(fake_ext, monkeypatch):
     monkeypatch.setenv(_fast.MODE_ENV, "exact")
-    assert _fast.resolve(None, True) == "exact"
-    assert _fast.resolve("fast", True) == "fast"  # explicit wins
+    assert _fast.resolve(None) == "exact"
+    assert _fast.resolve("fast") == "fast"  # explicit wins
     multi.mso_axon("EPSGpair", 5, 5.1, 30, 3, "active-full", 8, -68.0, 1)
     assert fake_ext == []
     monkeypatch.setenv(_fast.MODE_ENV, "")  # empty means unset
-    assert _fast.resolve(None, True) == "fast"
+    assert _fast.resolve(None) == "fast"
 
 
 def test_unknown_modes_are_rejected(monkeypatch, no_env):
@@ -339,7 +334,7 @@ def test_unknown_modes_are_rejected(monkeypatch, no_env):
         )
     monkeypatch.setenv(_fast.MODE_ENV, "turbo")
     with pytest.raises(ValueError, match="turbo"):
-        _fast.resolve(None, True)
+        _fast.resolve(None)
 
 
 @pytest.mark.parametrize("stim", ["ramp", "ramp2"])
