@@ -15,7 +15,8 @@ from concurrent import futures
 
 import numpy as np
 
-from msoaxon import _parallel, threshold
+import msoaxon
+from msoaxon import threshold
 
 # stimType: (n_points, factor, max, title, xlabel); x-values come from
 # threshold.sweep_x
@@ -75,7 +76,7 @@ def main() -> None:
     if a.workers == 1:  # in-process, as binary_search(workers=1) does
         run(a, None)
     else:
-        with _parallel.process_pool(a.workers) as pool:  # shared by every sweep
+        with msoaxon.process_pool(a.workers) as pool:  # shared by every sweep
             run(a, pool)
 
 
