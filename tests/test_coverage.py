@@ -298,9 +298,7 @@ def test_combine_all_script(tmp_path):
 
 
 @pytest.mark.parametrize("model", [msoaxon.two_cpt, msoaxon.mso_axon])
-def test_pre_stimulus_cache_does_not_change_results(model):
-
-    _solve._QUIET_CACHE.clear()
+def test_pre_stimulus_cache_does_not_change_results(model, fresh_quiet_cache):
     t1, x1 = model("EPSGpair", 5, 5.3, 70, 3, "active-full", 20, -68, 1)
     assert _solve._QUIET_CACHE  # first run filled it
     t2, x2 = model(
