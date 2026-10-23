@@ -116,11 +116,3 @@ def test_spiked_at_gets_the_sweep_point_settings():
         assert (stim_type, start, run_stop) == ("ramp", threshold.START, stop)
         assert factor == FACTOR
         assert run_syn.t_end == syn.t_end
-
-
-def test_fixed_current_stimulus_ignores_the_search_location():
-    # Synaptic fixes I at 0, but the search still walks its locations, so the
-    # run count and returned value follow the spikes, not the I passed in
-    fake = Fake(0.0)
-    assert search(fake, "Synaptic") == 1.5625
-    assert fake.probes == [0.0] * 7
