@@ -447,10 +447,6 @@ EPSG_UNITARY_AFTER_ONSET = {
     5.0: 4.050776728174052e-12,
 }
 
-EPSG_FAR_FROM_ONSET = pytest.mark.xfail(
-    strict=True, reason="epsg_unitary NaN, fixed by the single-source PR"
-)
-
 
 def test_epsg_unitary_after_onset_is_bit_for_bit_unchanged():
     for t, expected in EPSG_UNITARY_AFTER_ONSET.items():
@@ -469,7 +465,6 @@ def test_epsg_unitary_just_before_onset_is_a_signed_zero():
     assert list(np.signbit(got)) == [True, True, False]
 
 
-@EPSG_FAR_FROM_ONSET
 def test_epsg_unitary_far_before_onset_is_zero_not_nan():
     # exp(-t / 0.1) overflows for t < about -71 ms, and inf * 0 is NaN
     with warnings.catch_warnings():
@@ -482,7 +477,6 @@ def test_epsg_unitary_far_before_onset_is_zero_not_nan():
     assert list(np.signbit(got)) == [True, True, True, True, False]
 
 
-@EPSG_FAR_FROM_ONSET
 @pytest.mark.parametrize("model", ["multi", "two"])
 def test_epsg_pair_with_the_second_onset_80_ms_later_runs(model):
     # at the second onset the first EPSG is 80 ms old; the second EPSG's
