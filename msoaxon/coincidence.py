@@ -702,7 +702,7 @@ def spike_height(
         syn,
         **kw,
     )
-    axon = node - 1 if model == "multi" else 1
+    axon = _dispatch.axon_column(model, node)
     _HEIGHTS[key] = float((x[:, axon] - x[:, 0]).max())
     return _HEIGHTS[key]
 
