@@ -249,17 +249,17 @@ def applied_current(  # noqa: PLR0911
     if stim_type == "step":
         return s.I if s.start <= t < s.stop else 0.0
     if stim_type == "ramp":
-        slope = 1 / (s.stop - s.start)
-        t_top = s.start + 1 / slope
-        return float(s.start <= t <= t_top) * s.I * (t - s.start) * slope
+        return float(s.start <= t <= s.t_top) * s.I * (t - s.start) * s.slope
     if stim_type == "ramp2":
-        slope = 1 / (s.stop - s.start)
         return min(
             s.I,
-            float(t >= _solve.RAMP_RISE) * s.I * (t - _solve.RAMP_RISE) * slope,
+            float(t >= _solve.RAMP_RISE)
+            * s.I
+            * (t - _solve.RAMP_RISE)
+            * s.slope,
         )  # start hardcoded to 5
     if stim_type == "sine":
-        wave = np.sin(2 * np.pi * s.f * (t - s.start) / 1000)
+        wave = np.sin(s.two_pi_f * (t - s.start) / 1000)
         return float(s.start <= t <= s.stop) * s.I * wave * (wave > 0)
     if stim_type == "Synaptic":
         g = synaptic.interp_g(s.t_syn, s.g_syn, t)
@@ -278,7 +278,7 @@ def applied_current(  # noqa: PLR0911
             s.I
             * (0 - V1)
             * float(te >= 0)
-            * synaptic.epsg_unitary(te, s.epsg_tau)
+            * synaptic.epsg_unitary(te, s.epsg_tau, s.inv_peak)
         )
     if stim_type == "EPSGpair":
         te = t - s.start
@@ -287,8 +287,10 @@ def applied_current(  # noqa: PLR0911
             s.I
             * (0 - V1)
             * (
-                float(te >= 0) * synaptic.epsg_unitary(te, s.epsg_tau)
-                + float(te >= td) * synaptic.epsg_unitary(te - td, s.epsg_tau)
+                float(te >= 0)
+                * synaptic.epsg_unitary(te, s.epsg_tau, s.inv_peak)
+                + float(te >= td)
+                * synaptic.epsg_unitary(te - td, s.epsg_tau, s.inv_peak)
             )
         )
     raise ValueError(f"unknown stimType {stim_type!r}")

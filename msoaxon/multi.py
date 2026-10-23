@@ -432,23 +432,28 @@ def external_current(  # noqa: PLR0911, PLR0912
     """
     k = input_node - 1
     if stim_type == "ramp":
-        slope = 1 / (s.stop - s.start)
-        t_end_local = s.stop + _solve.RAMP_RISE  # msoAxon.m rebinds tEnd here
-        t_top = s.start + 1 / slope
-        I0 = float(s.start <= t <= t_top) * s.I * (t - s.start) * slope / 1000
-        if _solve.RAMP_RISE < t <= t_end_local:  # hardcoded 5 in the original
+        # slope, t_top and t_end_local are derived once, in _common.stimulus
+        # (msoAxon.m rebinds tEnd to t_end_local here)
+        I0 = (
+            float(s.start <= t <= s.t_top)
+            * s.I
+            * (t - s.start)
+            * s.slope
+            / 1000
+        )
+        if _solve.RAMP_RISE < t <= s.t_end_local:  # hardcoded 5 originally
             return k, -I0 * 1e3 / sa[0]
     elif stim_type == "ramp2":
-        slope = 1 / (s.stop - s.start)
         I0 = min(
-            float(t >= s.start) * s.I * (t - s.start) * slope / 1000, s.I / 1000
+            float(t >= s.start) * s.I * (t - s.start) * s.slope / 1000,
+            s.I / 1000,
         )
         return k, -I0 * 1e3 / sa[0]
     elif stim_type == "step":
         if s.start < t <= s.stop:
             return 0, -s.I / sa[0]  # always the soma, regardless of input_node
     elif stim_type == "sine":
-        wave = np.sin(2 * np.pi * s.f * (t - s.start) / 1000)
+        wave = np.sin(s.two_pi_f * (t - s.start) / 1000)
         if s.start < t <= s.stop:
             return k, -(s.I * wave * (wave > 0)) / sa[0]
     elif stim_type == "Synaptic":
@@ -470,9 +475,11 @@ def external_current(  # noqa: PLR0911, PLR0912
     elif stim_type == "EPSGpair":
         te = t - s.start
         td = s.stop - s.start
-        wave = float(te >= 0) * synaptic.epsg_unitary(te, s.epsg_tau) + float(
-            te >= td
-        ) * synaptic.epsg_unitary(te - td, s.epsg_tau)
+        wave = float(te >= 0) * synaptic.epsg_unitary(
+            te, s.epsg_tau, s.inv_peak
+        ) + float(te >= td) * synaptic.epsg_unitary(
+            te - td, s.epsg_tau, s.inv_peak
+        )
         return k, s.I * (0 - V[k]) * wave / -sa[k]
     return 0, 0.0
 
@@ -507,14 +514,14 @@ def bilateral_current(
         s.I
         * (0 - V[a])
         * float(te >= 0)
-        * synaptic.epsg_unitary(te, s.epsg_tau)
+        * synaptic.epsg_unitary(te, s.epsg_tau, s.inv_peak)
         / -sa[a]
     )
     ib = (
         s.I
         * (0 - V[b])
         * float(te >= td)
-        * synaptic.epsg_unitary(te - td, s.epsg_tau)
+        * synaptic.epsg_unitary(te - td, s.epsg_tau, s.inv_peak)
         / -sa[b]
     )
     return (a, ia), (b, ib)

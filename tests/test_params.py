@@ -2,6 +2,7 @@
 
 import dataclasses
 
+import numpy as np
 import pytest
 
 from msoaxon import _common, _dispatch, coincidence, multi, synaptic, two
@@ -74,6 +75,56 @@ def test_stimulus_optional_fields():
     syn = stimulus("SynapticPair")
     assert syn.t_syn is not None and syn.g_syn is not None
     assert (syn.VsynE, syn.diff) == (0.0, 1.0)
+
+
+def _bits(x):
+    return np.float64(x).tobytes()
+
+
+@pytest.mark.parametrize("stim_type", ["ramp", "ramp2"])
+def test_ramp_fields_equal_the_old_inline_expressions(stim_type):
+    # what multi.external_current and two.applied_current recomputed per call
+    start, stop = 5.3, 8.1
+    s = _common.stimulus(
+        stim_type, start, stop, 60.0, 20.0, synaptic.SynParams()
+    )
+    slope = 1 / (stop - start)
+    assert _bits(s.slope) == _bits(slope)
+    if stim_type == "ramp":
+        assert _bits(s.t_top) == _bits(start + 1 / slope)
+        assert _bits(s.t_end_local) == _bits(stop + 5)
+    else:
+        assert (s.t_top, s.t_end_local) == (None, None)
+    assert s.two_pi_f is None
+
+
+def test_sine_field_equals_the_old_inline_expression():
+    syn = synaptic.SynParams(f=317.0)
+    s = _common.stimulus("sine", 5.0, 9.0, 60.0, 20.0, syn)
+    assert _bits(s.two_pi_f) == _bits(2 * np.pi * syn.f)
+    for t in (5.0, 5.37, 8.123):
+        old = np.sin(2 * np.pi * s.f * (t - s.start) / 1000)
+        assert _bits(np.sin(s.two_pi_f * (t - s.start) / 1000)) == _bits(old)
+    assert (s.slope, s.t_top, s.t_end_local) == (None, None, None)
+
+
+def test_inv_peak_equals_the_old_inline_expressions():
+    default = stimulus("EPSG")
+    assert _bits(default.inv_peak) == _bits(1 / 0.21317)
+    tau = (0.1, 0.3)  # Myoga et al 2014: decay 0.3
+    s = _common.stimulus(
+        "EPSG", 5.0, 9.0, 60.0, 20.0, synaptic.SynParams(epsg_tau=tau)
+    )
+    rise, decay = tau
+    t_peak = np.log(decay / rise) * rise * decay / (decay - rise)
+    peak = np.exp(-t_peak / decay) - np.exp(-t_peak / rise)
+    assert _bits(s.inv_peak) == _bits(1 / peak)
+    # epsg_unitary gives the same bits whether it is handed the field or not
+    t = np.linspace(-2.0, 6.0, 801)
+    expected = (1 / peak) * (t > 0) * (np.exp(-t / decay) - np.exp(-t / rise))
+    for given in (s.inv_peak, None):
+        got = synaptic.epsg_unitary(t, s.epsg_tau, given)
+        assert got.tobytes() == expected.tobytes()
 
 
 def test_morphology_keys():

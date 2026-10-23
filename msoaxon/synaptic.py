@@ -18,36 +18,56 @@ EPSG_NORM = 0.21317
 EPSG_T_FLOOR = -1.0
 
 
+def epsg_inv_peak(tau: tuple[float, float] = EPSG_TAU) -> float:
+    """Returns the factor that makes epsg_unitary's peak 1.
+
+    The default kinetics keep the MATLAB expression, 1 / EPSG_NORM, so
+    results are unchanged; other (rise, decay) pairs are normalised
+    exactly.
+
+    Args:
+        tau: The (rise, decay) time constants [ms].
+
+    Returns:
+        1 / peak of the difference of exponentials.
+    """
+    if tau == EPSG_TAU:
+        return 1 / EPSG_NORM
+    rise, decay = tau
+    t_peak = np.log(decay / rise) * rise * decay / (decay - rise)
+    peak = np.exp(-t_peak / decay) - np.exp(-t_peak / rise)
+    return float(1 / peak)
+
+
 def epsg_unitary(
-    t: float | np.ndarray, tau: tuple[float, float] = EPSG_TAU
+    t: float | np.ndarray,
+    tau: tuple[float, float] = EPSG_TAU,
+    inv_peak: float | None = None,
 ) -> float | np.ndarray:
     """Returns the unitary EPSG waveform (difference of exponentials).
 
-    The peak is 1. The default kinetics keep the MATLAB expression,
-    peak-normalised by EPSG_NORM, so results are unchanged; other
-    (rise, decay) pairs are normalised exactly.
+    The peak is 1 (see epsg_inv_peak).
 
     Args:
         t: Time since onset [ms]; zero for t <= 0.
         tau: The (rise, decay) time constants [ms].
+        inv_peak: epsg_inv_peak(tau) if the caller has it already (the
+            models read it from Stimulus.inv_peak, computed once per
+            run); None computes it here.
 
     Returns:
         The waveform at t. Negative t gives -0.0, not 0.0, as it always
         has: the mask is 0 times a negative difference of exponentials.
     """
+    if inv_peak is None:
+        inv_peak = epsg_inv_peak(tau)
+    rise, decay = tau
     # The exponentials are evaluated at t clamped to >= EPSG_T_FLOOR: for t
     # below about -71 ms exp(-t / rise) overflows and 0 * inf is nan. The mask
     # zeroes those values anyway, and the clamped difference is still negative,
     # so negative t keeps its -0.0.
     tc = np.maximum(t, EPSG_T_FLOOR)
-    if tau == EPSG_TAU:
-        return (
-            (1 / EPSG_NORM) * (t > 0) * (np.exp(-tc / 0.18) - np.exp(-tc / 0.1))
-        )
-    rise, decay = tau
-    t_peak = np.log(decay / rise) * rise * decay / (decay - rise)
-    peak = np.exp(-t_peak / decay) - np.exp(-t_peak / rise)
-    return (1 / peak) * (t > 0) * (np.exp(-tc / decay) - np.exp(-tc / rise))
+    return inv_peak * (t > 0) * (np.exp(-tc / decay) - np.exp(-tc / rise))
 
 
 @dataclasses.dataclass
