@@ -147,9 +147,8 @@ def crossing(
                 x, split = x_yes - HEDGE * (x_yes - x_no), hi - lo
             else:
                 x = (lo + hi) / 2
-        elif hi - lo <= 2 * t:
-            x = (lo + hi) / 2
         else:
+            # hi - lo > tol = t / PREDICT_MARGIN > 2 * t, so lo + t < hi - t
             x, predicted = min(max(x, lo + t), hi - t), True
         spiked, peak = respond(x)
         overshot = predicted and spiked
