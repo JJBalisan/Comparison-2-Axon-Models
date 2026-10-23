@@ -39,13 +39,20 @@ interface, and the Rust crate takes the package's version from here on.
 - Internal: `_fast.effective` and `_fast.resolve` lose their always-true
   `covered` parameter, left over from #37 (#45).
 
+### Fixed
+
+- Threshold searches that climb to their ceiling no longer emit numpy
+  `overflow` RuntimeWarnings: `_bisect._predict`'s log-amplitude
+  extrapolation along a flat curve overflows `np.exp`, which is now
+  suppressed where it happens; the returned `inf` ("does not reach the
+  criterion") is unchanged, and so are the searches (#45).
+
 ### Notes
 
-- The numpy overflow warnings a ceiling-bound search emits (e.g. a 30 mV
-  criterion with Goldwyn's calibration) come from `_bisect._predict`'s
-  log-amplitude extrapolation along a flat curve, not from the model;
-  `smallest_crossing` clamps the step to 2x, so the answer is unaffected
-  (#45).
+- Those overflow warnings (e.g. a 30 mV criterion with Goldwyn's
+  calibration) never came from the model: `smallest_crossing` clamps the
+  prediction's `inf` to 2x, so every result before the fix was already
+  right (#45).
 
 ## 1.3.1 (23 Oct 2026)
 
