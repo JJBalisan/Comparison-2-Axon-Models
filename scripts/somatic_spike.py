@@ -13,11 +13,9 @@ import pathlib
 
 from msoaxon import multi, somatic
 
-MULTS = (
-    1.5,
-    2.0,
-    3.0,
-)  # below ~1.5x the somatic trace has no distinct inflection
+# the somatic trace has a distinct inflection only from ~1.35x to ~4.5x rheobase
+# (spike_amplitude's `distinct` flag)
+MULTS = (1.5, 2.0, 3.0)
 CASES = {
     "45-compartment (msoAxon.m)": ("multi", {}),
     "45-compartment, KLT blocked at soma + AIS (dendrotoxin)": (
@@ -60,9 +58,20 @@ def main() -> None:
         rows = []
         for k in (1.5, 3.0) if a.quick else MULTS:
             r = somatic.spike_amplitude(model, rb * k, mem=mem)
+            if not r["distinct"]:
+                raise SystemExit(
+                    f"{name}: no distinct inflection at {k}x rheobase"
+                )
             t, x = r.pop("trace")  # the run the amplitude was measured on
             rows.append(
-                {"multiple": k, **{key: float(v) for key, v in r.items()}}
+                {
+                    "multiple": k,
+                    **{
+                        key: float(v)
+                        for key, v in r.items()
+                        if key != "distinct"
+                    },
+                }
             )
             keep = t >= 4.8
             ax.plot(

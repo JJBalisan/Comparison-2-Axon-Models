@@ -294,7 +294,7 @@ Scott et al. 2005 ([doi](https://doi.org/10.1523/JNEUROSCI.1016-05.2005)) evoked
 
 - **The unmodified model already matches mature cells.** Lehnert et al. 2014 report "∼10 mV" for their model too.
 - **The KLT block reproduces the developmental mechanism:** the spike roughly doubles, and rheobase falls from 3784 to 200 pA. No tuning was needed.
-- **Below ~1.5× rheobase** the somatic response is a smooth hump with no distinct inflection, so no value is given.
+- **Valid range: about 1.35× to 4.5× rheobase** (multi and two models, 10 mV criterion). `spike_amplitude` returns `distinct=True` there. Outside it the step still fires but `distinct` is `False`, and `amplitude`, `t_inflection` and `v_inflection` are `None` (`peak_above_rest`, `t_spike` and `trace` stay valid). The inflection is distinct when the d²V/dt² peak in the search window is the largest before the spike peak (so the takeoff was not left in the skipped charging window), is not at either end of the window, and is at least `somatic.D2_MIN` = 100 mV/ms². Below the range the soma is a smooth hump with no upstroke curvature (1.05× and 1.2× used to return 9–12 mV from a flat d²V/dt² ≈ 0 plateau). Above it the takeoff falls in the skipped window, and the old picker returned ≈0 mV from the upstroke next to the peak at 10× rheobase. The limits move with the membrane: with KLT removed every step from 1.05× to 10× is distinct.
 - **Spikes driven by EPSG pairs** measure 9–11 mV at 2× threshold, against 8.5 ± 1.3 mV in vivo (van der Heijden et al. 2013). Near threshold the EPSP and spike merge and the inflection is ambiguous.
 
 `mso_axon(..., mem=membrane(v0, ...))` exposes the knobs used for the block:

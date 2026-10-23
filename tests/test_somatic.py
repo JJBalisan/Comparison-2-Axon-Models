@@ -78,3 +78,60 @@ def test_somatic_spike_is_mature_and_klt_sets_it():
     blocked = somatic.spike_amplitude("multi", 2 * rb_dtx, mem=mem)["amplitude"]
     assert blocked > 1.8 * control  # dendrotoxin: 15 -> 37 mV
     assert rb_dtx < rb / 5
+
+
+# rheobases at rel_tol 1e-4 (CHANGELOG 1.2.0), so the multiples are exact
+RHEOBASE = {"multi": 3784.1, "two": 3846.0}
+# PYTHON.md "Somatic spike" table: mV at 1.5x, 2x and 3x rheobase
+TABLE = {
+    "multi": {1.5: 7.6, 2.0: 13.4, 3.0: 19.4},
+    "two": {1.5: 6.2, 2.0: 15.6, 3.0: 17.6},
+}
+
+
+@pytest.mark.parametrize(
+    "model,k",
+    [(m, k) for m in TABLE for k in TABLE[m]],
+)
+def test_somatic_spike_table_points_are_distinct(model, k):
+    r = somatic.spike_amplitude(model, k * RHEOBASE[model])
+    assert r["distinct"]
+    assert r["amplitude"] == pytest.approx(TABLE[model][k], abs=0.06)
+    assert r["t_inflection"] is not None and r["v_inflection"] is not None
+
+
+@pytest.mark.parametrize("model", ["multi", "two"])
+def test_somatic_spike_at_10x_has_no_distinct_inflection(model):
+    # the axon crosses the criterion before the search window opens, and the
+    # old picker returned ~0 mV from the upstroke next to the peak
+    r = somatic.spike_amplitude(model, 10 * RHEOBASE[model])
+    assert not r["distinct"]
+    assert r["amplitude"] is None
+    assert r["t_inflection"] is None and r["v_inflection"] is None
+    assert r["t_spike"] <= somatic.START + somatic.CHARGING
+    assert r["peak_above_rest"] > 60  # it did spike
+    assert len(r["trace"][0]) > 0
+
+
+@pytest.mark.parametrize("model", ["multi", "two"])
+def test_somatic_spike_near_threshold_is_a_smooth_hump(model):
+    # 1.05x used to return 8.8-9.3 mV, bigger than 1.5x
+    r = somatic.spike_amplitude(model, 1.05 * RHEOBASE[model])
+    assert not r["distinct"]
+    assert r["amplitude"] is None
+    assert r["peak_above_rest"] > 10
+
+
+def test_somatic_spike_without_a_step_spike_is_none():
+    assert somatic.spike_amplitude("multi", 0.5 * RHEOBASE["multi"]) is None
+
+
+@pytest.mark.parametrize("k", [1.5, 3.0])
+def test_somatic_spike_with_klt_removed_stays_distinct(k):
+    # the sharp takeoff keeps its inflection at every step size, unlike the
+    # control membrane. The amplitude is only bounded: this membrane's response
+    # is steep in the current, and CI platforms differ by ~1 mV at 1.5x
+    mem = multi.membrane(-68.0, **DTX)
+    r = somatic.spike_amplitude("multi", k * 199.524, mem=mem)
+    assert r["distinct"]
+    assert 20 < r["amplitude"] < 40  # dendrotoxin: 15 -> 37 mV

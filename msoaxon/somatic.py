@@ -27,6 +27,12 @@ START, STOP, T_END = 5.0, 105.0, 110.0
 FACTOR = 10.0  # spike = axon rises this far above soma
 CHARGING = 0.15  # ms after step onset excluded from the inflection search
 LOOKBACK = 0.5  # ms before the spike-detection time searched for the takeoff
+# Smallest d2V/dt2 at the inflection [mV/ms^2] that counts as a distinct one.
+# Set from the multi and two models' scan of step size (issue #38): the peak is
+# 0-11 up to 1.25x rheobase (concave throughout, the smooth hump), 60-66 at
+# 1.3x, 105-129 at 1.35x, 240-327 at 1.5x and 1600-1950 at 3x. 100 sits between
+# 1.3x and 1.35x, 2.4x below the weakest published point (two, 1.5x).
+D2_MIN = 100.0
 
 
 def _merge_kw(
@@ -239,6 +245,23 @@ def spike_amplitude(
 ) -> dict[str, Any] | None:
     """Measures the somatic spike amplitude from the inflection point.
 
+    The inflection exists only for part of the range of step sizes. In the
+    multi and two models with the default criterion that is about 1.35x to 4.5x
+    rheobase. Below it the soma is a smooth hump with no upstroke curvature
+    (d2V/dt2 never rises above ~0 before the peak). Above it the axon crosses
+    the criterion so early that the takeoff falls in the first CHARGING ms,
+    which the search skips, and the picker would land on the upstroke next to
+    the peak. In both cases the step still fires, so the result is not None,
+    but `distinct` is False and the inflection fields are None instead of a
+    number from the wrong feature. The limits move with the membrane and the
+    criterion: with KLT removed the inflection stays distinct up to 10x.
+
+    The inflection is distinct when all of these hold:
+      - the d2V/dt2 peak in the search window is the largest before the
+        spike peak, so the takeoff was not left out of the window;
+      - that peak is not at either end of the window; and
+      - it is at least D2_MIN, a real convex takeoff.
+
     Args:
         model: "multi" or "two".
         I: Step amplitude [pA].
@@ -252,10 +275,12 @@ def spike_amplitude(
             sampled second run keeps its own max_step of 0.005 ms.
 
     Returns:
-        dict(amplitude, peak_above_rest, t_spike, t_inflection,
+        dict(amplitude, distinct, peak_above_rest, t_spike, t_inflection,
         v_inflection, trace) in mV and ms, where trace = (t, x) is the
-        finely sampled run up to 2 ms after the spike; or None if the
-        step doesn't fire.
+        finely sampled run up to 2 ms after the spike. `distinct` says
+        whether the soma has an inflection; when it is False, amplitude,
+        t_inflection and v_inflection are None, while peak_above_rest,
+        t_spike and trace are still valid. None if the step doesn't fire.
 
     Raises:
         ValueError: If mem is given both as `mem` and in model_kw.
@@ -294,12 +319,30 @@ def spike_amplitude(
     i_pk = int(np.argmax(np.where(grid > ts - 0.3, V, -np.inf)))
     lo = max(START + CHARGING, ts - LOOKBACK)
     win = np.flatnonzero((grid >= lo) & (np.arange(len(grid)) < i_pk))
-    i_inf = win[np.argmax(d2[win])]
-    return {
-        "amplitude": V[i_pk] - V[i_inf],
+    result = {
+        "amplitude": None,
+        "distinct": False,
         "peak_above_rest": V[i_pk] - v0,
         "t_spike": ts,
-        "t_inflection": grid[i_inf],
-        "v_inflection": V[i_inf],
+        "t_inflection": None,
+        "v_inflection": None,
         "trace": (t, x),
     }
+    if win.size == 0:
+        return result
+    i_inf = win[np.argmax(d2[win])]
+    before_peak = np.arange(len(grid)) < i_pk
+    i_takeoff = np.argmax(np.where(before_peak, d2, -np.inf))
+    if (
+        i_takeoff != i_inf  # the sharpest curvature precedes the window
+        or i_inf in (win[0], win[-1])
+        or d2[i_inf] < D2_MIN
+    ):
+        return result
+    result.update(
+        amplitude=V[i_pk] - V[i_inf],
+        distinct=True,
+        t_inflection=grid[i_inf],
+        v_inflection=V[i_inf],
+    )
+    return result
