@@ -86,6 +86,27 @@ uv pip install --find-links wheels msoaxon-fast
 (use `uv sync --inexact`). The path source stays for development: it is what
 `uv sync --extra fast` builds when you change `rust/`.
 
+**On PyPI (prepared, not yet enabled).** The `publish` job in
+`.github/workflows/wheels.yml` uploads the five wheels to PyPI by trusted
+publishing after a `v*` tag builds them, but it is skipped until the
+repository variable `PUBLISH_PYPI` is `true`, and no `msoaxon-fast` project
+exists on PyPI yet. Once one does, `uv sync --extra fast` resolves the wheel
+from the index and needs neither cargo nor a download; `[tool.uv.sources]`
+stays for development only (it makes uv build `rust/` instead of using the
+index). To enable it:
+
+1. On pypi.org, create the project `msoaxon-fast` (a pending publisher does
+   this on the first upload) with a trusted publisher: owner `JJBalisan`,
+   repository `Comparison-2-Axon-Models`, workflow `wheels.yml`, environment
+   left blank.
+2. Set the repository variable: `gh variable set PUBLISH_PYPI --body true`
+   (or Settings > Secrets and variables > Actions > Variables).
+3. The next `v*` tag publishes; the crate's version is the package's, so
+   each release has one `msoaxon-fast` version on PyPI.
+
+The first upload of a version is final: PyPI never accepts the same file
+name twice, so a re-run of a published tag fails at the upload.
+
 `mso_axon(..., mode=...)` picks the right-hand side; `_dispatch.run_model`
 passes `mode` on, so it also works in `model_kw`
 (`coincidence.threshold("multi", 0.1, model_kw={"mode": "exact"})`) and
