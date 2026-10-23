@@ -6,6 +6,47 @@ and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least. The `msoaxon-fast` crate in `rust/` carries the
 same version as the package, bumped in the same release PR.
 
+## 1.3.2 (23 Oct 2026)
+
+Housekeeping; results are unchanged. The parameter bundles become typed
+dataclasses, the worker pool and `spiking()` get a public, checked
+interface, and the Rust crate takes the package's version from here on.
+
+### Changed
+
+- The parameter bundles are frozen dataclasses with typed, documented
+  fields: `_common.Stimulus`, `multi.Morphology`, `multi.Membrane` and
+  `two.TwoCptParams` replace the `types.SimpleNamespace` objects. Attribute
+  names and the cache keys are unchanged, so results are bit-identical
+  (golden traces, `tests/test_settled.py`, the fast-mode BITWISE tests and
+  `_fast.self_check`); `two._rhs` is about 4% faster. `tests/test_params.py`
+  pins frozenness, identity hashing and the key tuples (#42).
+- The Na conductance expression `g * m**4 * (0.993 * h + 0.007)` is written
+  once, as `constants.na_open(m, h, g)`, with the evaluation order every copy
+  had (#45).
+- `msoaxon.process_pool` and `msoaxon.map_tasks` are public, re-exported
+  from the package; the analysis scripts use them instead of the private
+  `msoaxon._parallel` (#45).
+- `spiking.spiking` accepts `model="two"` or `"multi"` (and the `"Two"` /
+  `"Mult"` aliases of the port) and raises `ValueError` for any other name
+  instead of treating it as the 45-compartment model (#45).
+- `msoaxon-fast` carries the same version as `msoaxon`, bumped in the same
+  release PR, so release wheels are named after the release;
+  `tests/test_version.py` keeps `rust/pyproject.toml`, `rust/Cargo.toml` and
+  `rust/Cargo.lock` in step with the package. The wheels workflow can publish
+  to PyPI by trusted publishing, but stays off until the `PUBLISH_PYPI`
+  repository variable is `true` (PYTHON.md "Fast mode" has the steps) (#57).
+- Internal: `_fast.effective` and `_fast.resolve` lose their always-true
+  `covered` parameter, left over from #37 (#45).
+
+### Notes
+
+- The numpy overflow warnings a ceiling-bound search emits (e.g. a 30 mV
+  criterion with Goldwyn's calibration) come from `_bisect._predict`'s
+  log-amplitude extrapolation along a flat curve, not from the model;
+  `smallest_crossing` clamps the step to 2x, so the answer is unaffected
+  (#45).
+
 ## 1.3.1 (23 Oct 2026)
 
 The published somatic spike table moves: `spike_amplitude`'s inflection
