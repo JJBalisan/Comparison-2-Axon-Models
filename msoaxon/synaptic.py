@@ -1,6 +1,7 @@
 """Synaptic input conductance (port of Synaptic.m)."""
 
 import dataclasses
+import functools
 
 import numpy as np
 
@@ -70,18 +71,31 @@ def synaptic(syn: SynParams) -> tuple[np.ndarray, np.ndarray]:
     from MATLAB's rng/randn, so the same seed gives a different
     (statistically equivalent) noise realisation.
 
+    The table depends only on t_end, freq, gE and random_in, and every
+    Synaptic or SynapticPair run asks for it again, so recent tables are
+    kept (see _table). The arrays are shared between calls and read-only.
+
     Args:
         syn: The settings (t_end, freq, gE, random_in).
 
     Returns:
-        (tSyn, gSyn): the time grid [ms] and the conductance on it.
+        (tSyn, gSyn): the time grid [ms] and the conductance on it, both
+        read-only.
     """
-    dt = 0.01
-    t = np.arange(0, syn.t_end + dt / 2, dt)
-    nt = len(t)
-    n = np.random.default_rng(syn.random_in).standard_normal(nt)
+    return _table(syn.t_end, syn.freq, syn.gE, syn.random_in)
 
-    wc = syn.freq * 2 * np.pi / 1000  # center frequency
+
+@functools.lru_cache(maxsize=16)
+def _table(
+    t_end: float, freq: float, g_e: float, random_in: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Computes synaptic()'s tables, cached on the fields that fix them."""
+    dt = 0.01
+    t = np.arange(0, t_end + dt / 2, dt)
+    nt = len(t)
+    n = np.random.default_rng(random_in).standard_normal(nt)
+
+    wc = freq * 2 * np.pi / 1000  # center frequency
     gw = 24.7 * (4.37 * wc / (2 * np.pi) + 1)
     gam_filter = (
         (t / 1000) ** 4 * np.exp(-2 * np.pi * t * gw / 1000) * np.cos(t * wc)
@@ -91,12 +105,10 @@ def synaptic(syn: SynParams) -> tuple[np.ndarray, np.ndarray]:
     # 17.57 normalises so max is G, 37 is the unitary epsg amplitude (Lehnert et
     # al)
     epsg = (
-        syn.gE
-        * 37
-        * 17.57
-        * ((1 - np.exp(-t / 1.0)) ** 1.3 * np.exp(-t / 0.27))
+        g_e * 37 * 17.57 * ((1 - np.exp(-t / 1.0)) ** 1.3 * np.exp(-t / 0.27))
     )
     g = np.convolve(rect_gam, epsg)[:nt]
+    t.flags.writeable = g.flags.writeable = False  # shared by every caller
     return t, g
 
 

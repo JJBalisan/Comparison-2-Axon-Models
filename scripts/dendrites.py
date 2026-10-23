@@ -177,7 +177,11 @@ def run(a: argparse.Namespace, pool: futures.ProcessPoolExecutor) -> None:
     # Every threshold search (C, E, F) and the rheobase (G) is independent of
     # the rest, so all of them go to the pool now, in one batch, and run while
     # A, B and D are computed here. Each search is deterministic, so the results
-    # don't depend on this.
+    # don't depend on this. The delay-0 threshold of each configuration is
+    # searched once and shared: C's bilateral and soma entries, the first point
+    # of the E and F curves, and (as threshold0=) E's windows all use it. The
+    # windows wait for it, so it is submitted first and the windows go in
+    # before the curve points.
     def th_job(
         delay: float,
         tau: tuple[float, float] = synaptic.EPSG_TAU,
@@ -203,8 +207,15 @@ def run(a: argparse.Namespace, pool: futures.ProcessPoolExecutor) -> None:
     rb_job = pool.submit(
         somatic.rheobase, "multi", mem=mem_d, rel_tol=tol
     )  # the longest single job
+    kinetics = (
+        ("model EPSG (0.18 ms)", synaptic.EPSG_TAU),
+        ("Myoga EPSG (0.3 ms)", (0.1, 0.3)),
+    )
+    th0_E = {kname: th_job(0.0, tau, **bil) for kname, tau in kinetics}
     C_jobs = {
-        "bilateral (one EPSG per dendrite)": th_job(0.0, **bil),
+        # C and E use the default kinetics for the bilateral threshold at zero
+        # delay, so the one job serves both
+        "bilateral (one EPSG per dendrite)": th0_E[kinetics[0][0]],
         "unilateral (both on the lateral dendrite)": th_job(
             0.0,
             stim="EPSGbilateral",
@@ -215,12 +226,9 @@ def run(a: argparse.Namespace, pool: futures.ProcessPoolExecutor) -> None:
         "both at the soma, dendritic model": th_job(0.0, **dend),
         "both at the soma, lumped model": th_job(0.0),
     }
-    kinetics = (
-        ("model EPSG (0.18 ms)", synaptic.EPSG_TAU),
-        ("Myoga EPSG (0.3 ms)", (0.1, 0.3)),
-    )
     # E's widths come from window() (fixed input, bisection over delay); its
     # curves are only drawn, so they use a 50 us grid
+    th0_vals = {kname: j.result() for kname, j in th0_E.items()}
     W_jobs = {
         (kname, m): pool.submit(
             coincidence.window,
@@ -229,6 +237,7 @@ def run(a: argparse.Namespace, pool: futures.ProcessPoolExecutor) -> None:
             epsg_tau=tau,
             rel_tol=tol,
             delay_tol=1e-3 if a.quick else 1e-4,
+            threshold0=th0_vals[kname],
             **bil,
         )
         for kname, tau in kinetics
@@ -236,13 +245,15 @@ def run(a: argparse.Namespace, pool: futures.ProcessPoolExecutor) -> None:
     }
     delays = np.round(np.arange(0, 0.6001, 0.1 if a.quick else 0.05), 4)
     E_jobs = {
-        kname: [th_job(d, tau, **bil) for d in delays]
+        kname: [th0_E[kname]] + [th_job(d, tau, **bil) for d in delays[1:]]
         for kname, tau in kinetics
     }
     fd = np.round(np.arange(0, 1.0001, 0.2 if a.quick else 0.04), 4)
     F_jobs = {
-        "lumped": [th_job(d) for d in fd],
-        "dendritic": [th_job(d, **dend) for d in fd],
+        "lumped": [C_jobs["both at the soma, lumped model"]]
+        + [th_job(d) for d in fd[1:]],
+        "dendritic": [C_jobs["both at the soma, dendritic model"]]
+        + [th_job(d, **dend) for d in fd[1:]],
     }
 
     # A. passive

@@ -8,6 +8,7 @@ import pytest
 
 import msoaxon
 from msoaxon import (
+    _common,
     _dispatch,
     _parallel,
     _solve,
@@ -25,6 +26,54 @@ from msoaxon import (
 def test_map_tasks_handles_no_tasks():
     assert _parallel.map_tasks(abs, []) == []
     assert coincidence.threshold_curve("two", []).shape == (0,)
+
+
+# --- synaptic conductance memo (synaptic.py) ----------------------------------
+
+
+def test_synaptic_memo_returns_equal_read_only_arrays():
+    syn = msoaxon.SynParams(t_end=12.5, random_in=4242)
+    t, g = synaptic.synaptic(syn)
+    t2, g2 = synaptic.synaptic(syn)
+    # the cached arrays are the same objects, equal to a fresh computation,
+    # and a caller cannot change them
+    assert t2 is t and g2 is g
+    t_new, g_new = synaptic._table.__wrapped__(12.5, syn.freq, syn.gE, 4242)
+    assert np.array_equal(t, t_new) and np.array_equal(g, g_new)
+    for arr in (t, g):
+        assert not arr.flags.writeable
+        with pytest.raises(ValueError, match="read-only"):
+            arr[0] = 1.0
+    assert synaptic._table.cache_info().maxsize is not None  # bounded
+
+
+def test_synaptic_memo_keys_on_the_fields_that_fix_the_waveform():
+    base = msoaxon.SynParams(t_end=10.0, random_in=11)
+    _, g = synaptic.synaptic(base)
+    # a different seed, frequency, gE or length is a different table
+    for other in (
+        msoaxon.SynParams(t_end=10.0, random_in=12),
+        msoaxon.SynParams(t_end=10.0, random_in=11, freq=300.0),
+        msoaxon.SynParams(t_end=10.0, random_in=11, gE=2e7),
+    ):
+        _, g_other = synaptic.synaptic(other)
+        assert g_other is not g and not np.array_equal(g_other, g)
+    t_long, g_long = synaptic.synaptic(
+        msoaxon.SynParams(t_end=12.0, random_in=11)
+    )
+    assert len(g_long) > len(g) and len(t_long) == len(g_long)
+    # the fields the waveform ignores share the entry
+    same = msoaxon.SynParams(
+        t_end=10.0, random_in=11, VsynE=-10.0, diff=2.0, f=100.0
+    )
+    assert synaptic.synaptic(same)[1] is g
+
+
+def test_stimulus_shares_the_cached_conductance():
+    syn = msoaxon.SynParams(t_end=8.0, random_in=77)
+    s1 = _common.stimulus("Synaptic", 5.0, 5.0, 1.0, 8.0, syn)
+    s2 = _common.stimulus("SynapticPair", 5.0, 5.0, 1.0, 8.0, syn)
+    assert np.array_equal(s1.g_syn, s2.g_syn) and not s1.g_syn.flags.writeable
 
 
 # --- threshold sweeps (threshold.py) ------------------------------------------
