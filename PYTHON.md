@@ -266,7 +266,7 @@ Values are for the Python port.
 | EPSP half-width at soma | 523–549 µs | 0.52–0.6 ms |
 | Spike initiation site | AIS | AIS (Lehnert 2014) |
 | Input resistance, active, at rest | 2.5 MΩ steady, ~4.8 MΩ peak | 5 MΩ (Lehnert's model); ~7 MΩ measured |
-| Somatic spike, from inflection (100 ms step) | 7.6 / 13.4 / 19.4 mV at 1.5× / 2× / 3× rheobase | 17 ± 2 mV mature, 5–15 mV near threshold, graded |
+| Somatic spike, from inflection (100 ms step) | 7.4 / 13.3 / 18.2 mV at 1.5× / 2× / 3× rheobase | 17 ± 2 mV mature, 5–15 mV near threshold, graded |
 | Best frequency for half-wave sine input | 400–500 Hz | subthreshold resonance 242–300 Hz |
 
 An earlier version of this table listed a ~40 mV somatic spike as the clearest mismatch. That figure was measured from rest during an EPSG pair at 2× threshold, so it counted the synaptic depolarisation as spike. Measured like the experiments (next section), the spike matches mature cells.
@@ -284,17 +284,18 @@ An earlier version of this table listed a ~40 mV somatic spike as the clearest m
 
 Scott et al. 2005 ([doi](https://doi.org/10.1523/JNEUROSCI.1016-05.2005)) evoked spikes with 100 ms somatic current steps and measured amplitude from the inflection point. Mature cells (≥P21) give **17 ± 2 mV**: 5–15 mV near threshold, growing with the stimulus. Blocking Kv1 (KLT) with dendrotoxin in P20–21 cells raised it **from 15 to 37 mV**.
 
-`msoaxon/somatic.py` measures the model the same way. The inflection is the peak of d²V/dt² after the first 0.15 ms of charging: MSO neurons fire at step onset, while the membrane is still charging at 50–80 mV/ms, so fixed dV/dt criteria pick up the charging rather than the spike.
+`msoaxon/somatic.py` measures the model the same way. The inflection is the peak of d²V/dt² (of a cubic spline through the solver's samples) after the first 0.15 ms of charging: MSO neurons fire at step onset, while the membrane is still charging at 50–80 mV/ms, so fixed dV/dt criteria pick up the charging rather than the spike.
 
 | Somatic spike amplitude | 1.5× rheobase | 2× | 3× |
 |---|---|---|---|
-| 45-compartment (`msoAxon.m`) | 7.6 mV | 13.4 mV | 19.4 mV |
-| 45-compartment, KLT removed at soma + AIS, rest rebalanced (dendrotoxin) | 25.1 mV | 27.9 mV | 31.9 mV |
-| 2-compartment (`TwoCpt.m`) | 6.2 mV | 15.6 mV | 17.6 mV |
+| 45-compartment (`msoAxon.m`) | 7.4 mV | 13.3 mV | 18.2 mV |
+| 45-compartment, KLT removed at soma + AIS, rest rebalanced (dendrotoxin) | 25.4 mV | 28.2 mV | 31.7 mV |
+| 2-compartment (`TwoCpt.m`) | 6.4 mV | 13.0 mV | 17.8 mV |
 
 - **The unmodified model already matches mature cells.** Lehnert et al. 2014 report "∼10 mV" for their model too.
 - **The KLT block reproduces the developmental mechanism:** the spike roughly doubles, and rheobase falls from 3784 to 200 pA. No tuning was needed.
 - **Valid range: about 1.35× to 4.5× rheobase** (multi and two models, 10 mV criterion). `spike_amplitude` returns `distinct=True` there. Outside it the step still fires but `distinct` is `False`, and `amplitude`, `t_inflection` and `v_inflection` are `None` (`peak_above_rest`, `t_spike` and `trace` stay valid). The inflection is distinct when the d²V/dt² peak in the search window is the largest before the spike peak (so the takeoff was not left in the skipped charging window), is not at either end of the window, and is at least `somatic.D2_MIN` = 100 mV/ms². Below the range the soma is a smooth hump with no upstroke curvature (1.05× and 1.2× used to return 9–12 mV from a flat d²V/dt² ≈ 0 plateau). Above it the takeoff falls in the skipped window, and the old picker returned ≈0 mV from the upstroke next to the peak at 10× rheobase. The limits move with the membrane: with KLT removed every step from 1.05× to 10× is distinct.
+- **How stable the numbers are:** the pick is the maximum of the spline's d²V/dt², which lies on a solver sample, so it depends on where the solver put its steps. Rerunning with `max_step` 3, 4, 6 and 7 µs instead of 5 moves the dendrotoxin row by 0.00 mV and the multi rows by 0.00 mV; the 2-compartment rows move by up to 0.06 mV (1.5×), 0.00 (2×) and 0.20 mV (3×). Before issue #56 the pick was the argmax of d²V/dt² of the linearly interpolated trace, a comb with a tooth at every solver step. The dendrotoxin row then moved 0.6–1.9 mV under the same changes (25.08 mV on macOS against 25.97 mV on Linux CI at 1.5×), and so did the controls (2-compartment 2× spread 12.8–17.6 mV). The old control values (7.6 / 13.4 / 19.4 and 6.2 / 15.6 / 17.6 mV) were single teeth of that comb: the 2-compartment 2× value is 13.0 mV, not 15.6.
 - **Spikes driven by EPSG pairs** measure 9–11 mV at 2× threshold, against 8.5 ± 1.3 mV in vivo (van der Heijden et al. 2013). Near threshold the EPSP and spike merge and the inflection is ambiguous.
 
 `mso_axon(..., mem=membrane(v0, ...))` exposes the knobs used for the block:
@@ -333,7 +334,7 @@ Two things the paper doesn't state:
 | Bilateral / summed unilateral EPSP | — | 0.98 | 1.00 | linear in vivo |
 | Coincidence window at 3%, model EPSG / Myoga EPSG | 201 / 219 µs (soma input) | 165 / 181 µs | 223 / 249 µs | 221 µs (Myoga 2014) |
 | EPSG-pair threshold curve at the soma vs lumped (max difference) | — | 12% | 50% | "almost identical" (Lehnert) |
-| Somatic spike at 1.5 / 2 / 3× rheobase | 7.6 / 13.4 / 19.4 mV | 16.3 / 19.5 / 26.6 mV | 21.4 / 26.1 / 29.6 mV | 17 ± 2 mV mature |
+| Somatic spike at 1.5 / 2 / 3× rheobase | 7.4 / 13.3 / 18.2 mV | 16.7 / 20.9 / 25.9 mV | 21.1 / 26.1 / 30.8 mV | 17 ± 2 mV mature |
 
 Conserving the totals is the default because it reproduces what Lehnert et al. reported for their own dendritic variant: tuning almost identical to the lumped model. It also fixes the EPSP width and keeps the somatic spike near mature size.
 
@@ -357,7 +358,7 @@ Both reproduce the qualitative dendritic results: attenuation along the cable, E
 | Bilateral / summed unilateral EPSP | 0.98 → 1.00 | 1.00 → 1.02 |
 | Coincidence window at 3%, model / Myoga EPSG | 165 / 181 → 139 / 149 µs | 223 / 249 → 209 / 230 µs |
 | Pair threshold curve at the soma vs lumped (max difference) | 12% → 24% | 50% → 54% |
-| Somatic spike at 1.5 / 2 / 3× rheobase | 16.3 / 19.5 / 26.6 → 19.3 / 24.5 / 29.9 mV | 21.4 / 26.1 / 29.6 → 25.5 / 29.7 / 35.8 mV |
+| Somatic spike at 1.5 / 2 / 3× rheobase | 16.7 / 20.9 / 25.9 → 19.8 / 24.5 / 29.5 mV | 21.1 / 26.1 / 30.8 → 25.8 / 30.9 / 35.4 mV |
 
 What the higher resistivity does:
 - **It isolates the soma from the dendrites.** Somatic EPSPs get larger and narrower, dendritic EPSPs are attenuated more, and the soma sees less of the dendritic membrane.
