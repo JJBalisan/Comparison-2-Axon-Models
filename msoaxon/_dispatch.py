@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from msoaxon import multi, synaptic, two
+from msoaxon import _solve, multi, synaptic, two
 
 
 def run_model(
@@ -103,6 +103,66 @@ def run_model(
 STOP_WHEN_SETTLED = True
 
 
+def axon_column(model: str, node: int) -> int:
+    """Returns the state column of the compared compartment.
+
+    Args:
+        model: "multi" or "two".
+        node: The compartment compared with the soma, 1-indexed (the
+            two-compartment model has only the soma and one axon
+            compartment, so `node` only sets its parameters).
+
+    Returns:
+        node - 1 in the multi-compartment model, 1 in the two-compartment
+        model.
+    """
+    return node - 1 if model == "multi" else 1
+
+
+def _margin_run(
+    model: str,
+    stim: str,
+    start: float,
+    stop: float,
+    I: float,
+    node: int,
+    t_end: float,
+    v0: float,
+    input_node: int,
+    syn: synaptic.SynParams | None,
+    factor: float,
+    kw: dict[str, Any],
+) -> tuple[bool, np.ndarray]:
+    """Runs spikes()'s and response()'s model run and reads it out.
+
+    Returns:
+        (spiked, margin): whether the run ended before t_end with
+        axon - soma above SPIKE_TEST_FRACTION * factor, and axon - soma
+        at every output time [mV].
+    """
+    t, x = run_model(
+        model,
+        stim,
+        start,
+        stop,
+        I,
+        node,
+        t_end,
+        v0,
+        input_node,
+        syn,
+        stop_on_spike=factor,
+        stop_when_settled=STOP_WHEN_SETTLED,
+        **kw,
+    )
+    axon = axon_column(model, node)
+    margin = x[:, axon] - x[:, 0]
+    spiked = bool(
+        t[-1] < t_end and margin[-1] > _solve.SPIKE_TEST_FRACTION * factor
+    )
+    return spiked, margin
+
+
 def response(
     model: str,
     stim: str,
@@ -145,7 +205,7 @@ def response(
         above the soma before t_end (as in spikes()), and the largest
         axon - soma of the run [mV].
     """
-    t, x = run_model(
+    spiked, margin = _margin_run(
         model,
         stim,
         start,
@@ -156,15 +216,10 @@ def response(
         v0,
         input_node,
         syn,
-        stop_on_spike=factor,
-        stop_when_settled=STOP_WHEN_SETTLED,
-        **kw,
+        factor,
+        kw,
     )
-    axon = node - 1 if model == "multi" else 1
-    margin = x[:, axon] - x[:, 0]
-    return bool(t[-1] < t_end and margin[-1] > 0.75 * factor), float(
-        margin.max()
-    )
+    return spiked, float(margin.max())
 
 
 def spikes(
@@ -189,8 +244,9 @@ def spikes(
     end before t_end, so the final state tells them apart: a spike stop
     ends with axon - soma at `factor`, a settled stop at or below
     factor / 2 (see _solve.settled_event). The test sits at
-    0.75 * factor, away from both: the settled event can fire exactly as
-    axon - soma falls through factor / 2, so testing at factor / 2
+    0.75 * factor (_solve.SPIKE_TEST_FRACTION), away from both: the
+    settled event can fire exactly as axon - soma falls through
+    factor / 2 (_solve.SETTLED_FRACTION), so testing at factor / 2
     itself misread three near-threshold ramp runs as spikes.
 
     Args:
@@ -210,7 +266,7 @@ def spikes(
     Returns:
         True if the run spiked before t_end.
     """
-    t, x = run_model(
+    return _margin_run(
         model,
         stim,
         start,
@@ -221,12 +277,9 @@ def spikes(
         v0,
         input_node,
         syn,
-        stop_on_spike=factor,
-        stop_when_settled=STOP_WHEN_SETTLED,
-        **kw,
-    )
-    axon = node - 1 if model == "multi" else 1
-    return bool(t[-1] < t_end and x[-1, axon] - x[-1, 0] > 0.75 * factor)
+        factor,
+        kw,
+    )[0]
 
 
 # the fields of multi.membrane()'s cache key, in order

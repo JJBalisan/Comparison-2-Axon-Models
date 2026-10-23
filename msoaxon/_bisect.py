@@ -22,6 +22,18 @@ Response = Callable[[float], tuple[bool, float]]
 # after a prediction spikes, crossing probes this fraction of the bracket
 # back from it (issue #18)
 HEDGE = 0.25
+# crossing keeps a prediction this fraction of the tolerance inside the
+# bracket, so that a near-exact prediction closes it in two runs
+PREDICT_MARGIN = 0.4
+# crossing bisects after this many probes in a row land on the same side
+# without halving the bracket
+STALL_PROBES = 3
+# _predict floors a peak [mV] here before taking log(peak / level)
+PEAK_FLOOR = 1e-3
+# _predict with one point: dh/dlog(x), measured for the EPSG-pair thresholds
+LOG_SLOPE = 6.0
+# smallest_crossing steps up by at least this ratio while nothing spikes
+MIN_STEP_UP = 1.01
 
 
 def smallest_firing(
@@ -84,11 +96,12 @@ def crossing(
     converges, with ~7% more runs (issue #21).
 
     Each step predicts the boundary from the non-spiking points
-    (_predict) and probes there, kept 0.4 tol inside the bracket so that
-    a near-exact prediction closes it in two runs. It bisects instead
-    when there is no usable prediction, when the prediction falls
-    outside the bracket, or when three probes in a row landed on the
-    same side without halving the bracket.
+    (_predict) and probes there, kept 0.4 tol (PREDICT_MARGIN) inside
+    the bracket so that a near-exact prediction closes it in two runs.
+    It bisects instead when there is no usable prediction, when the
+    prediction falls outside the bracket, or when three probes
+    (STALL_PROBES) in a row landed on the same side without halving the
+    bracket.
 
     A prediction that spikes has overshot, and since it adds no
     non-spiking point the next prediction is no better. Bisecting then
@@ -118,17 +131,24 @@ def crossing(
     same, last, mark = 0, None, abs(x_yes - x_no)
     overshot = False  # the last probe was a prediction, and it spiked
     while abs(x_yes - x_no) > tol(x_no, x_yes):
-        lo, hi, t = min(x_no, x_yes), max(x_no, x_yes), 0.4 * tol(x_no, x_yes)
+        lo, hi, t = (
+            min(x_no, x_yes),
+            max(x_no, x_yes),
+            PREDICT_MARGIN * tol(x_no, x_yes),
+        )
         x, split, predicted = _predict(pts, level, f, finv), None, False
-        if x is None or not lo < x < hi or (same >= 3 and hi - lo > mark / 2):
+        if (
+            x is None
+            or not lo < x < hi
+            or (same >= STALL_PROBES and hi - lo > mark / 2)
+        ):
             same, mark = 0, (hi - lo) / 2
             if overshot:  # just short of the overshoot, not the midpoint
                 x, split = x_yes - HEDGE * (x_yes - x_no), hi - lo
             else:
                 x = (lo + hi) / 2
-        elif hi - lo <= 2 * t:
-            x = (lo + hi) / 2
         else:
+            # hi - lo > tol = t / PREDICT_MARGIN > 2 * t, so lo + t < hi - t
             x, predicted = min(max(x, lo + t), hi - t), True
         spiked, peak = respond(x)
         overshot = predicted and spiked
@@ -155,14 +175,14 @@ def _predict(
     Inverse quadratic interpolation (secant with two points) of f(x)
     against h = log(peak / level), through the three non-spiking points
     with the smallest |h|; one point alone uses the slope measured for
-    the EPSG-pair thresholds, dh/dlog x ~ 6 (after the B4 experiments,
-    scripts in the search-speed work). None if there is nothing to go
-    on.
+    the EPSG-pair thresholds, dh/dlog x ~ 6 (LOG_SLOPE; after the B4
+    experiments, scripts in the search-speed work). None if there is
+    nothing to go on.
     """
     near = sorted(
         (abs(h), f(x), h)
         for x, p in pts
-        for h in [np.log(max(p, 1e-3) / level)]
+        for h in [np.log(max(p, PEAK_FLOOR) / level)]
     )[:3]
     xs, hs = [x for _, x, _ in near], [h for _, _, h in near]
     if len(near) == 3 and len(set(hs)) == 3:
@@ -175,7 +195,7 @@ def _predict(
     elif len(near) >= 2 and hs[0] != hs[1]:
         est = xs[0] - hs[0] * (xs[1] - xs[0]) / (hs[1] - hs[0])
     elif len(near) == 1 and f is np.log:
-        est = xs[0] - hs[0] / 6.0
+        est = xs[0] - hs[0] / LOG_SLOPE
     else:
         return None
     if not np.isfinite(est):
@@ -242,7 +262,10 @@ def smallest_crossing(
             pts.append((x, peak))
         if hi is None:  # nothing spikes yet: go up
             x = min(
-                max(_predict(pts, level, np.log, np.exp) or 2 * lo, 1.01 * lo),
+                max(
+                    _predict(pts, level, np.log, np.exp) or 2 * lo,
+                    MIN_STEP_UP * lo,
+                ),
                 2 * lo,
             )
         elif (

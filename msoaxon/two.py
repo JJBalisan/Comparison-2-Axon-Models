@@ -17,6 +17,13 @@ from msoaxon import _common, _solve, constants as C, synaptic
 # replaced them with.
 GOLDWYN_2019 = {"r1": 8.5, "tau_est": 0.34, "v0": -58.0}
 
+# BDF solver settings of two_cpt (TwoCpt.m's ode15s options). Unlike
+# multi.mso_axon, whose max_step is a fraction of t_end, this model's is a
+# fixed 0.1 ms.
+RTOL = 1e-6
+ATOL = 1e-6
+MAX_STEP = 0.1  # [ms]
+
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class TwoCptParams:
@@ -242,16 +249,17 @@ def applied_current(  # noqa: PLR0911
     if stim_type == "step":
         return s.I if s.start <= t < s.stop else 0.0
     if stim_type == "ramp":
-        slope = 1 / (s.stop - s.start)
-        t_top = s.start + 1 / slope
-        return float(s.start <= t <= t_top) * s.I * (t - s.start) * slope
+        return float(s.start <= t <= s.t_top) * s.I * (t - s.start) * s.slope
     if stim_type == "ramp2":
-        slope = 1 / (s.stop - s.start)
         return min(
-            s.I, float(t >= 5) * s.I * (t - 5) * slope
+            s.I,
+            float(t >= _solve.RAMP_RISE)
+            * s.I
+            * (t - _solve.RAMP_RISE)
+            * s.slope,
         )  # start hardcoded to 5
     if stim_type == "sine":
-        wave = np.sin(2 * np.pi * s.f * (t - s.start) / 1000)
+        wave = np.sin(s.two_pi_f * (t - s.start) / 1000)
         return float(s.start <= t <= s.stop) * s.I * wave * (wave > 0)
     if stim_type == "Synaptic":
         g = synaptic.interp_g(s.t_syn, s.g_syn, t)
@@ -270,7 +278,7 @@ def applied_current(  # noqa: PLR0911
             s.I
             * (0 - V1)
             * float(te >= 0)
-            * synaptic.epsg_unitary(te, s.epsg_tau)
+            * synaptic.epsg_unitary(te, s.epsg_tau, s.inv_peak)
         )
     if stim_type == "EPSGpair":
         te = t - s.start
@@ -279,8 +287,10 @@ def applied_current(  # noqa: PLR0911
             s.I
             * (0 - V1)
             * (
-                float(te >= 0) * synaptic.epsg_unitary(te, s.epsg_tau)
-                + float(te >= td) * synaptic.epsg_unitary(te - td, s.epsg_tau)
+                float(te >= 0)
+                * synaptic.epsg_unitary(te, s.epsg_tau, s.inv_peak)
+                + float(te >= td)
+                * synaptic.epsg_unitary(te - td, s.epsg_tau, s.inv_peak)
             )
         )
     raise ValueError(f"unknown stimType {stim_type!r}")
@@ -372,6 +382,38 @@ def _rhs(
     ]
 
 
+def initial_state(P: TwoCptParams) -> np.ndarray:
+    """Returns two_cpt's initial state: the steady state at P.Vrest.
+
+    Unlike multi's rounded _GATE0, every gate starts at its exact steady
+    state at Vrest (z is frozen there), and get_params subtracts each
+    current's value at rest, so the model has no rest drift.
+
+    Args:
+        P: The parameters (get_params); Vrest is the v0 of the run.
+
+    Returns:
+        The 11 states in the module docstring's order.
+    """
+    Vr = P.Vrest
+    return np.array(
+        [
+            Vr,
+            Vr,
+            C.winf(Vr),
+            C.hinf(Vr),
+            C.winf(Vr),
+            C.minf(Vr),
+            C.minf(Vr),
+            C.hinf(Vr),
+            C.pinf(Vr),
+            C.ainf(Vr),
+            C.ainf(Vr),
+        ],
+        dtype=float,
+    )
+
+
 def two_cpt(
     stim_type: str,
     start: float,
@@ -386,7 +428,7 @@ def two_cpt(
     stop_on_spike: float | None = None,
     r1: float = 10.0,
     tau_est: float = 0.71,
-    max_step: float = 0.1,
+    max_step: float = MAX_STEP,
     stop_when_settled: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Runs the two-compartment model.
@@ -446,20 +488,7 @@ def two_cpt(
     syn = syn or synaptic.SynParams(t_end=t_end)
     P = get_params(v0, node, input_node, model_type, r1=r1, tau_est=tau_est)
     s = _common.stimulus(stim_type, start, stop, I, t_end, syn)
-    Vr = P.Vrest
-    x0 = [
-        Vr,
-        Vr,
-        C.winf(Vr),
-        C.hinf(Vr),
-        C.winf(Vr),
-        C.minf(Vr),
-        C.minf(Vr),
-        C.hinf(Vr),
-        C.pinf(Vr),
-        C.ainf(Vr),
-        C.ainf(Vr),
-    ]
+    x0 = initial_state(P)
     cuts = _solve.breakpoints(stim_type, start, stop, t_end)
     quiet = None
     # step and the synaptic inputs are already on at t == start (TwoCptODE uses
@@ -482,8 +511,8 @@ def two_cpt(
         x0,
         t_end,
         cuts,
-        rtol=1e-6,
-        atol=1e-6,
+        rtol=RTOL,
+        atol=ATOL,
         max_step=max_step,
         quiet=quiet,
         stop_event=_common._stops(

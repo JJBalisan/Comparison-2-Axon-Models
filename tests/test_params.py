@@ -2,9 +2,18 @@
 
 import dataclasses
 
+import numpy as np
 import pytest
 
-from msoaxon import _common, _dispatch, coincidence, multi, synaptic, two
+from msoaxon import (
+    _common,
+    _dispatch,
+    coincidence,
+    constants as C,
+    multi,
+    synaptic,
+    two,
+)
 
 
 def stimulus(stim_type="step"):
@@ -76,6 +85,56 @@ def test_stimulus_optional_fields():
     assert (syn.VsynE, syn.diff) == (0.0, 1.0)
 
 
+def _bits(x):
+    return np.float64(x).tobytes()
+
+
+@pytest.mark.parametrize("stim_type", ["ramp", "ramp2"])
+def test_ramp_fields_equal_the_old_inline_expressions(stim_type):
+    # what multi.external_current and two.applied_current recomputed per call
+    start, stop = 5.3, 8.1
+    s = _common.stimulus(
+        stim_type, start, stop, 60.0, 20.0, synaptic.SynParams()
+    )
+    slope = 1 / (stop - start)
+    assert _bits(s.slope) == _bits(slope)
+    if stim_type == "ramp":
+        assert _bits(s.t_top) == _bits(start + 1 / slope)
+        assert _bits(s.t_end_local) == _bits(stop + 5)
+    else:
+        assert (s.t_top, s.t_end_local) == (None, None)
+    assert s.two_pi_f is None
+
+
+def test_sine_field_equals_the_old_inline_expression():
+    syn = synaptic.SynParams(f=317.0)
+    s = _common.stimulus("sine", 5.0, 9.0, 60.0, 20.0, syn)
+    assert _bits(s.two_pi_f) == _bits(2 * np.pi * syn.f)
+    for t in (5.0, 5.37, 8.123):
+        old = np.sin(2 * np.pi * s.f * (t - s.start) / 1000)
+        assert _bits(np.sin(s.two_pi_f * (t - s.start) / 1000)) == _bits(old)
+    assert (s.slope, s.t_top, s.t_end_local) == (None, None, None)
+
+
+def test_inv_peak_equals_the_old_inline_expressions():
+    default = stimulus("EPSG")
+    assert _bits(default.inv_peak) == _bits(1 / 0.21317)
+    tau = (0.1, 0.3)  # Myoga et al 2014: decay 0.3
+    s = _common.stimulus(
+        "EPSG", 5.0, 9.0, 60.0, 20.0, synaptic.SynParams(epsg_tau=tau)
+    )
+    rise, decay = tau
+    t_peak = np.log(decay / rise) * rise * decay / (decay - rise)
+    peak = np.exp(-t_peak / decay) - np.exp(-t_peak / rise)
+    assert _bits(s.inv_peak) == _bits(1 / peak)
+    # epsg_unitary gives the same bits whether it is handed the field or not
+    t = np.linspace(-2.0, 6.0, 801)
+    expected = (1 / peak) * (t > 0) * (np.exp(-t / decay) - np.exp(-t / rise))
+    for given in (s.inv_peak, None):
+        got = synaptic.epsg_unitary(t, s.epsg_tau, given)
+        assert got.tobytes() == expected.tobytes()
+
+
 def test_morphology_keys():
     assert multi.LUMPED.key == "lumped"
     assert multi.with_dendrites().key == (
@@ -134,3 +193,60 @@ def test_keys_feed_the_caches():
         "mem=membrane(v0=-68.0, soma_klt_scale=1.0, ais_klt_scale=1.0, "
         "soma_na_vhalf=-62.5, rebalance_rest=False, dendrite_klt_scale=1.0)"
     )
+
+
+def _old_multi_y0(morph, mem, v0):
+    """mso_axon's inline initial state before initial_state existed."""
+    n = morph.n
+    if mem.y0_gates is None:
+        return np.concatenate(
+            [np.full(n, float(v0))] + [np.full(n, g) for g in multi._GATE0]
+        )
+    return np.concatenate([np.full(n, float(v0)), *mem.y0_gates])
+
+
+@pytest.mark.parametrize("rebalance_rest", [False, True])
+@pytest.mark.parametrize("dendrites", [False, True])
+@pytest.mark.parametrize("v0", [-68.0, -60.0, -65])
+def test_multi_initial_state_equals_the_old_inline_code(
+    rebalance_rest, dendrites, v0
+):
+    morph = multi.with_dendrites() if dendrites else multi.LUMPED
+    mem = multi.membrane(v0, morph=morph, rebalance_rest=rebalance_rest)
+    new, old = (
+        multi.initial_state(morph, mem, v0),
+        _old_multi_y0(morph, mem, v0),
+    )
+    assert new.dtype == old.dtype
+    assert new.shape == (7 * morph.n,)
+    assert np.array_equal(new, old)
+    assert new.tobytes() == old.tobytes()
+
+
+def _old_two_x0(params):
+    """two_cpt's inline initial state before initial_state existed."""
+    Vr = params.Vrest
+    return [
+        Vr,
+        Vr,
+        C.winf(Vr),
+        C.hinf(Vr),
+        C.winf(Vr),
+        C.minf(Vr),
+        C.minf(Vr),
+        C.hinf(Vr),
+        C.pinf(Vr),
+        C.ainf(Vr),
+        C.ainf(Vr),
+    ]
+
+
+@pytest.mark.parametrize("v0", [-68.0, -58.0, -65])
+@pytest.mark.parametrize("model_type", ["passive", "active-full"])
+def test_two_initial_state_equals_the_old_inline_code(v0, model_type):
+    P = two.get_params(v0, 3, 1, model_type)
+    new = two.initial_state(P)
+    old = np.asarray(_old_two_x0(P), dtype=float)  # as integrate() takes it
+    assert new.dtype == old.dtype
+    assert np.array_equal(new, old)
+    assert new.tobytes() == old.tobytes()

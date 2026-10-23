@@ -21,10 +21,10 @@ from typing import Any
 import numpy as np
 from scipy import interpolate
 
-from msoaxon import _bisect, _dispatch, coincidence, multi
+from msoaxon import _bisect, _common, _dispatch, coincidence, multi
 
-START, STOP, T_END = 5.0, 105.0, 110.0
-FACTOR = 10.0  # spike = axon rises this far above soma
+START, STOP, T_END = _common.START, 105.0, 110.0
+FACTOR = _common.FACTOR  # spike = axon rises this far above soma
 CHARGING = 0.15  # ms after step onset excluded from the inflection search
 LOOKBACK = 0.5  # ms before the spike-detection time searched for the takeoff
 # Smallest d2V/dt2 at the inflection [mV/ms^2] that counts as a distinct one.

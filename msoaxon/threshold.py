@@ -4,10 +4,10 @@ from collections.abc import Callable
 from concurrent import futures
 from typing import Any
 
-from msoaxon import _dispatch, _parallel, spiking, synaptic
+from msoaxon import _common, _dispatch, _parallel, spiking, synaptic
 
-START = 5.0
-T_END = 20.0
+START = _common.START
+T_END = _common.T_END
 V0 = -68.0
 MODEL_TYPE = "active-full"
 INPUT_NODE = 1

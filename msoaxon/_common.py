@@ -27,6 +27,14 @@ MODEL_TYPES = (
     "active-full",
 )
 
+# The analysis defaults (coincidence, threshold and somatic import them under
+# the same names): the stimulus onset and run length [ms] of the EPSG sweeps,
+# and the spike criterion, a compartment's rise above the soma [mV] (somatic
+# keeps its own longer run).
+START = 5.0
+T_END = 20.0
+FACTOR = 10.0
+
 
 def check_args(
     stim_type: str,
@@ -99,6 +107,22 @@ class Stimulus:
             only.
         diff: Delay of the second input of SynapticPair [ms]; the
             synaptic inputs only.
+        inv_peak: The factor that makes the unitary EPSG's peak 1
+            (synaptic.epsg_inv_peak(epsg_tau)); none of the other
+            fields below depend on it.
+        slope: Slope of the ramp [1/ms], 1 / (stop - start); "ramp" and
+            "ramp2" only.
+        t_top: When the "ramp" reaches its peak [ms], start + 1 / slope;
+            "ramp" only.
+        t_end_local: When the "ramp" is cut off in multi.py [ms],
+            stop + _solve.RAMP_RISE; "ramp" only.
+        two_pi_f: Angular frequency of the sine [rad/s], 2 * pi * f;
+            "sine" only.
+
+    The last five are derived once here instead of on every right-hand
+    side call, and are named after the Rust port's fields. Each is the
+    value the models' inline expressions produced, with the same operand
+    order.
     """
 
     start: float
@@ -111,6 +135,11 @@ class Stimulus:
     g_syn: np.ndarray | None = None
     VsynE: float | None = None
     diff: float | None = None
+    inv_peak: float | None = None
+    slope: float | None = None
+    t_top: float | None = None
+    t_end_local: float | None = None
+    two_pi_f: float | None = None
 
 
 def stimulus(
@@ -133,11 +162,19 @@ def stimulus(
         syn: A SynParams with the waveform settings.
 
     Returns:
-        A Stimulus with start, stop, I, t_end and epsg_tau, plus f for
-        "sine", and t_syn, g_syn, VsynE and diff for the synaptic
-        inputs (None for the other stimuli).
+        A Stimulus with start, stop, I, t_end, epsg_tau and inv_peak,
+        plus f and two_pi_f for "sine", slope for "ramp" and "ramp2"
+        with t_top and t_end_local for "ramp", and t_syn, g_syn, VsynE
+        and diff for the synaptic inputs (None for the other stimuli).
     """
     f = syn.f if stim_type == "sine" else None
+    two_pi_f = 2 * np.pi * f if f is not None else None
+    slope = t_top = t_end_local = None
+    if stim_type in ("ramp", "ramp2"):
+        slope = 1 / (stop - start)
+    if stim_type == "ramp":
+        t_top = start + 1 / slope
+        t_end_local = stop + _solve.RAMP_RISE
     t_syn = g_syn = v_syn = diff = None
     if stim_type in ("Synaptic", "SynapticPair"):
         t_syn, g_syn = synaptic.synaptic(syn)
@@ -153,6 +190,11 @@ def stimulus(
         g_syn=g_syn,
         VsynE=v_syn,
         diff=diff,
+        inv_peak=synaptic.epsg_inv_peak(tuple(syn.epsg_tau)),
+        slope=slope,
+        t_top=t_top,
+        t_end_local=t_end_local,
+        two_pi_f=two_pi_f,
     )
 
 

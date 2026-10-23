@@ -44,7 +44,18 @@ ACTIVE_GATES = {
     "active-KHT": (0, 0, 1, 0, 0, 0),
 }
 
-# initial gating values (steady state at -68 mV, as in msoAxon.m)
+# BDF solver settings of mso_axon (msoAxon.m's ode15s options). max_step is
+# MAX_STEP_FRACTION * t_end unless given: ode15s's default MaxStep.
+RTOL = 1e-8
+ATOL = 1e-8
+MAX_STEP_FRACTION = 0.1
+
+# Initial gating values (m, h, p, w, z, a), as in msoAxon.m: the steady state
+# at -68 mV rounded to two decimals (exact: 0.1192, 0.6699, 0.0006, 0.2868,
+# 0.6646, 0.2244; w and z are 0.01 off). The gates therefore start slightly
+# off steady state, which is the source of the ~0.9 mV drift of the rest
+# potential in membranes built without rebalance_rest. They must stay these
+# literals: the golden traces and the Rust port both start from them.
 _GATE0 = (0.12, 0.67, 0.0, 0.28, 0.67, 0.22)
 
 
@@ -421,23 +432,28 @@ def external_current(  # noqa: PLR0911, PLR0912
     """
     k = input_node - 1
     if stim_type == "ramp":
-        slope = 1 / (s.stop - s.start)
-        t_end_local = s.stop + 5  # msoAxon.m rebinds tEnd here
-        t_top = s.start + 1 / slope
-        I0 = float(s.start <= t <= t_top) * s.I * (t - s.start) * slope / 1000
-        if 5 < t <= t_end_local:  # 5 is hardcoded in the original
+        # slope, t_top and t_end_local are derived once, in _common.stimulus
+        # (msoAxon.m rebinds tEnd to t_end_local here)
+        I0 = (
+            float(s.start <= t <= s.t_top)
+            * s.I
+            * (t - s.start)
+            * s.slope
+            / 1000
+        )
+        if _solve.RAMP_RISE < t <= s.t_end_local:  # hardcoded 5 originally
             return k, -I0 * 1e3 / sa[0]
     elif stim_type == "ramp2":
-        slope = 1 / (s.stop - s.start)
         I0 = min(
-            float(t >= s.start) * s.I * (t - s.start) * slope / 1000, s.I / 1000
+            float(t >= s.start) * s.I * (t - s.start) * s.slope / 1000,
+            s.I / 1000,
         )
         return k, -I0 * 1e3 / sa[0]
     elif stim_type == "step":
         if s.start < t <= s.stop:
             return 0, -s.I / sa[0]  # always the soma, regardless of input_node
     elif stim_type == "sine":
-        wave = np.sin(2 * np.pi * s.f * (t - s.start) / 1000)
+        wave = np.sin(s.two_pi_f * (t - s.start) / 1000)
         if s.start < t <= s.stop:
             return k, -(s.I * wave * (wave > 0)) / sa[0]
     elif stim_type == "Synaptic":
@@ -459,9 +475,11 @@ def external_current(  # noqa: PLR0911, PLR0912
     elif stim_type == "EPSGpair":
         te = t - s.start
         td = s.stop - s.start
-        wave = float(te >= 0) * synaptic.epsg_unitary(te, s.epsg_tau) + float(
-            te >= td
-        ) * synaptic.epsg_unitary(te - td, s.epsg_tau)
+        wave = float(te >= 0) * synaptic.epsg_unitary(
+            te, s.epsg_tau, s.inv_peak
+        ) + float(te >= td) * synaptic.epsg_unitary(
+            te - td, s.epsg_tau, s.inv_peak
+        )
         return k, s.I * (0 - V[k]) * wave / -sa[k]
     return 0, 0.0
 
@@ -496,14 +514,14 @@ def bilateral_current(
         s.I
         * (0 - V[a])
         * float(te >= 0)
-        * synaptic.epsg_unitary(te, s.epsg_tau)
+        * synaptic.epsg_unitary(te, s.epsg_tau, s.inv_peak)
         / -sa[a]
     )
     ib = (
         s.I
         * (0 - V[b])
         * float(te >= td)
-        * synaptic.epsg_unitary(te - td, s.epsg_tau)
+        * synaptic.epsg_unitary(te - td, s.epsg_tau, s.inv_peak)
         / -sa[b]
     )
     return (a, ia), (b, ib)
@@ -703,6 +721,27 @@ def _rhs(
     return out
 
 
+def initial_state(morph: Morphology, mem: Membrane, v0: float) -> np.ndarray:
+    """Returns mso_axon's initial state: V at v0, then the six gates.
+
+    Args:
+        morph: The morphology (its n sets the block length).
+        mem: The channel overrides; its y0_gates (rebalance_rest) are the
+            starting gates, else msoAxon.m's rounded _GATE0.
+        v0: The initial potential [mV].
+
+    Returns:
+        The state vector, 7 * morph.n long, in the module docstring's
+        layout.
+    """
+    n = morph.n
+    if mem.y0_gates is None:
+        return np.concatenate(
+            [np.full(n, float(v0))] + [np.full(n, g) for g in _GATE0]
+        )
+    return np.concatenate([np.full(n, float(v0)), *mem.y0_gates])
+
+
 def mso_axon(
     stim_type: str,
     start: float,
@@ -816,12 +855,7 @@ def mso_axon(
             "pass morph= to membrane()"
         )
     n = morph.n
-    if mem.y0_gates is None:
-        y0 = np.concatenate(
-            [np.full(n, float(v0))] + [np.full(n, g) for g in _GATE0]
-        )
-    else:
-        y0 = np.concatenate([np.full(n, float(v0)), *mem.y0_gates])
+    y0 = initial_state(morph, mem, v0)
     cuts = _solve.breakpoints(stim_type, start, stop, t_end)
     mode = _fast.resolve(mode)
     if mode == "fast":
@@ -857,9 +891,9 @@ def mso_axon(
         y0,
         t_end,
         cuts,
-        rtol=1e-8,
-        atol=1e-8,
-        max_step=max_step or 0.1 * t_end,
+        rtol=RTOL,
+        atol=ATOL,
+        max_step=max_step or MAX_STEP_FRACTION * t_end,
         jac_sparsity=morph.jac,
         quiet=quiet,
         stop_event=_common._stops(

@@ -13,6 +13,24 @@ Event = Callable[[float, np.ndarray], float]
 _QUIET_CACHE = {}
 _QUIET_CACHE_SIZE = 64
 
+# msoAxon.m and TwoCptODE.m hardcode 5 ms in the ramp stimuli: "ramp" is gated
+# on 5 < t <= stop + 5, and "ramp2" in two_cpt rises from t = 5 whatever
+# `start` is. One name for all of those sites (breakpoints, multi, two).
+RAMP_RISE = 5.0  # [ms]
+# input_end: an EPSG has decayed to ~2e-9 of its peak 20 decay constants after
+# its last onset.
+EPSG_TAIL = 20
+# The searches stop a run early for one of two reasons, and spikes() tells them
+# apart by the final state of axon - soma (in units of the criterion `factor`):
+# a spike stop ends at factor (spike_event); a settled stop (settled_event)
+# needs axon - soma below SETTLED_FRACTION * factor, so it ends at or below
+# that. The test sits between them at SPIKE_TEST_FRACTION * factor, away from
+# both: the settled event can fire exactly as axon - soma falls through
+# SETTLED_FRACTION * factor, so testing there misread three near-threshold ramp
+# runs as spikes.
+SETTLED_FRACTION = 0.5
+SPIKE_TEST_FRACTION = 0.75
+
 
 def breakpoints(
     stim_type: str, start: float, stop: float, t_end: float
@@ -34,7 +52,7 @@ def breakpoints(
     """
     pts = {start, stop}
     if stim_type in ("ramp", "ramp2"):
-        pts |= {5.0, stop + 5.0}
+        pts |= {RAMP_RISE, stop + RAMP_RISE}
     return sorted(p for p in pts if 0 < p < t_end)
 
 
@@ -47,7 +65,7 @@ def input_end(
 ) -> float:
     """Returns the time after which the stimulus no longer drives the cell.
 
-    EPSGs: the last onset plus 20 decay constants, when the conductance
+    EPSGs: the last onset plus EPSG_TAIL decay constants, when the conductance
     is below ~2e-9 of its peak (neither model's EPSG ends sooner:
     two_cpt never cuts it off). step, ramp, sine and the synaptic inputs
     are off after `stop`. ramp2 holds its current to t_end, so it never
@@ -65,7 +83,7 @@ def input_end(
     """
     if stim_type in ("EPSG", "EPSGpair", "EPSGbilateral"):
         last = start if stim_type == "EPSG" else max(start, stop)
-        return last + 20 * max(epsg_tau)
+        return last + EPSG_TAIL * max(epsg_tau)
     if stim_type in ("step", "ramp", "sine", "Synaptic", "SynapticPair"):
         return max(start, stop)
     return t_end
@@ -144,9 +162,10 @@ def settled_event(dv: Rhs, t_off: float, axon_col: int, factor: float) -> Event:
     """Returns a terminal event: after t_off, stop once no spike can follow.
 
     Fires at the first time after t_off when axon - soma is below
-    factor / 2 and every compartment's voltage is falling. t_off
-    (input_end) guarantees the input has stopped driving the cell; all
-    voltages falling guarantees its response has peaked everywhere, a
+    SETTLED_FRACTION * factor (factor / 2) and every compartment's
+    voltage is falling. t_off (input_end) guarantees the input has
+    stopped driving the cell; all voltages falling guarantees its
+    response has peaked everywhere, a
     stronger condition than axon - soma falling (which also passed the
     benchmark's --check, but stops later). With no input and every
     compartment repolarising, the run's yes/no is decided; the searches,
@@ -158,7 +177,7 @@ def settled_event(dv: Rhs, t_off: float, axon_col: int, factor: float) -> Event:
     stop is identical to one without the event, and one that does is
     identical up to the stop. spikes() tells the two stops apart by the
     final state: a spike stop ends with axon - soma at factor, a settled
-    stop at or below factor / 2.
+    stop at or below SETTLED_FRACTION * factor (see SPIKE_TEST_FRACTION).
 
     Only the voltage derivatives are needed, so the models pass a
     function that computes those alone (multi._dv, two._dv), bit for bit
@@ -176,7 +195,7 @@ def settled_event(dv: Rhs, t_off: float, axon_col: int, factor: float) -> Event:
     """
 
     def event(t: float, x: np.ndarray) -> float:
-        if t < t_off or x[axon_col] - x[0] >= factor / 2:
+        if t < t_off or x[axon_col] - x[0] >= factor * SETTLED_FRACTION:
             return -1.0
         return 1.0 if np.all(np.asarray(dv(t, x)) < 0) else -1.0
 
