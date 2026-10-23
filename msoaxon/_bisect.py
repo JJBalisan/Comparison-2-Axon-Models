@@ -178,7 +178,13 @@ def _predict(
         est = xs[0] - hs[0] / 6.0
     else:
         return None
-    return finv(est) if np.isfinite(est) else None
+    if not np.isfinite(est):
+        return None
+    # a nearly flat response extrapolates far past float range (exp of a
+    # log-amplitude beyond ~709); the inf that results is as unhelpful as
+    # no prediction and the callers clamp it, so it needs no warning
+    with np.errstate(over="ignore"):
+        return finv(est)
 
 
 def smallest_crossing(

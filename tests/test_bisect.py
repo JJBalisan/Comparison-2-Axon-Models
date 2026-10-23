@@ -6,6 +6,7 @@ fails instead of hanging.
 """
 
 import math
+import warnings
 
 import numpy as np
 import pytest
@@ -366,3 +367,21 @@ def test_rheobase_reports_a_cell_that_fires_at_rest(monkeypatch):
     msg = str(err.value)
     assert "'multi'" in msg and "v0=-60.0" in msg
     assert "rebalance_rest=True" in msg
+
+
+def test_predict_from_a_flat_response_overflows_quietly():
+    # peaks 1e-7 apart extrapolate the log-amplitude to ~5e7, past exp
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        got = _bisect._predict(
+            [(1.0, 5.0), (2.0, 5.0000001)], LEVEL, np.log, np.exp
+        )
+    assert got == np.inf
+
+
+def test_smallest_crossing_climbs_a_flat_response_to_the_ceiling_quietly():
+    fake = Fake(np.inf, peak=lambda x: 5.0 + 1e-9 * math.log(x))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        got = _bisect.smallest_crossing(fake.respond, 1.0, 100.0, 1e-3, LEVEL)
+    assert got == np.inf
