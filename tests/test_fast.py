@@ -354,14 +354,12 @@ def test_ramp_needs_stop_after_start_before_any_dispatch(stim, mode, stop):
         two.two_cpt(stim, 5.0, stop, 30, 3, "active-full", 8, -68.0, 1)
 
 
-def test_mode_is_part_of_the_quiet_cache_key(fake_ext):
-    _solve._QUIET_CACHE.clear()
+def test_mode_is_part_of_the_quiet_cache_key(fake_ext, fresh_quiet_cache):
     for mode in ("exact", "fast"):
         multi.mso_axon(
             "EPSGpair", 5, 5.1, 30, 3, "active-full", 8, -68.0, 1, mode=mode
         )
     modes = sorted(k[0][-1] for k in _solve._QUIET_CACHE)
-    _solve._QUIET_CACHE.clear()
     assert modes == ["exact", "fast"]
 
 

@@ -54,8 +54,7 @@ def test_unbalanced_klt_block_fires_on_its_own():
     assert (y[:, 2] > -20).any()
 
 
-def test_prestimulus_cache_separates_membranes():
-    _solve._QUIET_CACHE.clear()
+def test_prestimulus_cache_separates_membranes(fresh_quiet_cache):
     msoaxon.mso_axon(*ARGS)
     t1, y1 = msoaxon.mso_axon(*ARGS, mem=multi.membrane(-68.0, **DTX))
     _solve._QUIET_CACHE.clear()
