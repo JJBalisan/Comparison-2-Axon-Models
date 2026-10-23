@@ -93,8 +93,10 @@ def run(
 
     from msoaxon import plotting
 
-    for stim in a.only or SWEEPS:
-        n, factor, max_I, title, xlabel = SWEEPS[stim]
+    stims = a.only or list(SWEEPS)
+
+    def sweep(stim: str) -> tuple[np.ndarray, list[float], list[float]]:
+        n, factor, max_I, _, _ = SWEEPS[stim]
         kw, dt = {}, 1 / 25
         if stim == "EPSGpair":
             n, kw = epsgpair_grid(a.jpg_grid)
@@ -113,6 +115,23 @@ def run(
             executor=pool,
             **kw,
         )
+        return x_values, multi, two
+
+    # binary_search maps its points onto the pool and waits for them, so called
+    # one sweep at a time it would drain the pool between sweeps. From one
+    # thread per sweep, every sweep's points are queued at once (submitting to
+    # the pool is thread-safe) and the pool stays busy until the last point;
+    # the figures are still drawn here, in order. Without a pool the sweeps run
+    # in-process, one after another.
+    if pool is None:
+        sweeps = {stim: sweep(stim) for stim in stims}
+    else:
+        with futures.ThreadPoolExecutor(len(stims)) as threads:
+            jobs = {stim: threads.submit(sweep, stim) for stim in stims}
+            sweeps = {stim: job.result() for stim, job in jobs.items()}
+    for stim in stims:
+        _, _, _, title, xlabel = SWEEPS[stim]
+        x_values, multi, two = sweeps[stim]
         print(f"{stim}: multi={multi}\n{' ' * len(stim)}  two  ={two}")
         fig = plotting.threshold_figure(
             x_values,
