@@ -20,6 +20,7 @@ import types
 from typing import Any
 
 import numpy as np
+from scipy import interpolate
 
 from msoaxon import _bisect, _dispatch, coincidence
 
@@ -256,6 +257,13 @@ def spike_amplitude(
     number from the wrong feature. The limits move with the membrane and the
     criterion: with KLT removed the inflection stays distinct up to 10x.
 
+    The inflection is the argmax of the second derivative of a cubic spline
+    through the solver's own samples, evaluated on a 1 us grid. Differentiating
+    a linear interpolant of the trace twice (the rule before issue #56) turns
+    every solver step into a tooth of d2V/dt2 and the argmax into a lottery
+    over the teeth, so a different platform's step placement moved a steep
+    takeoff's amplitude by ~1 mV (issue #56).
+
     The inflection is distinct when all of these hold:
       - the d2V/dt2 peak in the search window is the largest before the
         spike peak, so the takeoff was not left out of the window;
@@ -314,8 +322,10 @@ def spike_amplitude(
         **{**kw, "max_step": 0.005},
     )
     grid = np.arange(START + 0.001, ts + 2.0, 0.001)
-    V = np.interp(grid, t, x[:, 0])
-    d2 = np.gradient(np.gradient(V, grid), grid)
+    keep = (t > START) & np.r_[True, np.diff(t) > 0]
+    spline = interpolate.CubicSpline(t[keep], x[keep, 0])
+    V = spline(grid)
+    d2 = spline(grid, 2)
     i_pk = int(np.argmax(np.where(grid > ts - 0.3, V, -np.inf)))
     lo = max(START + CHARGING, ts - LOOKBACK)
     win = np.flatnonzero((grid >= lo) & (np.arange(len(grid)) < i_pk))

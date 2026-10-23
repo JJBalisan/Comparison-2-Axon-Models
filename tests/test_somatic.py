@@ -83,8 +83,8 @@ def test_somatic_spike_is_mature_and_klt_sets_it():
 RHEOBASE = {"multi": 3784.1, "two": 3846.0}
 # PYTHON.md "Somatic spike" table: mV at 1.5x, 2x and 3x rheobase
 TABLE = {
-    "multi": {1.5: 7.6, 2.0: 13.4, 3.0: 19.4},
-    "two": {1.5: 6.2, 2.0: 15.6, 3.0: 17.6},
+    "multi": {1.5: 7.4, 2.0: 13.3, 3.0: 18.2},
+    "two": {1.5: 6.4, 2.0: 13.0, 3.0: 17.8},
 }
 
 
@@ -125,12 +125,39 @@ def test_somatic_spike_without_a_step_spike_is_none():
     assert somatic.spike_amplitude("multi", 0.5 * RHEOBASE["multi"]) is None
 
 
-@pytest.mark.parametrize("k", [1.5, 3.0])
+# PYTHON.md dendrotoxin row (KLT removed): mV at 1.5x and 3x its rheobase
+DTX_TABLE = {1.5: 25.4, 3.0: 31.7}
+
+
+@pytest.mark.parametrize("k", DTX_TABLE)
 def test_somatic_spike_with_klt_removed_stays_distinct(k):
     # the sharp takeoff keeps its inflection at every step size, unlike the
-    # control membrane. The amplitude is only bounded: this membrane's response
-    # is steep in the current, and CI platforms differ by ~1 mV at 1.5x
+    # control membrane. Pinned to 0.1 mV: the pick is stable to that (issue #56,
+    # where the old argmax moved this row by ~0.9 mV between platforms)
     mem = multi.membrane(-68.0, **DTX)
     r = somatic.spike_amplitude("multi", k * 199.524, mem=mem)
     assert r["distinct"]
-    assert 20 < r["amplitude"] < 40  # dendrotoxin: 15 -> 37 mV
+    assert r["amplitude"] == pytest.approx(DTX_TABLE[k], abs=0.1)
+
+
+@pytest.mark.parametrize("k", DTX_TABLE)
+def test_somatic_spike_does_not_depend_on_solver_steps(monkeypatch, k):
+    # a different max_step moves every solver knot of the fine rerun, as a
+    # different platform's last-bit differences do. The old argmax of a
+    # linearly interpolated d2V/dt2 followed the knots and moved this row by
+    # 0.6-1.9 mV; the spline pick moves it by less than 0.1 mV
+    mem = multi.membrane(-68.0, **DTX)
+    run_model = somatic._dispatch.run_model
+    amps = []
+    for max_step in (0.004, 0.006):
+
+        def stepped(*args, max_step=max_step, **kw):
+            if kw.get("max_step") == 0.005:
+                kw["max_step"] = max_step
+            return run_model(*args, **kw)
+
+        monkeypatch.setattr(somatic._dispatch, "run_model", stepped)
+        r = somatic.spike_amplitude("multi", k * 199.524, mem=mem)
+        assert r["distinct"]
+        amps.append(r["amplitude"])
+    assert amps[0] == pytest.approx(amps[1], abs=0.1)
