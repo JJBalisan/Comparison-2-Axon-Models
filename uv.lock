@@ -651,7 +651,7 @@ wheels = [
 
 [[package]]
 name = "msoaxon"
-version = "1.3.2"
+version = "1.3.3"
 source = { editable = "." }
 dependencies = [
     { name = "matplotlib" },
@@ -693,7 +693,7 @@ dev = [
 
 [[package]]
 name = "msoaxon-fast"
-version = "1.3.2"
+version = "1.3.3"
 source = { directory = "rust" }
 
 [[package]]

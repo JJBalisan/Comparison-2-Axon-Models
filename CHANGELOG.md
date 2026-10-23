@@ -6,6 +6,69 @@ and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least. The `msoaxon-fast` crate in `rust/` carries the
 same version as the package, bumped in the same release PR.
 
+## 1.3.3 (23 Oct 2026)
+
+Preparation for the Rust port (#28): every number the port must copy has one
+source, the solver driver's rules have direct tests, and the Rust right-hand
+side takes its constants from Python. Results are bit-identical; one NaN edge
+far outside any script's reach is fixed.
+
+### Changed
+
+- The magic numbers shared by the Python models and the Rust port are named
+  once: `_solve.RAMP_RISE`, `EPSG_TAIL`, `SETTLED_FRACTION` and
+  `SPIKE_TEST_FRACTION`; the solver tolerances and step sizes (`multi.RTOL`,
+  `ATOL`, `MAX_STEP_FRACTION`; `two.RTOL`, `ATOL`, `MAX_STEP`); the search
+  constants in `_bisect` (`PREDICT_MARGIN`, `STALL_PROBES`, `PEAK_FLOOR`,
+  `LOG_SLOPE`, `MIN_STEP_UP`); `synaptic.EPSG_NORM`; and the analysis
+  defaults `START`, `T_END`, `FACTOR`, now defined in `_common` and
+  re-exported by `coincidence`, `threshold` and `somatic`. Each holds exactly
+  the literal it replaced (#28).
+- `_common.Stimulus` carries the ramp `slope`, `t_top` and `t_end_local`,
+  the sine `two_pi_f` and the EPSG `inv_peak`, computed once per run instead
+  of on every right-hand side call, with the operand order the inline
+  expressions had. `multi.initial_state` and `two.initial_state` build the
+  initial state; `_dispatch.axon_column` replaces three copies of the
+  compared-column rule, and `spikes` and `response` share one body (#28).
+- The Rust right-hand side (`msoaxon-fast`) no longer holds its own copies of
+  the reversal potentials or the gating-kinetics constants: `multi.V_NA`,
+  `V_K`, `V_H`, `constants._P_TEMP` / `_A_TEMP` and the literals of the
+  gating functions are passed in by `_fast` when a run is built, so a change
+  in Python can no longer be mistaken for hardware drift by the self-check.
+  `msoaxon_fast.interp` exposes the port's `np.interp` for the tests (#28,
+  #71).
+- `cargo test` runs in the `pytest-fast` CI job: nine crate tests, among them
+  a bit-exact guard on one right-hand-side evaluation and the interpolation
+  edge cases (#71).
+
+### Fixed
+
+- `synaptic.epsg_unitary` returned `nan` for onsets more than about 71 ms in
+  the past (35 ms for a 0.05 ms rise), which crashed both models for an
+  EPSGpair whose second onset was 80 ms after the first. It now returns
+  `-0.0`, as it already did for slightly negative times; every reachable
+  value is unchanged bit for bit, and `Epsg::unitary` in the Rust port does
+  the same (#71).
+
+### Removed
+
+- The unreachable midpoint branch in `_bisect.crossing` (#71).
+
+### Tests
+
+- `tests/test_solve.py` pins the solver driver's rules: `breakpoints`,
+  `input_end` for every stimulus, `pre_stimulus_is_quiet`, `spike_event`,
+  `settled_event`, `interp_g`, and the two/multi quiet-prefix difference
+  (#71).
+- `tests/test_analysis.py` pins `epsg_unitary` after, just before and far
+  before onset, and an EPSGpair 80 ms apart on both models (#71).
+- `tests/test_somatic.py` gives each somatic table point its own tolerance
+  from the measured `max_step` spread: 0.1 and 0.25 mV for the 2-compartment
+  1.5x and 3x points, 0.06 mV elsewhere (#28).
+- PYTHON.md gains a "Port contract" section: which tests survive a new
+  integrator, which retire, which can flip, and the Python-only behaviour the
+  port must reproduce or keep (#28).
+
 ## 1.3.2 (23 Oct 2026)
 
 Housekeeping; results are unchanged. The parameter bundles become typed
