@@ -3,7 +3,8 @@
 Versions follow [semantic versioning](https://semver.org/). The Python
 package is the reference: a release pins the numbers the analysis produces,
 and a change that moves them beyond the golden-trace tolerance is a new
-minor version at least.
+minor version at least. The `msoaxon-fast` crate in `rust/` carries the
+same version as the package, bumped in the same release PR.
 
 ## 1.3.1 (23 Oct 2026)
 
