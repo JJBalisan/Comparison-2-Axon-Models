@@ -64,9 +64,9 @@ max-statements = 50      # ~ pyguide 3.18 "about 40 lines"
 # VsynE, ...) so each line can be checked against the .m file it ports:
 # N803/N806/N815 (mixed-case names), E741 (I), N812 (constants imported as C).
 "msoaxon/multi.py" = ["N803", "N806", "N812", "E741"]
-"msoaxon/two.py" = ["N803", "N806", "N812", "E741"]
+"msoaxon/two.py" = ["N803", "N806", "N812", "N815", "E741"]
 "msoaxon/constants.py" = ["N803"]
-"msoaxon/_common.py" = ["N803", "N812", "E741"]
+"msoaxon/_common.py" = ["N803", "N812", "N815", "E741"]
 "msoaxon/_dispatch.py" = ["N803", "E741"]
 "msoaxon/synaptic.py" = ["N815"]
 "msoaxon/threshold.py" = ["N803", "N806", "E741"]

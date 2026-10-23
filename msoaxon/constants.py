@@ -64,6 +64,32 @@ def hinf(V: np.ndarray | float, vhalf: float = 62.5) -> np.ndarray | float:
     return 1.0 / (1.0 + np.exp((V + vhalf) / 7.77))
 
 
+def na_open(
+    m: np.ndarray | float,
+    h: np.ndarray | float,
+    g: np.ndarray | float = 1.0,
+) -> np.ndarray | float:
+    """Returns the Na conductance g * m^4 * (0.993 h + 0.007).
+
+    The 0.007 is the non-inactivating fraction of the channels. The
+    float order is the one every copy of this expression had, left to
+    right, so g multiplies m**4 before the inactivation term; a caller
+    multiplying the result by a driving force keeps msoAxon.m's order,
+    which the golden traces and the Rust port depend on. The default
+    g = 1 leaves the bits unchanged (x * 1.0 == x).
+
+    Args:
+        m: Na activation.
+        h: Na inactivation.
+        g: The maximal conductance (any units); 1 gives the open
+            fraction itself.
+
+    Returns:
+        g times the open fraction, in g's units.
+    """
+    return g * m**4 * (0.993 * h + 0.007)
+
+
 def pinf(V: np.ndarray | float) -> np.ndarray | float:
     """KHT activation: Rothman & Manis 2003, without their slow gate.
 
@@ -206,7 +232,7 @@ def _fractions(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Returns the KLT, h and Na fractions of the resting conductance."""
     h = G_H * ainf(v_rest)
-    na = G_NA * minf(v_rest) ** 4 * (0.993 * hinf(v_rest) + 0.007)
+    na = na_open(minf(v_rest), hinf(v_rest), G_NA)
     kht = G_KHT * pinf(v_rest)
     klt = G_KLT * winf(v_rest) ** 4 * zinf(v_rest)
     total = klt + kht + na + h + G_LK

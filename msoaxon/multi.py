@@ -12,7 +12,8 @@ appended after the axon, so compartments 1-45 keep their meaning; the state then
 has 7 blocks of n = 45 + dendrite compartments.
 """
 
-import types
+import dataclasses
+from typing import Any
 
 import numpy as np
 from scipy import sparse
@@ -85,32 +86,102 @@ def _tree_jac_sparsity(
     return sparse.bmat(blocks).tocsc()
 
 
-# A morphology is a SimpleNamespace with these fields (LUMPED and
-# with_dendrites()):
-#   key       hashable summary of every setting, part of the pre-stimulus
-#             cache key
-#   n         number of compartments (45 for LUMPED)
-#   sa, cap   membrane area [um^2] and capacitance [ms nS/um^2] per
-#             compartment
-#   g_na, g_kht, g_klt, g_h, g_lk
-#             channel densities [nS/um^2] per compartment (membrane() may
-#             override g_na / g_klt / the leak reversal without touching
-#             these)
-#   parent, child, g_ax
-#             the axial edges, 0-based: current flows along
-#             parent[k] -> child[k] with conductance g_ax[k] [S]
-#   chain     True if the edges are exactly 0-1-2-..., so axial_current can
-#             use msoAxon.m's own float order
-#   jac       sparsity pattern of the 7n x 7n Jacobian for the BDF solver
-#   labels    a name per compartment ("soma", "AIS", "node",
-#             "lateral dendrite", ...)
-#   lateral, medial (with_dendrites only)
-#             1-indexed compartment numbers of each dendrite, proximal to
-#             distal
-#
+@dataclasses.dataclass(frozen=True, eq=False)
+class Morphology:
+    """A multi-compartment morphology (LUMPED and with_dendrites()).
+
+    eq=False keeps identity equality and hashing, so the ndarray fields
+    never reach a generated __eq__.
+
+    Attributes:
+        key: Hashable summary of every setting, part of the pre-stimulus
+            cache key.
+        n: Number of compartments (45 for LUMPED).
+        sa: Membrane area per compartment [um^2].
+        cap: Capacitance per compartment [ms nS/um^2].
+        g_na: Na density per compartment [nS/um^2]; membrane() may
+            override it without touching this.
+        g_kht: KHT density per compartment [nS/um^2].
+        g_klt: KLT density per compartment [nS/um^2]; membrane() may
+            override it.
+        g_h: h density per compartment [nS/um^2].
+        g_lk: Leak density per compartment [nS/um^2]; membrane() may
+            override the leak reversal.
+        parent: The axial edges, 0-based: current flows along
+            parent[k] -> child[k].
+        child: See parent.
+        g_ax: Conductance of each axial edge [S].
+        chain: True if the edges are exactly 0-1-2-..., so axial_current
+            can use msoAxon.m's own float order.
+        jac: Sparsity pattern of the 7n x 7n Jacobian for the BDF
+            solver.
+        labels: A name per compartment ("soma", "AIS", "node", "lateral
+            dendrite", ...).
+        lateral: 1-indexed compartment numbers of the lateral dendrite,
+            proximal to distal; with_dendrites() only.
+        medial: As lateral, for the medial dendrite.
+    """
+
+    key: str | tuple[Any, ...]
+    n: int
+    sa: np.ndarray
+    cap: np.ndarray
+    g_na: np.ndarray
+    g_kht: np.ndarray
+    g_klt: np.ndarray
+    g_h: np.ndarray
+    g_lk: np.ndarray
+    parent: np.ndarray
+    child: np.ndarray
+    g_ax: np.ndarray
+    chain: bool
+    jac: sparse.csc_matrix
+    labels: list[str]
+    lateral: np.ndarray | None = None
+    medial: np.ndarray | None = None
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class Membrane:
+    """Per-compartment channel overrides for one morphology (membrane()).
+
+    eq=False keeps identity equality and hashing.
+
+    Attributes:
+        key: Every setting membrane() was built from, part of the
+            pre-stimulus cache key.
+        morph_key: The morphology's key.
+        morph: The morphology these arrays are for.
+        g_na: Na density per compartment [nS/um^2].
+        g_klt: KLT density per compartment [nS/um^2].
+        na_vhalf: Negated Na inactivation midpoint per compartment
+            [mV], as C.hinf's vhalf expects.
+        vlk: Leak reversal per compartment [mV].
+        y0_gates: Initial (m, h, p, w, z, a) steady-state blocks, each
+            of length n; None unless rebalance_rest.
+    """
+
+    key: tuple[float | bool, ...]
+    morph_key: str | tuple[Any, ...]
+    morph: Morphology
+    g_na: np.ndarray
+    g_klt: np.ndarray
+    na_vhalf: np.ndarray
+    vlk: np.ndarray
+    y0_gates: tuple[np.ndarray, ...] | None
+
+
 # The unbranched 45-compartment chain of msoAxon.m (soma, 2 AIS, 21
 # internode/node pairs)
-LUMPED = types.SimpleNamespace(
+_PARENT, _CHILD = np.arange(N - 1), np.arange(1, N)
+for _a in (
+    CAP,
+    _G_AX,
+    _PARENT,
+    _CHILD,
+):  # read-only, as in constants.py
+    _a.flags.writeable = False
+LUMPED = Morphology(
     key="lumped",
     n=N,
     sa=C.SA,
@@ -120,20 +191,13 @@ LUMPED = types.SimpleNamespace(
     g_klt=C.G_KLT,
     g_h=C.G_H,
     g_lk=C.G_LK,
-    parent=np.arange(N - 1),
-    child=np.arange(1, N),
+    parent=_PARENT,
+    child=_CHILD,
     g_ax=_G_AX,
     chain=True,
     jac=_chain_jac_sparsity(),
     labels=["soma", "AIS", "AIS"] + ["internode", "node"] * 21,
 )
-for _a in (
-    CAP,
-    _G_AX,
-    LUMPED.parent,
-    LUMPED.child,
-):  # read-only, as in constants.py
-    _a.flags.writeable = False
 
 
 def with_dendrites(
@@ -143,7 +207,7 @@ def with_dendrites(
     klt_lambda: float = 74.0,
     conserve_totals: bool = True,
     dendrite_ra: float = R_AXIAL,
-) -> types.SimpleNamespace:
+) -> Morphology:
     """Builds Lehnert et al 2014's dendritic variant (their Fig. 8).
 
     Two identical unbranched dendrites (lateral = ipsilateral input,
@@ -180,7 +244,7 @@ def with_dendrites(
             dendrites). The soma and axon keep 100.
 
     Returns:
-        A morphology (see the comment above LUMPED), with `lateral` and
+        A Morphology, with `lateral` and
         `medial` holding each dendrite's 1-indexed compartment numbers.
 
     Raises:
@@ -245,7 +309,7 @@ def with_dendrites(
         + ["lateral dendrite"] * n_seg
         + ["medial dendrite"] * n_seg
     )
-    return types.SimpleNamespace(
+    return Morphology(
         key=(
             "dendrites",
             float(length),
@@ -274,9 +338,7 @@ def with_dendrites(
     )  # 1-indexed compartment numbers
 
 
-def axial_current(
-    V: np.ndarray, morph: types.SimpleNamespace = LUMPED
-) -> np.ndarray:
+def axial_current(V: np.ndarray, morph: Morphology = LUMPED) -> np.ndarray:
     """Returns the axial current density, sign convention as in msoAxon.m.
 
     Args:
@@ -334,7 +396,7 @@ def external_current(  # noqa: PLR0911, PLR0912
     t: float,
     V: np.ndarray,
     stim_type: str,
-    s: types.SimpleNamespace,
+    s: _common.Stimulus,
     input_node: int,
     sa: np.ndarray = C.SA,
 ) -> tuple[int, float]:
@@ -407,7 +469,7 @@ def external_current(  # noqa: PLR0911, PLR0912
 def bilateral_current(
     t: float,
     V: np.ndarray,
-    s: types.SimpleNamespace,
+    s: _common.Stimulus,
     a: int,
     b: int,
     sa: np.ndarray,
@@ -453,9 +515,9 @@ def membrane(
     ais_klt_scale: float = 1.0,
     soma_na_vhalf: float = -62.5,
     rebalance_rest: bool = False,
-    morph: types.SimpleNamespace | None = None,
+    morph: Morphology | None = None,
     dendrite_klt_scale: float = 1.0,
-) -> types.SimpleNamespace:
+) -> Membrane:
     """Builds per-compartment channel overrides for the multi model.
 
     Defaults reproduce msoAxon.m exactly. The knobs are the ones the
@@ -482,8 +544,8 @@ def membrane(
             sharpens EPSPs.
 
     Returns:
-        A SimpleNamespace with key, morph_key, morph, g_na, g_klt,
-        na_vhalf, vlk and y0_gates (None unless rebalance_rest).
+        A Membrane with key, morph_key, morph, g_na, g_klt, na_vhalf,
+        vlk and y0_gates (None unless rebalance_rest).
 
     Raises:
         ValueError: If dendrite_klt_scale is set for a morphology
@@ -495,10 +557,38 @@ def membrane(
             "dendrite_klt_scale needs a morphology with dendrites "
             "(morph=with_dendrites())"
         )
-    # v0 is in the key because the leak reversals (vlk) are built from it:
-    # without it, membrane(-60) and membrane(-68) would share a pre-stimulus
-    # cache entry
-    m = types.SimpleNamespace(
+    g_klt = morph.g_klt.copy()
+    g_klt[0] *= soma_klt_scale
+    g_klt[1:3] *= ais_klt_scale
+    g_klt[N:] *= dendrite_klt_scale
+    # stored negated, as C.hinf's vhalf (exp((V + vhalf) / 7.77)) expects
+    na_vhalf = np.full(morph.n, 62.5)
+    na_vhalf[0] = -soma_na_vhalf
+    vlk = np.full(morph.n, float(v0))
+    y0_gates = None
+    if rebalance_rest:
+        V = np.full(morph.n, float(v0))
+        gates = (
+            C.minf(V),
+            C.hinf(V, na_vhalf),
+            C.pinf(V),
+            C.winf(V),
+            C.zinf(V),
+            C.ainf(V),
+        )
+        mi, hi, pi, wi, zi, ai = gates
+        I_ion = (
+            C.na_open(mi, hi, morph.g_na) * (V - V_NA)
+            + morph.g_kht * pi * (V - V_K)
+            + g_klt * wi**4 * zi * (V - V_K)
+            + morph.g_h * ai * (V - V_H)
+        )
+        vlk = V + I_ion / morph.g_lk
+        y0_gates = gates
+    return Membrane(
+        # v0 is in the key because the leak reversals (vlk) are built from
+        # it: without it, membrane(-60) and membrane(-68) would share a
+        # pre-stimulus cache entry
         key=(
             float(v0),
             float(soma_klt_scale),
@@ -509,47 +599,22 @@ def membrane(
         ),
         morph_key=morph.key,
         morph=morph,
+        g_na=morph.g_na,
+        g_klt=g_klt,
+        na_vhalf=na_vhalf,
+        vlk=vlk,
+        y0_gates=y0_gates,
     )
-    m.g_na = morph.g_na
-    m.g_klt = morph.g_klt.copy()
-    m.g_klt[0] *= soma_klt_scale
-    m.g_klt[1:3] *= ais_klt_scale
-    m.g_klt[N:] *= dendrite_klt_scale
-    # stored negated, as C.hinf's vhalf (exp((V + vhalf) / 7.77)) expects
-    m.na_vhalf = np.full(morph.n, 62.5)
-    m.na_vhalf[0] = -soma_na_vhalf
-    m.vlk = np.full(morph.n, float(v0))
-    m.y0_gates = None
-    if rebalance_rest:
-        V = np.full(morph.n, float(v0))
-        gates = (
-            C.minf(V),
-            C.hinf(V, m.na_vhalf),
-            C.pinf(V),
-            C.winf(V),
-            C.zinf(V),
-            C.ainf(V),
-        )
-        mi, hi, pi, wi, zi, ai = gates
-        I_ion = (
-            m.g_na * mi**4 * (0.993 * hi + 0.007) * (V - V_NA)
-            + morph.g_kht * pi * (V - V_K)
-            + m.g_klt * wi**4 * zi * (V - V_K)
-            + morph.g_h * ai * (V - V_H)
-        )
-        m.vlk = V + I_ion / morph.g_lk
-        m.y0_gates = gates
-    return m
 
 
 def _dv(
     t: float,
     x: np.ndarray,
     stim_type: str,
-    s: types.SimpleNamespace,
+    s: _common.Stimulus,
     input_node: int,
-    mem: types.SimpleNamespace,
-    morph: types.SimpleNamespace = LUMPED,
+    mem: Membrane,
+    morph: Morphology = LUMPED,
     input_node2: int | None = None,
 ) -> np.ndarray:
     """Computes the voltage derivatives alone: _rhs's first n entries.
@@ -566,7 +631,7 @@ def _dv(
         dV/dt per compartment [mV/ms].
     """
     V, m, h, p, w, z, a = x.reshape(7, morph.n)
-    INa = mem.g_na * m**4 * (0.993 * h + 0.007) * (V - V_NA)
+    INa = C.na_open(m, h, mem.g_na) * (V - V_NA)
     IKHT = morph.g_kht * p * (V - V_K)
     IKLT = mem.g_klt * w**4 * z * (V - V_K)
     Ih = morph.g_h * a * (V - V_H)
@@ -587,11 +652,11 @@ def _rhs(
     t: float,
     x: np.ndarray,
     stim_type: str,
-    s: types.SimpleNamespace,
+    s: _common.Stimulus,
     input_node: int,
     active: tuple[bool, ...],
-    mem: types.SimpleNamespace,
-    morph: types.SimpleNamespace = LUMPED,
+    mem: Membrane,
+    morph: Morphology = LUMPED,
     input_node2: int | None = None,
 ) -> np.ndarray:
     """Computes the right-hand side.
@@ -605,7 +670,7 @@ def _rhs(
     out = np.empty_like(x)
     d = out.reshape(7, n)
 
-    INa = mem.g_na * m**4 * (0.993 * h + 0.007) * (V - V_NA)
+    INa = C.na_open(m, h, mem.g_na) * (V - V_NA)
     IKHT = morph.g_kht * p * (V - V_K)
     IKLT = mem.g_klt * w**4 * z * (V - V_K)
     # linear in activation, as in RM03 (no power given in Lehnert or Baumann)
@@ -651,8 +716,8 @@ def mso_axon(
     syn: synaptic.SynParams | None = None,
     max_step: float | None = None,
     stop_on_spike: float | None = None,
-    mem: types.SimpleNamespace | None = None,
-    morph: types.SimpleNamespace | None = None,
+    mem: Membrane | None = None,
+    morph: Morphology | None = None,
     input_node2: int | None = None,
     stop_when_settled: bool = False,
     mode: str | None = None,

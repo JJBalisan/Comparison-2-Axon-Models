@@ -24,7 +24,6 @@ lumped results they are compared with.
 import argparse
 import json
 import pathlib
-import types
 from collections.abc import Iterable
 from concurrent import futures
 from typing import Any
@@ -40,9 +39,9 @@ MYOGA_US = 221
 
 
 def epsp(
-    morph: types.SimpleNamespace,
+    morph: multi.Morphology,
     site: int,
-    mem: types.SimpleNamespace | None,
+    mem: multi.Membrane | None,
     amp: float = UNITARY,
     site2: int | None = None,
     t_end: float = 12.0,
@@ -103,7 +102,7 @@ def shape(g: np.ndarray, v: np.ndarray) -> dict[str, float]:
 
 
 def rin_tau(
-    morph: types.SimpleNamespace, mem: types.SimpleNamespace | None
+    morph: multi.Morphology, mem: multi.Membrane | None
 ) -> dict[str, float]:
     """Measures input resistance and time constant (see passive_step).
 

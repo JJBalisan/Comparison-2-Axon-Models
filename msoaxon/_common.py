@@ -1,6 +1,8 @@
 """Stimulus and argument handling shared by both models (from TwoCpt.m)."""
 
-import types
+import dataclasses
+
+import numpy as np
 
 from msoaxon import _solve, constants as C, synaptic
 
@@ -76,6 +78,41 @@ def check_args(
         )
 
 
+@dataclasses.dataclass(frozen=True, eq=False)
+class Stimulus:
+    """The stimulus settings of one run (what TwoCpt.m stored on P).
+
+    eq=False keeps identity equality and hashing, so the ndarray fields
+    never reach a generated __eq__.
+
+    Attributes:
+        start: Stimulus start [ms].
+        stop: Stimulus stop [ms]; its meaning depends on the stimulus.
+        I: Stimulus amplitude (pA or nS, depending on the stimulus).
+        t_end: End of the run [ms].
+        epsg_tau: The EPSG (rise, decay) time constants [ms].
+        f: Sine frequency [Hz]; "sine" only.
+        t_syn: Times of the synaptic conductance table [ms]; the
+            synaptic inputs only.
+        g_syn: The conductance table [nS]; the synaptic inputs only.
+        VsynE: Synaptic reversal potential [mV]; the synaptic inputs
+            only.
+        diff: Delay of the second input of SynapticPair [ms]; the
+            synaptic inputs only.
+    """
+
+    start: float
+    stop: float
+    I: float
+    t_end: float
+    epsg_tau: tuple[float, float]
+    f: float | None = None
+    t_syn: np.ndarray | None = None
+    g_syn: np.ndarray | None = None
+    VsynE: float | None = None
+    diff: float | None = None
+
+
 def stimulus(
     stim_type: str,
     start: float,
@@ -83,7 +120,7 @@ def stimulus(
     I: float,
     t_end: float,
     syn: synaptic.SynParams,
-) -> types.SimpleNamespace:
+) -> Stimulus:
     """Bundles the stimulus settings (what TwoCpt.m stored on P).
 
     Args:
@@ -96,19 +133,27 @@ def stimulus(
         syn: A SynParams with the waveform settings.
 
     Returns:
-        A SimpleNamespace with start, stop, I, t_end and epsg_tau, plus
-        f for "sine", and t_syn, g_syn, VsynE and diff for the
-        synaptic inputs.
+        A Stimulus with start, stop, I, t_end and epsg_tau, plus f for
+        "sine", and t_syn, g_syn, VsynE and diff for the synaptic
+        inputs (None for the other stimuli).
     """
-    s = types.SimpleNamespace(
-        start=start, stop=stop, I=I, t_end=t_end, epsg_tau=tuple(syn.epsg_tau)
-    )
-    if stim_type == "sine":
-        s.f = syn.f
+    f = syn.f if stim_type == "sine" else None
+    t_syn = g_syn = v_syn = diff = None
     if stim_type in ("Synaptic", "SynapticPair"):
-        s.t_syn, s.g_syn = synaptic.synaptic(syn)
-        s.VsynE, s.diff = syn.VsynE, syn.diff
-    return s
+        t_syn, g_syn = synaptic.synaptic(syn)
+        v_syn, diff = syn.VsynE, syn.diff
+    return Stimulus(
+        start=start,
+        stop=stop,
+        I=I,
+        t_end=t_end,
+        epsg_tau=tuple(syn.epsg_tau),
+        f=f,
+        t_syn=t_syn,
+        g_syn=g_syn,
+        VsynE=v_syn,
+        diff=diff,
+    )
 
 
 def _stops(
@@ -117,7 +162,7 @@ def _stops(
     stop_on_spike: float | None,
     stop_when_settled: bool,
     stim_type: str,
-    s: types.SimpleNamespace,
+    s: Stimulus,
 ) -> list[_solve.Event] | None:
     """Returns the terminal events for a run: none, the spike stop, or both.
 

@@ -3,7 +3,6 @@
 The analysis functions pick the model with model="multi" / "two".
 """
 
-import types
 from typing import Any
 
 import numpy as np
@@ -23,8 +22,8 @@ def run_model(
     input_node: int,
     syn: synaptic.SynParams | None = None,
     model_type: str = "active-full",
-    mem: types.SimpleNamespace | None = None,
-    morph: types.SimpleNamespace | None = None,
+    mem: multi.Membrane | None = None,
+    morph: multi.Morphology | None = None,
     input_node2: int | None = None,
     mode: str | None = None,
     **kw: Any,
