@@ -328,11 +328,18 @@ def two_cpt(
         the state layout.
 
     Raises:
-        ValueError: For unknown names or out-of-range compartments.
+        ValueError: For unknown names, out-of-range compartments, or a
+            ramp with stop <= start.
     """
     _common.check_args(
-        stim_type, model_type, node, input_node, min_node=2
-    )  # node 1 is the soma
+        stim_type,
+        model_type,
+        node,
+        input_node,
+        min_node=2,  # node 1 is the soma
+        start=start,
+        stop=stop,
+    )
     syn = syn or synaptic.SynParams(t_end=t_end)
     P = get_params(v0, node, input_node, model_type, r1=r1, tau_est=tau_est)
     s = _common.stimulus(stim_type, start, stop, I, t_end, syn)

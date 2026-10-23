@@ -25,6 +25,7 @@ from msoaxon import (
     coincidence,
     multi,
     synaptic,
+    two,
 )
 
 BITWISE = sys.platform == "darwin" and platform.machine() == "arm64"
@@ -341,12 +342,16 @@ def test_unknown_modes_are_rejected(monkeypatch, no_env):
         _fast.resolve(None, True)
 
 
-def test_coverage_excludes_only_degenerate_ramps():
-    for stim in multi.MSO_STIM_TYPES:
-        assert _fast.covers(stim, 5.0, 5.5)
-    assert not _fast.covers("ramp", 5.0, 5.0)
-    assert not _fast.covers("ramp2", 5, 5)
-    assert _fast.covers("EPSGpair", 5.0, 5.0)
+@pytest.mark.parametrize("stim", ["ramp", "ramp2"])
+@pytest.mark.parametrize("mode", [None, "exact", "fast"])
+@pytest.mark.parametrize("stop", [5.0, 4.0, float("nan")])
+def test_ramp_needs_stop_after_start_before_any_dispatch(stim, mode, stop):
+    with pytest.raises(ValueError, match="ramp needs stop > start"):
+        multi.mso_axon(
+            stim, 5.0, stop, 30, 3, "active-full", 8, -68.0, 1, mode=mode
+        )
+    with pytest.raises(ValueError, match="ramp needs stop > start"):
+        two.two_cpt(stim, 5.0, stop, 30, 3, "active-full", 8, -68.0, 1)
 
 
 def test_mode_is_part_of_the_quiet_cache_key(fake_ext):

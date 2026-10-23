@@ -6,8 +6,8 @@ the reference: mso_axon(mode="exact") runs it, mode="fast" runs the port.
 
 Mode, per mso_axon call: an explicit mode= wins, then the MSOAXON_MODE
 environment variable, then the default, which is "fast" when the extension
-imports and covers the configuration, else "exact" (silently). Asking for
-"fast" (by argument or environment) when it can't run warns and runs
+imports, else "exact" (silently). Every configuration is ported. Asking
+for "fast" (by argument or environment) when it can't run warns and runs
 "exact".
 
 The first fast run in a process checks the port against multi._rhs on a few
@@ -75,24 +75,6 @@ def requested(mode: str | None = None) -> str | None:
     return mode
 
 
-def covers(stim_type: str, start: float, stop: float) -> bool:
-    """Returns whether the Rust port handles this configuration.
-
-    Everything multi._rhs handles is ported. The one exception is a ramp
-    with stop == start, where the numpy path raises ZeroDivisionError;
-    it keeps doing so.
-
-    Args:
-        stim_type: The stimulus name.
-        start: Stimulus start [ms].
-        stop: Stimulus stop [ms].
-
-    Returns:
-        True if mode="fast" can run it.
-    """
-    return not (stim_type in ("ramp", "ramp2") and stop == start)
-
-
 def effective(mode: str | None, covered: bool = True) -> str:
     """Returns the mode a run will use, without warning.
 
@@ -101,7 +83,7 @@ def effective(mode: str | None, covered: bool = True) -> str:
 
     Args:
         mode: The mode passed to mso_axon, or None.
-        covered: Whether the configuration is ported (covers()).
+        covered: Whether the configuration is ported (always, today).
 
     Returns:
         "fast" or "exact".
@@ -112,12 +94,12 @@ def effective(mode: str | None, covered: bool = True) -> str:
     )
 
 
-def resolve(mode: str | None, covered: bool) -> str:
+def resolve(mode: str | None, covered: bool = True) -> str:
     """Returns the mode one run uses, warning if "fast" can't run.
 
     Args:
         mode: The mode passed to mso_axon, or None.
-        covered: Whether the configuration is ported (covers()).
+        covered: Whether the configuration is ported (always, today).
 
     Returns:
         "fast" or "exact".

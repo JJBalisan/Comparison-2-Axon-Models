@@ -104,9 +104,8 @@ warnings.filterwarnings("ignore", category=msoaxon.DriftWarning)
 
 or pass `mode="exact"` to use the reference. Everything `multi._rhs` handles is
 ported: every stimulus (Synaptic and SynapticPair included), the lumped chain and
-`with_dendrites()` trees, `membrane()` overrides and every model type. The one
-fallback is a ramp with `stop == start`, where the numpy path raises
-`ZeroDivisionError` and keeps doing so.
+`with_dendrites()` trees, `membrane()` overrides and every model type, so
+`mode="fast"` never falls back to `"exact"` for a configuration.
 
 **Speed** (Apple M1 Max, Python 3.12, best of 3; the machine was busy, so read the
 ratios rather than the seconds):

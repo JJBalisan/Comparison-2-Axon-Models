@@ -24,10 +24,12 @@ def sweep_setting(
 
     Returns:
         (stop, syn, I_override); I_override is None unless the stimulus
-        fixes I.
+        fixes I (none does now: "Synaptic" used to pin it to 0, which
+        made the search report the ceiling).
 
     Raises:
-        ValueError: If the threshold search doesn't support stim_type.
+        ValueError: If the threshold search doesn't support stim_type,
+            "Synaptic" and "SynapticPair" included.
     """
     syn = synaptic.SynParams(t_end=T_END)
     if stim_type == "step":
@@ -45,9 +47,6 @@ def sweep_setting(
             syn,
             None,
         )  # stop = second EPSG onset
-    if stim_type == "Synaptic":
-        syn.random_in = 13986
-        return 15.0, syn, 0.0
     raise ValueError(
         f"stimType {stim_type!r} is not supported by the threshold search"
     )
