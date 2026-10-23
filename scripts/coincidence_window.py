@@ -80,11 +80,33 @@ def run(a: argparse.Namespace, pool: futures.ProcessPoolExecutor) -> None:
     tol = 1e-2 if a.quick else 1e-4  # threshold tolerance
     delay_tol = 1e-3 if a.quick else 1e-4  # window boundary tolerance [ms]
     combos = [(c, k) for c in CONFIGS for k in KINETICS]
-    # the widths come from window(), all submitted at once; the curves are only
-    # drawn
-    win_jobs = {}
-    for cname, kname in combos:
+
+    # The widths come from window() and the curves are only drawn, so each
+    # combination needs the delay-0 threshold exactly once: it goes to the pool
+    # first, and then feeds both the windows (threshold0=) and the curve. The
+    # windows are submitted before the curve points so that their chain (delay
+    # 0, then the bisection over delay) starts early; the pool is never left
+    # waiting on one combination at a time.
+    def th_job(cname: str, kname: str, delay: float) -> futures.Future:
         model, v0, kw = CONFIGS[cname]
+        return pool.submit(
+            coincidence.threshold,
+            model,
+            float(delay),
+            a.node,
+            v0,
+            KINETICS[kname],
+            kw,
+            tol,
+        )
+
+    th0_jobs = {(c, k): th_job(c, k, 0.0) for c, k in combos}
+    by_job = {j: ck for ck, j in th0_jobs.items()}
+    win_jobs = {}
+    for th0_job in futures.as_completed(by_job):
+        cname, kname = by_job[th0_job]
+        model, v0, kw = CONFIGS[cname]
+        th0 = th0_job.result()
         for m in MARGINS:
             win_jobs[cname, kname, m] = pool.submit(
                 coincidence.window,
@@ -96,20 +118,18 @@ def run(a: argparse.Namespace, pool: futures.ProcessPoolExecutor) -> None:
                 model_kw=kw,
                 rel_tol=tol,
                 delay_tol=delay_tol,
+                threshold0=th0,
             )
     delays = np.round(np.arange(0, 1.0001, 0.1 if a.quick else 0.05), 4)
+    curve_jobs = {
+        (cname, kname): [th_job(cname, kname, d) for d in delays[1:]]
+        for cname, kname in combos
+    }
     curves, rows, direct = {}, [], {}
     for cname, kname in combos:
-        model, v0, kw = CONFIGS[cname]
-        th = curves[cname, kname] = coincidence.threshold_curve(
-            model,
-            delays,
-            node=a.node,
-            v0=v0,
-            epsg_tau=KINETICS[kname],
-            model_kw=kw,
-            rel_tol=tol,
-            executor=pool,
+        th = curves[cname, kname] = np.array(
+            [th0_jobs[cname, kname].result()]
+            + [j.result() for j in curve_jobs[cname, kname]]
         )
         res = [win_jobs[cname, kname, m].result() for m in MARGINS]
         th0, widths = res[0][1], [w * 1e3 for w, _ in res]
