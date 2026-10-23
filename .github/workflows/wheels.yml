@@ -151,3 +151,29 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+
+  # Tags only, and only once JJ opts in: publish the five wheels to PyPI by
+  # trusted publishing (OIDC; no token is stored anywhere). Until the
+  # repository variable PUBLISH_PYPI is set to "true" this job is skipped, so
+  # nothing reaches PyPI. The steps to enable it are in PYTHON.md ("Fast
+  # mode"); the PyPI project and its trusted publisher must exist first.
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v') && vars.PUBLISH_PYPI == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+      - name: Check the wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheels=(dist/*.whl)
+          printf '%s\n' "${wheels[@]}"
+          [ "${#wheels[@]}" -eq 5 ] || { echo "expected five wheels" >&2; exit 1; }
+      - uses: pypa/gh-action-pypi-publish@release/v1
