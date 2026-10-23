@@ -394,7 +394,9 @@ def window(
 
     Returns:
         (width, th0): the width [ms], nan if the input still spikes at
-        max_delay, and the coincident threshold.
+        max_delay or if th0 is not finite (nothing fires up to the
+        ceiling, or a given threshold0 is inf or nan), and the
+        coincident threshold.
     """
     site, model_kw = (stim, input_node, input_node2), model_kw or {}
     factor = resolve_criterion(
@@ -425,6 +427,8 @@ def window(
             criterion=factor,
         )
     )
+    if not np.isfinite(th0):
+        return np.nan, th0  # no threshold, so no window
     amp = (1 + margin) * th0
 
     def respond(delay: float) -> tuple[bool, float]:

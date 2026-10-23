@@ -49,10 +49,11 @@ def test_sweep_settings_follow_binarysearch_m():
         threshold.sweep_setting("EPSGpair", 3, 0.1)[0] == threshold.START + 0.2
         and threshold.sweep_x("EPSGpair", 3, 0.1) == 0.2
     )
-    stop, syn, I = threshold.sweep_setting("Synaptic", 1)
-    assert (stop, syn.random_in, I) == (15.0, 13986, 0.0)
-    with pytest.raises(ValueError, match="not supported"):
-        threshold.sweep_setting("SynapticPair", 1)
+    for stim in ("Synaptic", "SynapticPair"):
+        with pytest.raises(ValueError, match="not supported"):
+            threshold.sweep_setting(stim, 1)
+        with pytest.raises(ValueError, match="not supported"):
+            threshold.binary_search(stim, 1, 3, 10.0, 15000.0)
     with pytest.raises(ValueError, match="no x-axis"):
         threshold.sweep_x("step", 1)
 
@@ -369,3 +370,19 @@ def test_window_reuses_threshold0_and_reports_no_window():
         "two", 1.5, threshold0=th0
     )  # 2.5x th0 spikes even on the plateau
     assert np.isnan(w_big)
+
+
+@pytest.mark.parametrize("th0", [np.inf, np.nan])
+def test_window_without_a_finite_threshold_reports_no_window(th0):
+    w, got = coincidence.window("two", 0.03, threshold0=th0)
+    assert np.isnan(w) and (np.isnan(got) if np.isnan(th0) else got == th0)
+
+
+@pytest.mark.filterwarnings("ignore:overflow:RuntimeWarning")
+def test_window_when_nothing_fires_returns_no_window():
+    # a fixed 30 mV criterion is out of reach for Goldwyn's calibration
+    kw = {k: v for k, v in two.GOLDWYN_2019.items() if k != "v0"}
+    w, th0 = coincidence.window(
+        "two", 0.03, v0=-58, model_kw=kw, criterion=30.0
+    )
+    assert np.isnan(w) and th0 == np.inf

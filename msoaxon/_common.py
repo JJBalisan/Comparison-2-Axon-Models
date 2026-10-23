@@ -32,6 +32,8 @@ def check_args(
     node: int,
     input_node: int,
     min_node: int,
+    start: float,
+    stop: float,
     stim_types: tuple[str, ...] = STIM_TYPES,
     n_max: int = C.N_CPT,
 ) -> None:
@@ -44,11 +46,15 @@ def check_args(
         input_node: Where the stimulus enters, 1-indexed, 1..n_max.
         min_node: The smallest allowed `node` (2 in two_cpt, where node
             1 would be the soma itself).
+        start: Stimulus start [ms].
+        stop: Stimulus stop [ms]; a ramp rises from start to stop, so
+            "ramp" and "ramp2" need stop > start.
         stim_types: The stimulus names the calling model accepts.
         n_max: The number of compartments an input may enter.
 
     Raises:
-        ValueError: If any argument is out of range or unknown.
+        ValueError: If any argument is out of range or unknown, or a
+            ramp doesn't end after it starts.
     """
     if stim_type not in stim_types:
         raise ValueError(f"unknown stimType {stim_type!r}")
@@ -63,6 +69,10 @@ def check_args(
     if not 1 <= input_node <= n_max:
         raise ValueError(
             f"input_node must be 1..{n_max} (1-indexed), got {input_node}"
+        )
+    if stim_type in ("ramp", "ramp2") and not stop > start:
+        raise ValueError(
+            f"ramp needs stop > start, got start={start}, stop={stop}"
         )
 
 

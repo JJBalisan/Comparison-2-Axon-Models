@@ -717,8 +717,8 @@ def mso_axon(
 
     Raises:
         ValueError: For unknown names, out-of-range compartments, a
-            missing input_node2, a mem built for another morphology, or
-            an unknown mode.
+            ramp with stop <= start, a missing input_node2, a mem built
+            for another morphology, or an unknown mode.
     """
     morph = morph or (mem.morph if mem is not None else LUMPED)
     _common.check_args(
@@ -727,6 +727,8 @@ def mso_axon(
         node,
         input_node,
         min_node=1,
+        start=start,
+        stop=stop,
         stim_types=MSO_STIM_TYPES,
         n_max=morph.n,
     )
@@ -757,7 +759,7 @@ def mso_axon(
     else:
         y0 = np.concatenate([np.full(n, float(v0)), *mem.y0_gates])
     cuts = _solve.breakpoints(stim_type, start, stop, t_end)
-    mode = _fast.resolve(mode, _fast.covers(stim_type, start, stop))
+    mode = _fast.resolve(mode)
     if mode == "fast":
         rhs = _fast.build(
             stim_type, s, input_node, active, mem, morph, input_node2
