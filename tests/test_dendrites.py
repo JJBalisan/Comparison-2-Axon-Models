@@ -106,8 +106,7 @@ def test_bilateral_inputs_beat_unilateral():
     assert bil < uni
 
 
-def test_prestimulus_cache_separates_morphologies():
-    _solve._QUIET_CACHE.clear()
+def test_prestimulus_cache_separates_morphologies(fresh_quiet_cache):
     msoaxon.mso_axon(*ARGS)
     t1, y1 = msoaxon.mso_axon(*ARGS, morph=D)
     _solve._QUIET_CACHE.clear()
@@ -182,12 +181,11 @@ def test_dendrite_ra_changes_only_dendritic_edges():
     )
 
 
-def test_prestimulus_cache_separates_membrane_v0():
+def test_prestimulus_cache_separates_membrane_v0(fresh_quiet_cache):
     # the leak reversals come from membrane()'s v0, so it must be part of the
     # cache key
     assert multi.membrane(-60.0).key != multi.membrane(-68.0).key
     args = ("EPSG", 5, 10, 26.7, 3, "active-full", 8, -68.0, 1)
-    _solve._QUIET_CACHE.clear()
     msoaxon.mso_axon(*args, mem=multi.membrane(-60.0))
     t1, y1 = msoaxon.mso_axon(*args, mem=multi.membrane(-68.0))
     _solve._QUIET_CACHE.clear()

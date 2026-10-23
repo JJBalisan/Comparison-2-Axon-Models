@@ -37,9 +37,8 @@ def test_goldwyn_calibration_hits_its_passive_targets():
     assert np.isclose(tau, 0.71, atol=0.01)
 
 
-def test_prestimulus_cache_separates_calibrations():
+def test_prestimulus_cache_separates_calibrations(fresh_quiet_cache):
     args = ("EPSGpair", 5, 5.2, 30, 3, "active-full", 20, -68.0, 1)
-    _solve._QUIET_CACHE.clear()
     msoaxon.two_cpt(*args)  # fills the cache for the default calibration
     t1, x1 = msoaxon.two_cpt(*args, **GOLDWYN_KW)
     _solve._QUIET_CACHE.clear()
