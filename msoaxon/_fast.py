@@ -18,13 +18,16 @@ bits on other hardware, where numpy and Rust can use different exp/pow.
 
 import importlib
 import os
-import types
 import warnings
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from msoaxon import constants, synaptic
+from msoaxon import _common, constants, synaptic
+
+if TYPE_CHECKING:  # multi imports this module
+    from msoaxon import multi
 
 try:
     import msoaxon_fast as _ext
@@ -135,11 +138,11 @@ def _f64(a: np.ndarray) -> np.ndarray:
 
 def build(
     stim_type: str,
-    s: types.SimpleNamespace,
+    s: _common.Stimulus,
     input_node: int,
     active: tuple[bool, ...],
-    mem: types.SimpleNamespace,
-    morph: types.SimpleNamespace,
+    mem: 'multi.Membrane',
+    morph: 'multi.Morphology',
     input_node2: int | None = None,
 ) -> Rhs:
     """Builds the Rust right-hand side for one run.
@@ -167,11 +170,11 @@ def build(
 
 def _build(
     stim_type: str,
-    s: types.SimpleNamespace,
+    s: _common.Stimulus,
     input_node: int,
     active: tuple[bool, ...],
-    mem: types.SimpleNamespace,
-    morph: types.SimpleNamespace,
+    mem: 'multi.Membrane',
+    morph: 'multi.Morphology',
     input_node2: int | None = None,
 ) -> Rhs:
     """build() without the first-use DriftWarning."""

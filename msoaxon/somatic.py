@@ -16,13 +16,12 @@ default, or coincidence.Relative(f), a fraction f of the model's spike height
 membrane).
 """
 
-import types
 from typing import Any
 
 import numpy as np
 from scipy import interpolate
 
-from msoaxon import _bisect, _dispatch, coincidence
+from msoaxon import _bisect, _dispatch, coincidence, multi
 
 START, STOP, T_END = 5.0, 105.0, 110.0
 FACTOR = 10.0  # spike = axon rises this far above soma
@@ -37,7 +36,7 @@ D2_MIN = 100.0
 
 
 def _merge_kw(
-    mem: types.SimpleNamespace | None, model_kw: dict[str, Any] | None
+    mem: multi.Membrane | None, model_kw: dict[str, Any] | None
 ) -> dict[str, Any]:
     """Folds the `mem` shorthand into the model keywords.
 
@@ -80,7 +79,7 @@ def fires(
     I: float,
     node: int = 3,
     v0: float = -68.0,
-    mem: types.SimpleNamespace | None = None,
+    mem: multi.Membrane | None = None,
     *,
     criterion: coincidence.Criterion = FACTOR,
     model_kw: dict[str, Any] | None = None,
@@ -127,7 +126,7 @@ def response(
     I: float,
     node: int = 3,
     v0: float = -68.0,
-    mem: types.SimpleNamespace | None = None,
+    mem: multi.Membrane | None = None,
     *,
     criterion: coincidence.Criterion = FACTOR,
     model_kw: dict[str, Any] | None = None,
@@ -171,7 +170,7 @@ def rheobase(
     model: str,
     node: int = 3,
     v0: float = -68.0,
-    mem: types.SimpleNamespace | None = None,
+    mem: multi.Membrane | None = None,
     rel_tol: float = 1e-4,
     guess: float = 2000.0,
     *,
@@ -239,7 +238,7 @@ def spike_amplitude(
     I: float,
     node: int = 3,
     v0: float = -68.0,
-    mem: types.SimpleNamespace | None = None,
+    mem: multi.Membrane | None = None,
     *,
     criterion: coincidence.Criterion = FACTOR,
     model_kw: dict[str, Any] | None = None,

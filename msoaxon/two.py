@@ -5,7 +5,7 @@ MATLAB code, so x[:, 0] is the soma and x[:, 1] the axon compartment.
 Currents are in pA, conductances in nS, capacitances in pF, time in ms.
 """
 
-import types
+import dataclasses
 
 import numpy as np
 
@@ -18,6 +18,82 @@ from msoaxon import _common, _solve, constants as C, synaptic
 GOLDWYN_2019 = {"r1": 8.5, "tau_est": 0.34, "v0": -58.0}
 
 
+@dataclasses.dataclass(frozen=True, eq=False)
+class TwoCptParams:
+    """TwoCpt.m's parameter struct P, from get_params.
+
+    eq=False keeps identity equality and hashing. Compartment 1 is the
+    soma, 2 the axon node; conductances in nS, capacitances in pF.
+
+    Attributes:
+        couple12: Forward coupling constant, soma to axon.
+        couple21: Backward coupling constant, axon to soma.
+        gNa2: Axonal Na conductance [nS].
+        gKHT: Somatic KHT conductance [nS].
+        Vrest: Resting potential [mV].
+        Elk: Leak reversal potential [mV].
+        VK: K reversal potential of the KHT current [mV].
+        EK: K reversal potential of the KLT current [mV].
+        gC: Coupling conductance between the compartments [nS].
+        gTot1: Total resting conductance of the soma [nS].
+        gTot2: Total resting conductance of the axon [nS].
+        tau1: Soma time constant [ms].
+        tau2: Axon time constant [ms].
+        cap1: Soma capacitance [pF].
+        cap2: Axon capacitance [pF].
+        gKLT1: Somatic KLT conductance [nS].
+        gKLT2: Axonal KLT conductance [nS].
+        Vh: h reversal potential [mV].
+        gh1: Somatic h conductance [nS].
+        gh2: Axonal h conductance [nS].
+        glk1: Somatic leak conductance [nS].
+        glk2: Axonal leak conductance [nS].
+        gNa1: Somatic Na conductance [nS].
+        ENa: Na reversal potential [mV].
+        IappLoc: The compartment (1 or 2) the stimulus enters.
+        INa0_1: Somatic Na current at rest, subtracted [pA].
+        INa0_2: Axonal Na current at rest, subtracted [pA].
+        IKLT0_1: Somatic KLT current at rest, subtracted [pA].
+        IKLT0_2: Axonal KLT current at rest, subtracted [pA].
+        Ih0_1: Somatic h current at rest, subtracted [pA].
+        Ih0_2: Axonal h current at rest, subtracted [pA].
+        z_rest: KLT inactivation at rest, frozen in this model.
+    """
+
+    couple12: float
+    couple21: float
+    gNa2: float
+    gKHT: float
+    Vrest: float
+    Elk: float
+    VK: float
+    EK: float
+    gC: float
+    gTot1: float
+    gTot2: float
+    tau1: float
+    tau2: float
+    cap1: float
+    cap2: float
+    gKLT1: float
+    gKLT2: float
+    Vh: float
+    gh1: float
+    gh2: float
+    glk1: float
+    glk2: float
+    gNa1: float
+    ENa: float
+    IappLoc: int
+    INa0_1: float
+    INa0_2: float
+    IKLT0_1: float
+    IKLT0_2: float
+    Ih0_1: float
+    Ih0_2: float
+    z_rest: float
+
+
 def get_params(
     v0: float,
     node: int,
@@ -25,7 +101,7 @@ def get_params(
     model_type: str,
     r1: float = 10.0,
     tau_est: float = 0.71,
-) -> types.SimpleNamespace:
+) -> TwoCptParams:
     """Ports getParam: the two-compartment parameters.
 
     Args:
@@ -40,11 +116,10 @@ def get_params(
             [ms]. Defaults are TwoCpt.m's values.
 
     Returns:
-        A SimpleNamespace P with TwoCpt.m's field names.
+        A TwoCptParams with TwoCpt.m's field names.
     """
-    P = types.SimpleNamespace()
-    P.couple12 = C.COUPLING1[node - 2]  # forward coupling
-    P.couple21 = C.COUPLING2[node - 2]  # backward coupling
+    couple12 = C.COUPLING1[node - 2]  # forward coupling
+    couple21 = C.COUPLING2[node - 2]  # backward coupling
 
     if model_type in ("active-KLT", "active-full", "active-KLT+H"):
         klt1, klt2 = C.KLT_FRAC[0], C.KLT_FRAC[node - 1]
@@ -63,12 +138,12 @@ def get_params(
         na1 = C.NA_FRAC[0]
         # only nodes 3 and 5 were calibrated; TwoCpt.m uses 140 for every other
         # node
-        P.gNa2 = {3: 119.0, 5: 25.5}.get(node, 140.0)
+        gNa2 = {3: 119.0, 5: 25.5}.get(node, 140.0)
     else:
         na1 = 0.0
-        P.gNa2 = 0.0
+        gNa2 = 0.0
 
-    P.gKHT = (
+    gKHT = (
         0.1 / C.SA[0] * 1000
         if model_type in ("active-KHT", "active-full")
         else 0.0
@@ -76,46 +151,74 @@ def get_params(
 
     area_ratio = C.AREA_RATIO[node - 1]
     R1 = r1 * 1e-3  # input resistance to CPT1 [GOhm]
-    P.Vrest = P.Elk = v0
-    P.VK = P.EK = -90.0
+    Vrest = Elk = v0
+    VK = EK = -90.0
 
     # passive parameters
-    P.gC = (1 / R1) * P.couple21 / (1 - P.couple12 * P.couple21)
-    P.gTot1 = P.gC * (1 / P.couple21 - 1)
-    P.gTot2 = P.gC * (1 / P.couple12 - 1)
+    gC = (1 / R1) * couple21 / (1 - couple12 * couple21)
+    gTot1 = gC * (1 / couple21 - 1)
+    gTot2 = gC * (1 / couple12 - 1)
     # separation-of-time-scales assumption
-    P.tau1 = tau_est * (1 - P.couple12 * P.couple21)
-    P.tau2 = P.tau1 * area_ratio * (P.couple12 / P.couple21)
-    P.cap1 = P.tau1 * (P.gTot1 + P.gC)
-    P.cap2 = P.tau2 * (P.gTot2 + P.gC)
+    tau1 = tau_est * (1 - couple12 * couple21)
+    tau2 = tau1 * area_ratio * (couple12 / couple21)
+    cap1 = tau1 * (gTot1 + gC)
+    cap2 = tau2 * (gTot2 + gC)
 
-    Vr = P.Vrest
-    P.gKLT1 = klt1 * P.gTot1 / (C.winf(Vr) ** 4 * C.zinf(Vr))
-    P.gKLT2 = klt2 * P.gTot2 / (C.winf(Vr) ** 4 * C.zinf(Vr))
-    P.Vh = -35.0
-    P.gh1 = h1 * P.gTot1 / C.ainf(Vr)
-    P.gh2 = h2 * P.gTot2 / C.ainf(Vr)
-    P.glk1 = (1 - klt1 - h1 - na1) * P.gTot1
-    P.glk2 = (1 - klt2 - h2) * P.gTot2
-    P.gNa1 = na1 * P.gTot1 / (C.minf(Vr) ** 4 * (0.993 * C.hinf(Vr) + 0.007))
-    P.ENa = 69.0
-    P.IappLoc = 1 if input_node == 1 else 2
+    Vr = Vrest
+    gKLT1 = klt1 * gTot1 / (C.winf(Vr) ** 4 * C.zinf(Vr))
+    gKLT2 = klt2 * gTot2 / (C.winf(Vr) ** 4 * C.zinf(Vr))
+    Vh = -35.0
+    gh1 = h1 * gTot1 / C.ainf(Vr)
+    gh2 = h2 * gTot2 / C.ainf(Vr)
+    glk1 = (1 - klt1 - h1 - na1) * gTot1
+    glk2 = (1 - klt2 - h2) * gTot2
+    gNa1 = na1 * gTot1 / (C.minf(Vr) ** 4 * (0.993 * C.hinf(Vr) + 0.007))
+    ENa = 69.0
 
     # resting offsets subtracted so each current is zero at Vrest
-    na_rest = C.minf(Vr) ** 4 * (0.993 * C.hinf(Vr) + 0.007) * (Vr - P.ENa)
-    klt_rest = C.winf(Vr) ** 4 * C.zinf(Vr) * (Vr - P.EK)
-    h_rest = C.ainf(Vr) * (Vr - P.Vh)
-    P.INa0_1, P.INa0_2 = P.gNa1 * na_rest, P.gNa2 * na_rest
-    P.IKLT0_1, P.IKLT0_2 = P.gKLT1 * klt_rest, P.gKLT2 * klt_rest
-    P.Ih0_1, P.Ih0_2 = P.gh1 * h_rest, P.gh2 * h_rest
-    P.z_rest = C.zinf(Vr)  # z is frozen at rest in this model
-    return P
+    na_rest = C.minf(Vr) ** 4 * (0.993 * C.hinf(Vr) + 0.007) * (Vr - ENa)
+    klt_rest = C.winf(Vr) ** 4 * C.zinf(Vr) * (Vr - EK)
+    h_rest = C.ainf(Vr) * (Vr - Vh)
+    return TwoCptParams(
+        couple12=couple12,
+        couple21=couple21,
+        gNa2=gNa2,
+        gKHT=gKHT,
+        Vrest=Vrest,
+        Elk=Elk,
+        VK=VK,
+        EK=EK,
+        gC=gC,
+        gTot1=gTot1,
+        gTot2=gTot2,
+        tau1=tau1,
+        tau2=tau2,
+        cap1=cap1,
+        cap2=cap2,
+        gKLT1=gKLT1,
+        gKLT2=gKLT2,
+        Vh=Vh,
+        gh1=gh1,
+        gh2=gh2,
+        glk1=glk1,
+        glk2=glk2,
+        gNa1=gNa1,
+        ENa=ENa,
+        IappLoc=1 if input_node == 1 else 2,
+        INa0_1=gNa1 * na_rest,
+        INa0_2=gNa2 * na_rest,
+        IKLT0_1=gKLT1 * klt_rest,
+        IKLT0_2=gKLT2 * klt_rest,
+        Ih0_1=gh1 * h_rest,
+        Ih0_2=gh2 * h_rest,
+        z_rest=C.zinf(Vr),  # z is frozen at rest in this model
+    )
 
 
 # One return per stimulus, in TwoCptODE.m's if/elseif order, so each branch
 # can be checked against the table above multi.external_current.
 def applied_current(  # noqa: PLR0911
-    t: float, V1: float, stim_type: str, s: types.SimpleNamespace
+    t: float, V1: float, stim_type: str, s: _common.Stimulus
 ) -> float:
     """Returns the input current at time t (the Iapp branch of TwoCptODE).
 
@@ -186,9 +289,9 @@ def applied_current(  # noqa: PLR0911
 def _dv(
     t: float,
     x: np.ndarray,
-    P: types.SimpleNamespace,
+    P: TwoCptParams,
     stim_type: str,
-    s: types.SimpleNamespace,
+    s: _common.Stimulus,
 ) -> list[float]:
     """Computes the voltage derivatives alone: _rhs's first two entries.
 
@@ -223,9 +326,9 @@ def _dv(
 def _rhs(
     t: float,
     x: np.ndarray,
-    P: types.SimpleNamespace,
+    P: TwoCptParams,
     stim_type: str,
-    s: types.SimpleNamespace,
+    s: _common.Stimulus,
 ) -> list[float]:
     """Computes TwoCptODE.m's right-hand side.
 

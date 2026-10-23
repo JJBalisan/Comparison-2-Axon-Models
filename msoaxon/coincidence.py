@@ -569,8 +569,8 @@ _HEIGHTS: dict[tuple[Any, ...], float] = {}
 def _frozen(name: str, value: object) -> object:
     """Returns a hashable stand-in for one model keyword's value.
 
-    A morphology or membrane (a SimpleNamespace, unhashable and mutable)
-    stands in as its `key`, which names every setting it was built
+    A morphology or membrane (a dataclass whose ndarray fields are
+    unhashable) stands in as its `key`, which names every setting it was built
     from, plus a membrane's morph_key.
 
     Raises:
