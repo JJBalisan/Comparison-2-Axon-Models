@@ -730,10 +730,28 @@ impl MultiRhs {
     }
 }
 
+/// `Table::interp` at one point: `np.interp(x, xs, ys, 0.0, 0.0)`, the
+/// contract of `synaptic.interp_g`. Exposed so the tests can hold the port
+/// of numpy's interpolation to numpy (tests/test_fast.py).
+#[pyfunction]
+fn interp(xs: PyReadonlyArray1<'_, f64>, ys: PyReadonlyArray1<'_, f64>, x: f64) -> PyResult<f64> {
+    let table = Table {
+        x: to_vec(&xs),
+        y: to_vec(&ys),
+    };
+    if table.x.is_empty() || table.x.len() != table.y.len() {
+        return Err(PyValueError::new_err(
+            "xs and ys must be non-empty and the same length",
+        ));
+    }
+    Ok(table.interp(x))
+}
+
 /// The Rust right-hand side of msoaxon's 45-compartment model.
 #[pymodule]
 fn msoaxon_fast(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<MultiRhs>()?;
+    m.add_function(wrap_pyfunction!(interp, m)?)?;
     Ok(())
 }
 
@@ -762,6 +780,71 @@ mod tests {
             decay: 0.18,
             rise: 0.1,
         }
+    }
+
+    fn table(x: &[f64], y: &[f64]) -> Table {
+        Table {
+            x: x.to_vec(),
+            y: y.to_vec(),
+        }
+    }
+
+    #[test]
+    fn interp_matches_numpy_on_the_knots_and_between() {
+        // values from np.interp(x, xs, ys, left=0.0, right=0.0)
+        let t = table(&[0.0, 0.3, 1.0, 2.5], &[0.0, 2.0, 1.5, -1.0]);
+        let cases = [
+            (0.1, 0.6666666666666667),
+            (0.65, 1.75),
+            (1.7, 0.33333333333333337),
+            (2.0, -0.16666666666666674),
+        ];
+        for (x, want) in cases {
+            assert_same(t.interp(x), want, 1e-15);
+        }
+        // a knot gives its own value exactly, whatever the slopes
+        for (x, want) in [(0.0f64, 0.0f64), (0.3, 2.0), (1.0, 1.5), (2.5, -1.0)] {
+            assert_eq!(t.interp(x).to_bits(), want.to_bits(), "knot {x}");
+        }
+    }
+
+    #[test]
+    fn interp_is_zero_outside_the_table_not_clamped() {
+        // synaptic.interp_g passes left=right=0.0; np.interp's default
+        // would return the end values instead
+        let t = table(&[0.0, 0.3, 1.0], &[4.0, 2.0, 1.5]);
+        for x in [
+            -1e-300,
+            -0.1,
+            f64::NEG_INFINITY,
+            1.0 + 1e-15,
+            2.6,
+            f64::INFINITY,
+        ] {
+            assert_eq!(t.interp(x).to_bits(), 0.0f64.to_bits(), "x={x}");
+        }
+    }
+
+    #[test]
+    fn interp_on_a_one_point_table() {
+        // numpy: the point itself gives y, anything else 0, and NaN (which
+        // compares neither way) gives y as well
+        let t = table(&[1.5], &[7.0]);
+        assert_eq!(t.interp(1.5), 7.0);
+        assert_eq!(t.interp(1.4), 0.0);
+        assert_eq!(t.interp(1.6), 0.0);
+        assert_eq!(t.interp(f64::NAN), 7.0);
+    }
+
+    #[test]
+    fn interp_passes_nan_through_a_longer_table() {
+        assert!(table(&[0.0, 1.0], &[0.0, 1.0]).interp(f64::NAN).is_nan());
+    }
+
+    #[test]
+    fn interp_on_a_flat_segment_is_that_value() {
+        let t = table(&[0.0, 1.0, 2.0], &[3.0, 3.0, 5.0]);
+        assert_eq!(t.interp(0.37), 3.0);
     }
 
     #[test]

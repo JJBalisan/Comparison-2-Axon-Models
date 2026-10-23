@@ -287,6 +287,79 @@ def test_self_check_passes_and_is_cheap():
         assert worst < 1e-10
 
 
+# --- Table::interp against np.interp -----------------------------------------
+
+
+def interp_g_like(xs, ys, x):
+    """synaptic.interp_g's call: zero outside the table."""
+    return float(np.interp(x, xs, ys, left=0.0, right=0.0))
+
+
+def assert_interp_same(got, want):
+    if np.isnan(want):
+        assert np.isnan(got)
+    elif BITWISE:
+        # np.interp's fused multiply-add on arm64 is reproduced in Rust
+        assert np.float64(got).tobytes() == np.float64(want).tobytes()
+    else:
+        np.testing.assert_allclose(got, want, rtol=1e-15)
+
+
+@needs_ext
+def test_rust_interp_matches_numpy_on_the_edges():
+    xs = np.array([0.0, 0.3, 1.0, 2.5, 2.5000000000000004])
+    ys = np.array([0.0, 2.0, 1.5, -1.0, 4.0])
+    ulp = np.nextafter
+    points = [*xs, -1e-300, -0.1, 2.6, 9e99, -9e99, np.nan]
+    points += [ulp(x, np.inf) for x in xs] + [ulp(x, -np.inf) for x in xs]
+    points += [-np.inf, np.inf, 0.1, 0.65, 1.7, 2.0]
+    for x in points:
+        want = interp_g_like(xs, ys, float(x))
+        assert_interp_same(_ext_interp(xs, ys, x), want)
+
+
+@needs_ext
+@pytest.mark.parametrize("x", [1.4, 1.5, 1.6, np.nan, -np.inf, np.inf])
+def test_rust_interp_on_a_one_point_table(x):
+    xs, ys = np.array([1.5]), np.array([7.0])
+    assert_interp_same(_ext_interp(xs, ys, x), interp_g_like(xs, ys, x))
+
+
+@needs_ext
+def test_rust_interp_matches_numpy_on_random_tables():
+    rng = np.random.default_rng(2610)
+    for _ in range(40):
+        n = int(rng.integers(2, 60))
+        xs = np.cumsum(rng.uniform(1e-3, 1.0, n))
+        ys = rng.normal(size=n)
+        ys[rng.integers(0, n, 2)] = ys[0]  # some flat spans
+        for x in rng.uniform(xs[0] - 0.2, xs[-1] + 0.2, 60):
+            assert_interp_same(
+                _ext_interp(xs, ys, float(x)), interp_g_like(xs, ys, float(x))
+            )
+
+
+@needs_ext
+def test_rust_interp_matches_a_synaptic_table():
+    t_syn, g_syn = synaptic.synaptic(synaptic.SynParams(t_end=20.0))
+    rng = np.random.default_rng(14)
+    for x in [-0.5, 0.0, 20.0, 20.5, *rng.uniform(0.0, 20.0, 300)]:
+        want = synaptic.interp_g(t_syn, g_syn, float(x))
+        assert_interp_same(_ext_interp(t_syn, g_syn, float(x)), want)
+
+
+@needs_ext
+def test_rust_interp_rejects_empty_and_ragged_tables():
+    with pytest.raises(ValueError, match="non-empty"):
+        _ext_interp(np.array([]), np.array([]), 0.0)
+    with pytest.raises(ValueError, match="same length"):
+        _ext_interp(np.array([0.0, 1.0]), np.array([0.0]), 0.5)
+
+
+def _ext_interp(xs, ys, x):
+    return _fast._ext.interp(xs, ys, float(x))
+
+
 # --- the drift warning -------------------------------------------------------
 
 
