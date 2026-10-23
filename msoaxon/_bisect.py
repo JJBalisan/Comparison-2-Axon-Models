@@ -4,7 +4,8 @@ New analysis code: crossing / smallest_crossing (bisection helped by
 interpolation, used by coincidence.threshold, coincidence.window and
 somatic.rheobase) and smallest_firing (plain bisection, the yes/no search
 they are measured against). The MATLAB port's own search (threshold._search,
-BinarySearch.m's halving search) is separate and must stay as it is.
+BinarySearch.m's halving search) is separate and stays as it is by choice: the
+threshold graphs and the comparison with the repo's jpgs use its values.
 
 Both searches assume zero input doesn't fire. When their first value fires
 they check that with one run at zero, and raise FiresWithoutInputError if the

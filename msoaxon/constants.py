@@ -114,8 +114,8 @@ def ainf(V: np.ndarray | float) -> np.ndarray | float:
 
 
 # --- Gating time constants [ms] at 35 C, shared by both models ---------------
-# The expressions are msoAxon.m's and TwoCpt.m's, term for term, so results stay
-# bit-identical. The 2-CPT model holds z at rest and never uses tauz.
+# The expressions follow msoAxon.m and TwoCpt.m term for term, and the golden
+# traces pin the results. The 2-CPT model holds z at rest and never uses tauz.
 _P_TEMP = 3 ** ((22 - 35) / 10)  # Q10 of 3 from 22 C
 _A_TEMP = 3 ** ((32 - 35) / 10)  # Q10 of 3 from 32 C
 
