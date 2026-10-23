@@ -20,8 +20,9 @@ A run spikes when the axon rises `criterion` above the soma: 10 mV (FACTOR) by
 default, as in the MATLAB EPSG-pair sweeps, or a fraction of the model's own
 spike height, criterion=Relative(0.5) (issue #21; see spike_height).
 
-This is new analysis code, not part of the MATLAB port: it uses a standard
-bracketing bisection rather than BinarySearch.m's halving search.
+This is new analysis code, not part of the MATLAB port: it uses the predictive
+search of _bisect (bisection helped by interpolation) rather than
+BinarySearch.m's halving search.
 """
 
 import dataclasses

@@ -596,10 +596,9 @@ def _rhs(
 ) -> np.ndarray:
     """Computes the right-hand side.
 
-    Arithmetic is kept expression-for-expression identical to
-    msoAxon.m's order so results are bit-for-bit stable; the speed comes
-    from writing into one output array and skipping gates that are
-    switched off.
+    Arithmetic keeps msoAxon.m's expressions and their order, so the
+    golden traces stay stable; the speed comes from writing into one
+    output array and skipping gates that are switched off.
     """
     n = morph.n
     V, m, h, p, w, z, a = x.reshape(7, n)

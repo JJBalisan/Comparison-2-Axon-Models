@@ -3,8 +3,10 @@
     uv run scripts/making_threshold_graphs.py --node 3 --out-dir figures
     uv run scripts/making_threshold_graphs.py --only EPSGpair --jpg-grid   # the repo's jpgs
 
-Each binary-search point runs ~8 simulations per model; points run in parallel
-across all CPUs unless --workers says otherwise.
+Each binary-search point runs about 8 simulations per model for EPSGpair
+(ceiling 150) and about 14 for ramp, ramp2 and sine (ceiling 15000), halving
+from the ceiling to a step of 1. Points run in parallel across all CPUs unless
+--workers says otherwise.
 """  # noqa: E501 (printed verbatim as --help)
 
 import argparse

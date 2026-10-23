@@ -220,7 +220,7 @@ These widths use inputs 3% above threshold. At 0.5% they shrink to 70–91 µs. 
 
 How the widths are computed:
 - `coincidence.window()` does what the experiment does: it fixes the input at (1 + margin) × the coincident threshold (resolved to 1e-4) and searches over delay, to 0.1 µs, for where that input stops spiking. Probability is 50% there. About 20 simulations per window, within 0.5 µs of the same search at 1e-7.
-- Both searches predict rather than halve. At the 10 mV criterion the peak of axon − soma rises smoothly through 10 mV (7.7, 9.7, 10.0, 10.3, 17.8 mV at −1%, −0.1%, 0, +0.1%, +1% of threshold), so each run that doesn't spike says how close it came. That takes 8–12 simulations per threshold instead of 15.
+- Both searches predict rather than halve. At the 10 mV criterion the peak of axon − soma rises smoothly through 10 mV (7.7, 9.7, 10.0, 10.3, 17.8 mV at −1%, −0.1%, 0, +0.1%, +1% of threshold), so each run that doesn't spike says how close it came. That takes about 10 simulations per threshold on average (125 for the twelve benchmark thresholds, at most 13) instead of 15.
 - Earlier versions read the crossing off a threshold curve on a 20 µs grid. Linear interpolation across a curve that bends upward read 0.1–4 µs low, most at the 0.5% margin.
 - Noisy trials check this: 1% amplitude jitter plus 5 µs onset jitter give 200 µs against `window()`'s 199 µs. If the noise is large enough to keep peak probability near 85%, the half-maximum width comes out about 10% wider.
 
