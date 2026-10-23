@@ -3,12 +3,17 @@ name: wheels
 # Prebuilt msoaxon-fast wheels, so fast mode needs no cargo (#39).
 #
 # On a v* tag: build, smoke-test and attach the wheels to that tag's GitHub
-# release. By hand (workflow_dispatch, on any branch): the same build and
-# smoke test, with the wheels kept as workflow artifacts only.
+# release. By hand (workflow_dispatch) or on a pull request: the same build
+# and smoke test, with the wheels kept as workflow artifacts only.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+  # A pull request that touches the crate or this file builds and smoke-tests
+  # the wheels too, so a broken build shows before a tag does (and a new
+  # workflow can run before it exists on main, where dispatch needs it).
+  pull_request:
+    paths: ["rust/**", ".github/workflows/wheels.yml"]
 
 # Building only reads the code; the one job that writes (the release upload)
 # raises its own token below.
