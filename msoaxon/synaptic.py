@@ -13,6 +13,9 @@ EPSG_TAU = (
 # The unitary EPSG's peak for EPSG_TAU, from the MATLAB code. Kept as the
 # literal (fast mode's _fast._epsg and rust/src/lib.rs hold their own copies).
 EPSG_NORM = 0.21317
+# epsg_unitary clamps t to at least this [ms] inside its exponentials (see
+# there); below onset the waveform is masked to zero whatever they hold.
+EPSG_T_FLOOR = -1.0
 
 
 def epsg_unitary(
@@ -29,16 +32,22 @@ def epsg_unitary(
         tau: The (rise, decay) time constants [ms].
 
     Returns:
-        The waveform at t.
+        The waveform at t. Negative t gives -0.0, not 0.0, as it always
+        has: the mask is 0 times a negative difference of exponentials.
     """
+    # The exponentials are evaluated at t clamped to >= EPSG_T_FLOOR: for t
+    # below about -71 ms exp(-t / rise) overflows and 0 * inf is nan. The mask
+    # zeroes those values anyway, and the clamped difference is still negative,
+    # so negative t keeps its -0.0.
+    tc = np.maximum(t, EPSG_T_FLOOR)
     if tau == EPSG_TAU:
         return (
-            (1 / EPSG_NORM) * (t > 0) * (np.exp(-t / 0.18) - np.exp(-t / 0.1))
+            (1 / EPSG_NORM) * (t > 0) * (np.exp(-tc / 0.18) - np.exp(-tc / 0.1))
         )
     rise, decay = tau
     t_peak = np.log(decay / rise) * rise * decay / (decay - rise)
     peak = np.exp(-t_peak / decay) - np.exp(-t_peak / rise)
-    return (1 / peak) * (t > 0) * (np.exp(-t / decay) - np.exp(-t / rise))
+    return (1 / peak) * (t > 0) * (np.exp(-tc / decay) - np.exp(-tc / rise))
 
 
 @dataclasses.dataclass
