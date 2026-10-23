@@ -13,15 +13,84 @@
 //!
 //! msoaxon builds one `MultiRhs` per `mso_axon` call, holding every per-model
 //! constant, and scipy's BDF solver calls it as `f(t, x)`.
+//!
+//! This file has no model number of its own: the reversal potentials and the
+//! gating kinetics' constants come from Python (see `Gating`), so a change to
+//! `multi.py` or `constants.py` reaches both implementations. What stays
+//! here is structure: the exponents (`m**4`), the `1.0`s and the unit
+//! conversions of `_rhs`.
 
 use numpy::{PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
-const V_NA: f64 = 69.0;
-const V_K: f64 = -90.0;
-const V_H: f64 = -35.0;
+/// Declares `Gating`, one `f64` per name, and its constructor from the dict
+/// that `_fast._gating()` passes. Each field is named for the
+/// `msoaxon.constants` function (or `multi` constant) its number belongs to;
+/// the Python side lists the same names with the values and their sources.
+macro_rules! gating {
+    ($($(#[$doc:meta])* $field:ident),* $(,)?) => {
+        /// The constants of the currents and the gating kinetics.
+        #[derive(Clone, Debug)]
+        struct Gating {
+            $($(#[$doc])* $field: f64,)*
+        }
+
+        impl Gating {
+            /// Reads every field from `map`; a missing or unknown name is an
+            /// error, so a typo on either side cannot go unnoticed.
+            fn from_map(map: &HashMap<String, f64>) -> PyResult<Self> {
+                const NAMES: &[&str] = &[$(stringify!($field)),*];
+                if let Some(name) = map.keys().find(|k| !NAMES.contains(&k.as_str())) {
+                    return Err(PyValueError::new_err(format!(
+                        "unknown gating constant {name:?}"
+                    )));
+                }
+                let get = |name: &str| {
+                    map.get(name).copied().ok_or_else(|| {
+                        PyValueError::new_err(format!("missing gating constant {name:?}"))
+                    })
+                };
+                Ok(Gating {
+                    $($field: get(stringify!($field))?,)*
+                })
+            }
+        }
+    };
+}
+
+gating! {
+    /// `multi.V_NA`, `V_K`, `V_H`: the reversal potentials [mV].
+    v_na, v_k, v_h,
+    /// `na_open`: the inactivating fraction and the floor, 0.993 h + 0.007.
+    na_open_h, na_open_floor,
+    /// `minf`: (V + v) / k.
+    minf_v, minf_k,
+    /// `taum`: (a + b / (1 + exp((v - V) / k))) / div.
+    taum_a, taum_b, taum_v, taum_k, taum_div,
+    /// `hinf`: (V + vhalf) / k, with vhalf per compartment.
+    hinf_k,
+    /// `tauh`: (a + b / (1 + exp((v - V) / k))) / div.
+    tauh_a, tauh_b, tauh_v, tauh_k, tauh_div,
+    /// `pinf`: 1 / (1 + exp(-(V + v) / k)).
+    pinf_v, pinf_k,
+    /// `taup`: temp * (num / (a exp((V + v) / ka) + b exp(-(V + v) / kb)) + c).
+    taup_temp, taup_num, taup_a, taup_ka, taup_b, taup_kb, taup_v, taup_c,
+    /// `winf`: (V + v) / k.
+    winf_v, winf_k,
+    /// `tauw`: num / (a exp((V + v) / ka) + b exp(-(V + v) / kb)) + c.
+    tauw_num, tauw_a, tauw_ka, tauw_b, tauw_kb, tauw_v, tauw_c,
+    /// `zinf`: (1 - floor) / (1 + exp((V + v) / k)) + floor.
+    zinf_floor, zinf_v, zinf_k,
+    /// `tauz`: num / (a exp((V + va) / ka) + exp(-(V + vb) / kb)) + c.
+    tauz_num, tauz_a, tauz_va, tauz_ka, tauz_vb, tauz_kb, tauz_c,
+    /// `ainf`: 1 / (1 + exp(k (V + v))).
+    ainf_k, ainf_v,
+    /// `taua`: temp * (c + a exp(-(V + v)^2 / k)).
+    taua_temp, taua_c, taua_a, taua_v, taua_k,
+}
 
 /// The unitary EPSG waveform (`synaptic.epsg_unitary`).
 ///
@@ -38,7 +107,11 @@ impl Epsg {
     #[inline]
     fn unitary(&self, t: f64) -> f64 {
         let pos = if t > 0.0 { 1.0 } else { 0.0 };
-        (self.inv_peak * pos) * ((-t / self.decay).exp() - (-t / self.rise).exp())
+        // Far before onset the exponentials overflow and 0 * inf is NaN;
+        // like the Python, they see t no lower than -1 (the product is
+        // already 0 there, and t > -1 keeps its bits). NaN passes through.
+        let te = if t < -1.0 { -1.0 } else { t };
+        (self.inv_peak * pos) * ((-te / self.decay).exp() - (-te / self.rise).exp())
     }
 }
 
@@ -305,8 +378,7 @@ struct MultiRhs {
     parent: Vec<usize>,
     child: Vec<usize>,
     active: [bool; 6],
-    p_temp: f64,
-    a_temp: f64,
+    gating: Gating,
     stim: Stim,
 }
 
@@ -314,6 +386,7 @@ impl MultiRhs {
     /// Writes dx/dt for state `x` at time `t` into `out` (both 7n long).
     fn eval(&self, t: f64, x: &[f64], out: &mut [f64]) {
         let n = self.n;
+        let c = &self.gating;
         let (v, rest) = x.split_at(n);
         let (m, rest) = rest.split_at(n);
         let (h, rest) = rest.split_at(n);
@@ -324,10 +397,13 @@ impl MultiRhs {
         let mut total = vec![0.0f64; n];
         for i in 0..n {
             let vi = v[i];
-            let ina = self.g_na[i] * m[i].powf(4.0) * (0.993 * h[i] + 0.007) * (vi - V_NA);
-            let ikht = self.g_kht[i] * p[i] * (vi - V_K);
-            let iklt = self.g_klt[i] * w[i].powf(4.0) * z[i] * (vi - V_K);
-            let ih = self.g_h[i] * a[i] * (vi - V_H);
+            let ina = self.g_na[i]
+                * m[i].powf(4.0)
+                * (c.na_open_h * h[i] + c.na_open_floor)
+                * (vi - c.v_na);
+            let ikht = self.g_kht[i] * p[i] * (vi - c.v_k);
+            let iklt = self.g_klt[i] * w[i].powf(4.0) * z[i] * (vi - c.v_k);
+            let ih = self.g_h[i] * a[i] * (vi - c.v_h);
             let ilk = self.g_lk[i] * (vi - self.vlk[i]);
             total[i] = ina + ikht + iklt + ih + ilk;
         }
@@ -357,50 +433,57 @@ impl MultiRhs {
         for i in 0..n {
             let vi = v[i];
             dm[i] = if act_m {
-                let minf = 1.0 / (1.0 + ((vi + 46.0) / -11.0).exp());
-                let taum = (0.141 + (-0.0826 / (1.0 + ((-20.5 - vi) / 10.8).exp()))) / 3.0;
+                let minf = 1.0 / (1.0 + ((vi + c.minf_v) / c.minf_k).exp());
+                let taum = (c.taum_a + (c.taum_b / (1.0 + ((c.taum_v - vi) / c.taum_k).exp())))
+                    / c.taum_div;
                 (minf - m[i]) / taum
             } else {
                 0.0
             };
             dh[i] = if act_h {
-                let hinf = 1.0 / (1.0 + ((vi + self.na_vhalf[i]) / 7.77).exp());
-                let tauh = (4.0 + (-3.74 / (1.0 + ((-40.6 - vi) / 5.05).exp()))) / 3.0;
+                let hinf = 1.0 / (1.0 + ((vi + self.na_vhalf[i]) / c.hinf_k).exp());
+                let tauh = (c.tauh_a + (c.tauh_b / (1.0 + ((c.tauh_v - vi) / c.tauh_k).exp())))
+                    / c.tauh_div;
                 (hinf - h[i]) / tauh
             } else {
                 0.0
             };
             dp[i] = if act_p {
-                let pinf = 1.0 / (1.0 + (-(vi + 23.0) / 6.0).exp());
-                let taup = self.p_temp
-                    * (100.0
-                        / (4.0 * ((vi + 60.0) / 32.0).exp() + 5.0 * (-(vi + 60.0) / 22.0).exp())
-                        + 5.0);
+                let pinf = 1.0 / (1.0 + (-(vi + c.pinf_v) / c.pinf_k).exp());
+                let taup = c.taup_temp
+                    * (c.taup_num
+                        / (c.taup_a * ((vi + c.taup_v) / c.taup_ka).exp()
+                            + c.taup_b * (-(vi + c.taup_v) / c.taup_kb).exp())
+                        + c.taup_c);
                 (pinf - p[i]) / taup
             } else {
                 0.0
             };
             dw[i] = if act_w {
-                let winf = 1.0 / (1.0 + ((vi + 57.34) / -11.7).exp());
-                let tauw = 21.5
-                    / (6.0 * ((vi + 60.0) / 7.0).exp() + 24.0 * (-(vi + 60.0) / 50.6).exp())
-                    + 0.35;
+                let winf = 1.0 / (1.0 + ((vi + c.winf_v) / c.winf_k).exp());
+                let tauw = c.tauw_num
+                    / (c.tauw_a * ((vi + c.tauw_v) / c.tauw_ka).exp()
+                        + c.tauw_b * (-(vi + c.tauw_v) / c.tauw_kb).exp())
+                    + c.tauw_c;
                 (winf - w[i]) / tauw
             } else {
                 0.0
             };
             dz[i] = if act_z {
-                let zinf = (1.0 - 0.27) / (1.0 + ((vi + 67.0) / 6.16).exp()) + 0.27;
-                let tauz =
-                    170.0 / (5.0 * ((vi + 60.0) / 10.0).exp() + (-(vi + 70.0) / 8.0).exp()) + 10.7;
+                let zinf = (1.0 - c.zinf_floor) / (1.0 + ((vi + c.zinf_v) / c.zinf_k).exp())
+                    + c.zinf_floor;
+                let tauz = c.tauz_num
+                    / (c.tauz_a * ((vi + c.tauz_va) / c.tauz_ka).exp()
+                        + (-(vi + c.tauz_vb) / c.tauz_kb).exp())
+                    + c.tauz_c;
                 (zinf - z[i]) / tauz
             } else {
                 0.0
             };
             da[i] = if act_a {
-                let ainf = 1.0 / (1.0 + (0.1 * (vi + 80.4)).exp());
-                let s = vi + 61.5;
-                let taua = self.a_temp * (79.0 + 417.0 * (-(s * s) / 800.0).exp());
+                let ainf = 1.0 / (1.0 + (c.ainf_k * (vi + c.ainf_v)).exp());
+                let s = vi + c.taua_v;
+                let taua = c.taua_temp * (c.taua_c + c.taua_a * (-(s * s) / c.taua_k).exp());
                 (ainf - a[i]) / taua
             } else {
                 0.0
@@ -438,11 +521,12 @@ impl MultiRhs {
     /// (one entry per axial edge, 0-based). `stim_type` is one of
     /// `multi.MSO_STIM_TYPES` or "none"; the stimulus keywords are the
     /// fields of `_common.stimulus`, with `k`/`k2` the 0-based input
-    /// compartments and `epsg` = (1 / peak, decay, rise).
+    /// compartments and `epsg` = (1 / peak, decay, rise). `gating` maps
+    /// every name declared in `Gating` to its value (`_fast._gating()`).
     #[new]
     #[pyo3(signature = (
         *, g_na, g_kht, g_klt, g_h, g_lk, vlk, na_vhalf, cap, sa, g_ax,
-        parent, child, active, p_temp, a_temp, stim_type, start=0.0,
+        parent, child, active, gating, stim_type, start=0.0,
         stop=0.0, amp=0.0, k=0, k2=0, f=0.0, epsg=(1.0, 1.0, 1.0),
         t_syn=None, g_syn=None, vsyn=0.0, diff=None
     ))]
@@ -461,8 +545,7 @@ impl MultiRhs {
         parent: PyReadonlyArray1<'_, i64>,
         child: PyReadonlyArray1<'_, i64>,
         active: [bool; 6],
-        p_temp: f64,
-        a_temp: f64,
+        gating: HashMap<String, f64>,
         stim_type: &str,
         start: f64,
         stop: f64,
@@ -610,8 +693,7 @@ impl MultiRhs {
             parent,
             child,
             active,
-            p_temp,
-            a_temp,
+            gating: Gating::from_map(&gating)?,
             stim,
         })
     }
@@ -648,9 +730,321 @@ impl MultiRhs {
     }
 }
 
+/// `Table::interp` at one point: `np.interp(x, xs, ys, 0.0, 0.0)`, the
+/// contract of `synaptic.interp_g`. Exposed so the tests can hold the port
+/// of numpy's interpolation to numpy (tests/test_fast.py).
+#[pyfunction]
+fn interp(xs: PyReadonlyArray1<'_, f64>, ys: PyReadonlyArray1<'_, f64>, x: f64) -> PyResult<f64> {
+    let table = Table {
+        x: to_vec(&xs),
+        y: to_vec(&ys),
+    };
+    if table.x.is_empty() || table.x.len() != table.y.len() {
+        return Err(PyValueError::new_err(
+            "xs and ys must be non-empty and the same length",
+        ));
+    }
+    Ok(table.interp(x))
+}
+
 /// The Rust right-hand side of msoaxon's 45-compartment model.
 #[pymodule]
 fn msoaxon_fast(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<MultiRhs>()?;
+    m.add_function(wrap_pyfunction!(interp, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Numpy and Rust call the same libm on the machine the port was written
+    /// on (darwin-arm64): bit-identical there, close elsewhere.
+    const BITWISE: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
+
+    fn assert_same(got: f64, want: f64, rel: f64) {
+        if BITWISE {
+            assert_eq!(got.to_bits(), want.to_bits(), "{got:e} vs {want:e}");
+        } else {
+            assert!(
+                (got - want).abs() <= rel * want.abs(),
+                "{got:e} vs {want:e}"
+            );
+        }
+    }
+
+    fn default_epsg() -> Epsg {
+        Epsg {
+            inv_peak: 1.0 / 0.21317,
+            decay: 0.18,
+            rise: 0.1,
+        }
+    }
+
+    fn table(x: &[f64], y: &[f64]) -> Table {
+        Table {
+            x: x.to_vec(),
+            y: y.to_vec(),
+        }
+    }
+
+    #[test]
+    fn interp_matches_numpy_on_the_knots_and_between() {
+        // values from np.interp(x, xs, ys, left=0.0, right=0.0)
+        let t = table(&[0.0, 0.3, 1.0, 2.5], &[0.0, 2.0, 1.5, -1.0]);
+        let cases = [
+            (0.1, 0.6666666666666667),
+            (0.65, 1.75),
+            (1.7, 0.33333333333333337),
+            (2.0, -0.16666666666666674),
+        ];
+        for (x, want) in cases {
+            assert_same(t.interp(x), want, 1e-15);
+        }
+        // a knot gives its own value exactly, whatever the slopes
+        for (x, want) in [(0.0f64, 0.0f64), (0.3, 2.0), (1.0, 1.5), (2.5, -1.0)] {
+            assert_eq!(t.interp(x).to_bits(), want.to_bits(), "knot {x}");
+        }
+    }
+
+    #[test]
+    fn interp_is_zero_outside_the_table_not_clamped() {
+        // synaptic.interp_g passes left=right=0.0; np.interp's default
+        // would return the end values instead
+        let t = table(&[0.0, 0.3, 1.0], &[4.0, 2.0, 1.5]);
+        for x in [
+            -1e-300,
+            -0.1,
+            f64::NEG_INFINITY,
+            1.0 + 1e-15,
+            2.6,
+            f64::INFINITY,
+        ] {
+            assert_eq!(t.interp(x).to_bits(), 0.0f64.to_bits(), "x={x}");
+        }
+    }
+
+    #[test]
+    fn interp_on_a_one_point_table() {
+        // numpy: the point itself gives y, anything else 0, and NaN (which
+        // compares neither way) gives y as well
+        let t = table(&[1.5], &[7.0]);
+        assert_eq!(t.interp(1.5), 7.0);
+        assert_eq!(t.interp(1.4), 0.0);
+        assert_eq!(t.interp(1.6), 0.0);
+        assert_eq!(t.interp(f64::NAN), 7.0);
+    }
+
+    #[test]
+    fn interp_passes_nan_through_a_longer_table() {
+        assert!(table(&[0.0, 1.0], &[0.0, 1.0]).interp(f64::NAN).is_nan());
+    }
+
+    #[test]
+    fn interp_on_a_flat_segment_is_that_value() {
+        let t = table(&[0.0, 1.0, 2.0], &[3.0, 3.0, 5.0]);
+        assert_eq!(t.interp(0.37), 3.0);
+    }
+
+    /// The values `msoaxon._fast._gating()` passes (multi.V_NA, constants.py's
+    /// literals and Q10 factors), for the fixed model below.
+    fn gating() -> Gating {
+        let q10 = |a: f64, b: f64| 3f64.powf((a - b) / 10.0);
+        let values = [
+            ("v_na", 69.0),
+            ("v_k", -90.0),
+            ("v_h", -35.0),
+            ("na_open_h", 0.993),
+            ("na_open_floor", 0.007),
+            ("minf_v", 46.0),
+            ("minf_k", -11.0),
+            ("taum_a", 0.141),
+            ("taum_b", -0.0826),
+            ("taum_v", -20.5),
+            ("taum_k", 10.8),
+            ("taum_div", 3.0),
+            ("hinf_k", 7.77),
+            ("tauh_a", 4.0),
+            ("tauh_b", -3.74),
+            ("tauh_v", -40.6),
+            ("tauh_k", 5.05),
+            ("tauh_div", 3.0),
+            ("pinf_v", 23.0),
+            ("pinf_k", 6.0),
+            ("taup_temp", q10(22.0, 35.0)),
+            ("taup_num", 100.0),
+            ("taup_a", 4.0),
+            ("taup_ka", 32.0),
+            ("taup_b", 5.0),
+            ("taup_kb", 22.0),
+            ("taup_v", 60.0),
+            ("taup_c", 5.0),
+            ("winf_v", 57.34),
+            ("winf_k", -11.7),
+            ("tauw_num", 21.5),
+            ("tauw_a", 6.0),
+            ("tauw_ka", 7.0),
+            ("tauw_b", 24.0),
+            ("tauw_kb", 50.6),
+            ("tauw_v", 60.0),
+            ("tauw_c", 0.35),
+            ("zinf_floor", 0.27),
+            ("zinf_v", 67.0),
+            ("zinf_k", 6.16),
+            ("tauz_num", 170.0),
+            ("tauz_a", 5.0),
+            ("tauz_va", 60.0),
+            ("tauz_ka", 10.0),
+            ("tauz_vb", 70.0),
+            ("tauz_kb", 8.0),
+            ("tauz_c", 10.7),
+            ("ainf_k", 0.1),
+            ("ainf_v", 80.4),
+            ("taua_temp", q10(32.0, 35.0)),
+            ("taua_c", 79.0),
+            ("taua_a", 417.0),
+            ("taua_v", 61.5),
+            ("taua_k", 800.0),
+        ];
+        let map = values
+            .map(|(k, v)| (k.to_string(), v))
+            .into_iter()
+            .collect();
+        Gating::from_map(&map).unwrap()
+    }
+
+    /// A 45-compartment chain in the pattern of `constants.py` (soma, two
+    /// AIS, 21 internode/node pairs) with an EPSG pair at the soma; the
+    /// values are fixed, not the real morphology.
+    fn model() -> MultiRhs {
+        let n = 45;
+        let axon = |head: [f64; 3], internode: f64, node: f64| -> Vec<f64> {
+            (0..n)
+                .map(|i| match i {
+                    0..=2 => head[i],
+                    _ if (i - 3) % 2 == 0 => internode,
+                    _ => node,
+                })
+                .collect()
+        };
+        let edges = n - 1;
+        MultiRhs {
+            n,
+            g_na: axon([0.2, 4.0, 4.0], 0.0, 4.0),
+            g_kht: (0..n).map(|i| if i == 0 { 0.1 } else { 0.0 }).collect(),
+            g_klt: axon([1.55; 3], 0.0, 1.55),
+            g_h: (0..n).map(|i| if i < 3 { 0.02 } else { 0.0 }).collect(),
+            g_lk: axon([0.0005; 3], 0.0002, 0.05),
+            vlk: (0..n).map(|i| -65.0 - 0.05 * i as f64).collect(),
+            na_vhalf: (0..n).map(|i| if i == 0 { 77.0 } else { 62.5 }).collect(),
+            cap: (0..n).map(|i| 1.0 + 0.01 * i as f64).collect(),
+            sa: axon([8750.0, 200.0, 20.7], 207.3, 2.07),
+            g_ax: (0..edges)
+                .map(|e| 2.0e-8 * (1.0 + 0.05 * e as f64))
+                .collect(),
+            parent: (0..edges).collect(),
+            child: (1..n).collect(),
+            active: [true; 6],
+            gating: gating(),
+            stim: Stim::EpsgPair {
+                start: 5.0,
+                td: 0.2,
+                amp: 100.0,
+                k: 0,
+                w: default_epsg(),
+            },
+        }
+    }
+
+    /// V from -75 mV in 0.7 mV steps, the six gates a fixed pattern in
+    /// 0.05..0.95.
+    fn state() -> Vec<f64> {
+        (0..7 * 45)
+            .map(|j| {
+                if j < 45 {
+                    -75.0 + 0.7 * j as f64
+                } else {
+                    0.05 + 0.9 * ((j * 37 % 101) as f64 / 100.0)
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn eval_keeps_the_values_captured_before_the_gating_moved_to_python() {
+        let mut out = vec![0.0; 7 * 45];
+        model().eval(5.1, &state(), &mut out);
+        // every 23rd of the 315 outputs, from the code before this change
+        let sampled: [f64; 14] = [
+            -4.413877638942935e0,
+            1.5664623361151598e-3,
+            -1.6087343526101417e1,
+            -1.1683193512611474e0,
+            8.837880264411313e-2,
+            1.374628095108558e-1,
+            -1.701359809791315e-1,
+            -2.3789557480257964e-1,
+            -1.9384294020535559e-1,
+            -2.774157034887882e-1,
+            6.681458243998471e-3,
+            -9.598634051855456e-3,
+            3.922629037735645e-4,
+            -1.367808281399423e-3,
+        ];
+        for (i, want) in sampled.into_iter().enumerate() {
+            let got = out[23 * i];
+            if BITWISE {
+                assert_eq!(got.to_bits(), want.to_bits(), "out[{}]", 23 * i);
+            } else {
+                // elementwise, so the cancellation in (x_inf - x) / tau shows
+                assert!(
+                    (got - want).abs() <= 1e-9 * want.abs() + 1e-12,
+                    "out[{}]: {got:e} vs {want:e}",
+                    23 * i
+                );
+            }
+        }
+        if BITWISE {
+            // FNV-1a over the bits of all 315 outputs
+            let mut hash: u64 = 0xcbf29ce484222325;
+            for v in &out {
+                for byte in v.to_bits().to_le_bytes() {
+                    hash = (hash ^ byte as u64).wrapping_mul(0x100000001b3);
+                }
+            }
+            assert_eq!(hash, 0x4c8fdc374248577f);
+        }
+    }
+
+    #[test]
+    fn eval_follows_a_changed_constant() {
+        let (x, mut out, mut moved) = (state(), vec![0.0; 315], vec![0.0; 315]);
+        let mut rhs = model();
+        rhs.eval(5.1, &x, &mut out);
+        rhs.gating.v_na += 1.0;
+        rhs.eval(5.1, &x, &mut moved);
+        assert_ne!(out[0], moved[0]); // dV of the soma
+        assert_eq!(out[45..], moved[45..]); // the gates don't see V_Na
+    }
+
+    #[test]
+    fn unitary_keeps_its_value_at_a_reachable_time() {
+        // captured from the code before the clamp was added
+        assert_same(default_epsg().unitary(0.1), 9.657736997044162e-1, 1e-14);
+    }
+
+    #[test]
+    fn unitary_is_negative_zero_far_before_onset() {
+        // exp(200 / 0.1) overflows: without the clamp this was 0 * inf = NaN
+        let far = default_epsg().unitary(-200.0);
+        assert_eq!(far, 0.0);
+        assert!(far.is_sign_negative(), "expected -0.0, got {far:?}");
+        // the same -0.0 just either side of the clamp, and at onset
+        for t in [-0.5, -1.0, -1.5, -70.0, -71.0] {
+            let u = default_epsg().unitary(t);
+            assert!(u == 0.0 && u.is_sign_negative(), "t={t}: {u:?}");
+        }
+        assert!(default_epsg().unitary(f64::NAN).is_nan());
+    }
 }

@@ -78,6 +78,10 @@ jobs:
         working-directory: rust
       - run: cargo clippy -- -D warnings
         working-directory: rust
+      # the crate's own tests (the pyo3 extension-module feature is off in
+      # Cargo.toml, so the test binary links; maturin turns it on for wheels)
+      - run: cargo test
+        working-directory: rust
       - run: uv sync --locked --extra fast
       # bit-identical to the numpy reference on this runner? The self-check
       # (differing states, states compared, largest relative difference),

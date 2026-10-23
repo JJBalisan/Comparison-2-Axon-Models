@@ -23,6 +23,7 @@ from msoaxon import (
     _parallel,
     _solve,
     coincidence,
+    constants,
     multi,
     synaptic,
     two,
@@ -183,10 +184,74 @@ def test_rust_rhs_reads_strided_states():
 
 
 @needs_ext
+def test_rust_epsg_pair_is_finite_far_before_the_second_onset():
+    # the second EPSG starts 80 ms after the first: the exponentials of its
+    # waveform overflow at te - td < -71 unless clamped (as in the Python)
+    syn = synaptic.SynParams(t_end=20.0)
+    s = _common.stimulus("EPSGpair", 5.0, 85.0, 100.0, 20.0, syn)
+    active = (True,) * 6
+    mem = multi.membrane(-68.0)
+    fast = _fast._build("EPSGpair", s, 1, active, mem, multi.LUMPED, None)
+    x = states(multi.N, np.random.default_rng(8), 1)[1]
+    assert np.all(np.isfinite(fast(5.1, x)))
+
+
+@needs_ext
 def test_rust_rhs_rejects_a_wrong_state_length():
     args, _ = setup("EPSGpair")
     with pytest.raises(ValueError, match="315"):
         _fast._build(*args)(5.0, np.zeros(10))
+
+
+# the constants the Rust side takes from Python: (module, name, new value)
+PASSED_CONSTANTS = [
+    (multi, "V_NA", multi.V_NA + 1.0),
+    (multi, "V_K", multi.V_K + 1.0),
+    (multi, "V_H", multi.V_H + 1.0),
+    (constants, "_P_TEMP", constants._P_TEMP * 1.5),
+    (constants, "_A_TEMP", constants._A_TEMP * 1.5),
+]
+
+
+@needs_ext
+@pytest.mark.parametrize(
+    ("module", "name", "value"),
+    PASSED_CONSTANTS,
+    ids=[f"{m.__name__}.{n}" for m, n, _ in PASSED_CONSTANTS],
+)
+def test_rust_rhs_follows_a_changed_python_constant(
+    monkeypatch, module, name, value
+):
+    # the Rust side has no numbers of its own: move one in Python and its
+    # right-hand side must move exactly as multi._rhs does, so a change to
+    # the model can't be mistaken for hardware drift
+    args, _ = setup("EPSGpair")
+    n = args[5].n
+    x = states(n, np.random.default_rng(5), 1)[1]
+    before = multi._rhs(5.1, x, *args)
+    with monkeypatch.context() as mp:
+        mp.setattr(module, name, value)
+        want = multi._rhs(5.1, x, *args)
+        assert not np.array_equal(want, before)
+        assert_same(_fast._build(*args)(5.1, x), want, n)
+    # and back to the original once the patch is undone
+    assert_same(_fast._build(*args)(5.1, x), before, n)
+
+
+@needs_ext
+@pytest.mark.parametrize("change", ["unknown", "missing"])
+def test_rust_rhs_rejects_a_mismatched_gating_dict(monkeypatch, change):
+    args, _ = setup("EPSGpair")
+    gating = dict(_fast._GATING)
+    if change == "unknown":
+        gating["tauq_c"] = 1.0
+        match = 'unknown gating constant "tauq_c"'
+    else:
+        del gating["tauz_c"]
+        match = 'missing gating constant "tauz_c"'
+    monkeypatch.setattr(_fast, "_GATING", gating)
+    with pytest.raises(ValueError, match=match):
+        _fast._build(*args)
 
 
 @needs_ext
@@ -220,6 +285,79 @@ def test_self_check_passes_and_is_cheap():
         # elementwise, so cancellation in (x_inf - x) / tau shows; GitHub's
         # ubuntu x86_64 runner measured 2.7e-13 (every state differed)
         assert worst < 1e-10
+
+
+# --- Table::interp against np.interp -----------------------------------------
+
+
+def interp_g_like(xs, ys, x):
+    """synaptic.interp_g's call: zero outside the table."""
+    return float(np.interp(x, xs, ys, left=0.0, right=0.0))
+
+
+def assert_interp_same(got, want):
+    if np.isnan(want):
+        assert np.isnan(got)
+    elif BITWISE:
+        # np.interp's fused multiply-add on arm64 is reproduced in Rust
+        assert np.float64(got).tobytes() == np.float64(want).tobytes()
+    else:
+        np.testing.assert_allclose(got, want, rtol=1e-15)
+
+
+@needs_ext
+def test_rust_interp_matches_numpy_on_the_edges():
+    xs = np.array([0.0, 0.3, 1.0, 2.5, 2.5000000000000004])
+    ys = np.array([0.0, 2.0, 1.5, -1.0, 4.0])
+    ulp = np.nextafter
+    points = [*xs, -1e-300, -0.1, 2.6, 9e99, -9e99, np.nan]
+    points += [ulp(x, np.inf) for x in xs] + [ulp(x, -np.inf) for x in xs]
+    points += [-np.inf, np.inf, 0.1, 0.65, 1.7, 2.0]
+    for x in points:
+        want = interp_g_like(xs, ys, float(x))
+        assert_interp_same(_ext_interp(xs, ys, x), want)
+
+
+@needs_ext
+@pytest.mark.parametrize("x", [1.4, 1.5, 1.6, np.nan, -np.inf, np.inf])
+def test_rust_interp_on_a_one_point_table(x):
+    xs, ys = np.array([1.5]), np.array([7.0])
+    assert_interp_same(_ext_interp(xs, ys, x), interp_g_like(xs, ys, x))
+
+
+@needs_ext
+def test_rust_interp_matches_numpy_on_random_tables():
+    rng = np.random.default_rng(2610)
+    for _ in range(40):
+        n = int(rng.integers(2, 60))
+        xs = np.cumsum(rng.uniform(1e-3, 1.0, n))
+        ys = rng.normal(size=n)
+        ys[rng.integers(0, n, 2)] = ys[0]  # some flat spans
+        for x in rng.uniform(xs[0] - 0.2, xs[-1] + 0.2, 60):
+            assert_interp_same(
+                _ext_interp(xs, ys, float(x)), interp_g_like(xs, ys, float(x))
+            )
+
+
+@needs_ext
+def test_rust_interp_matches_a_synaptic_table():
+    t_syn, g_syn = synaptic.synaptic(synaptic.SynParams(t_end=20.0))
+    rng = np.random.default_rng(14)
+    for x in [-0.5, 0.0, 20.0, 20.5, *rng.uniform(0.0, 20.0, 300)]:
+        want = synaptic.interp_g(t_syn, g_syn, float(x))
+        assert_interp_same(_ext_interp(t_syn, g_syn, float(x)), want)
+
+
+@needs_ext
+def test_rust_interp_rejects_empty_and_ragged_tables():
+    with pytest.raises(ValueError, match="non-empty"):
+        _ext_interp(np.array([]), np.array([]), 0.0)
+    with pytest.raises(ValueError, match="same length"):
+        _ext_interp(np.array([0.0, 1.0]), np.array([0.0]), 0.5)
+
+
+def _ext_interp(xs, ys, x):
+    return _fast._ext.interp(xs, ys, float(x))
 
 
 # --- the drift warning -------------------------------------------------------
