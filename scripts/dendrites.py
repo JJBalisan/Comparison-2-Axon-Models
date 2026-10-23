@@ -333,10 +333,15 @@ def run(a: argparse.Namespace, pool: futures.ProcessPoolExecutor) -> None:
         k: pool.submit(somatic.spike_amplitude, "multi", rb * k, mem=mem_d)
         for k in mults
     }
+
+    def amp_or_none(r: dict[str, Any]) -> float | None:
+        # None when the soma has no distinct inflection at that step
+        return None if r["amplitude"] is None else float(r["amplitude"])
+
     res["G_somatic_spike"] = {
         "rheobase_pA": float(rb),
         "amplitudes_mV": {
-            str(k): float(j.result()["amplitude"]) for k, j in amp_jobs.items()
+            str(k): amp_or_none(j.result()) for k, j in amp_jobs.items()
         },
     }
     print("G", res["G_somatic_spike"], flush=True)
