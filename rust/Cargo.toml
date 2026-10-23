@@ -10,7 +10,7 @@ name = "msoaxon_fast"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.25", features = ["extension-module", "abi3-py311"] }
+pyo3 = { version = "0.25", features = ["abi3-py311"] }
 numpy = "0.25"
 
 [profile.release]

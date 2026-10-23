@@ -847,6 +847,187 @@ mod tests {
         assert_eq!(t.interp(0.37), 3.0);
     }
 
+    /// The values `msoaxon._fast._gating()` passes (multi.V_NA, constants.py's
+    /// literals and Q10 factors), for the fixed model below.
+    fn gating() -> Gating {
+        let q10 = |a: f64, b: f64| 3f64.powf((a - b) / 10.0);
+        let values = [
+            ("v_na", 69.0),
+            ("v_k", -90.0),
+            ("v_h", -35.0),
+            ("na_open_h", 0.993),
+            ("na_open_floor", 0.007),
+            ("minf_v", 46.0),
+            ("minf_k", -11.0),
+            ("taum_a", 0.141),
+            ("taum_b", -0.0826),
+            ("taum_v", -20.5),
+            ("taum_k", 10.8),
+            ("taum_div", 3.0),
+            ("hinf_k", 7.77),
+            ("tauh_a", 4.0),
+            ("tauh_b", -3.74),
+            ("tauh_v", -40.6),
+            ("tauh_k", 5.05),
+            ("tauh_div", 3.0),
+            ("pinf_v", 23.0),
+            ("pinf_k", 6.0),
+            ("taup_temp", q10(22.0, 35.0)),
+            ("taup_num", 100.0),
+            ("taup_a", 4.0),
+            ("taup_ka", 32.0),
+            ("taup_b", 5.0),
+            ("taup_kb", 22.0),
+            ("taup_v", 60.0),
+            ("taup_c", 5.0),
+            ("winf_v", 57.34),
+            ("winf_k", -11.7),
+            ("tauw_num", 21.5),
+            ("tauw_a", 6.0),
+            ("tauw_ka", 7.0),
+            ("tauw_b", 24.0),
+            ("tauw_kb", 50.6),
+            ("tauw_v", 60.0),
+            ("tauw_c", 0.35),
+            ("zinf_floor", 0.27),
+            ("zinf_v", 67.0),
+            ("zinf_k", 6.16),
+            ("tauz_num", 170.0),
+            ("tauz_a", 5.0),
+            ("tauz_va", 60.0),
+            ("tauz_ka", 10.0),
+            ("tauz_vb", 70.0),
+            ("tauz_kb", 8.0),
+            ("tauz_c", 10.7),
+            ("ainf_k", 0.1),
+            ("ainf_v", 80.4),
+            ("taua_temp", q10(32.0, 35.0)),
+            ("taua_c", 79.0),
+            ("taua_a", 417.0),
+            ("taua_v", 61.5),
+            ("taua_k", 800.0),
+        ];
+        let map = values
+            .map(|(k, v)| (k.to_string(), v))
+            .into_iter()
+            .collect();
+        Gating::from_map(&map).unwrap()
+    }
+
+    /// A 45-compartment chain in the pattern of `constants.py` (soma, two
+    /// AIS, 21 internode/node pairs) with an EPSG pair at the soma; the
+    /// values are fixed, not the real morphology.
+    fn model() -> MultiRhs {
+        let n = 45;
+        let axon = |head: [f64; 3], internode: f64, node: f64| -> Vec<f64> {
+            (0..n)
+                .map(|i| match i {
+                    0..=2 => head[i],
+                    _ if (i - 3) % 2 == 0 => internode,
+                    _ => node,
+                })
+                .collect()
+        };
+        let edges = n - 1;
+        MultiRhs {
+            n,
+            g_na: axon([0.2, 4.0, 4.0], 0.0, 4.0),
+            g_kht: (0..n).map(|i| if i == 0 { 0.1 } else { 0.0 }).collect(),
+            g_klt: axon([1.55; 3], 0.0, 1.55),
+            g_h: (0..n).map(|i| if i < 3 { 0.02 } else { 0.0 }).collect(),
+            g_lk: axon([0.0005; 3], 0.0002, 0.05),
+            vlk: (0..n).map(|i| -65.0 - 0.05 * i as f64).collect(),
+            na_vhalf: (0..n).map(|i| if i == 0 { 77.0 } else { 62.5 }).collect(),
+            cap: (0..n).map(|i| 1.0 + 0.01 * i as f64).collect(),
+            sa: axon([8750.0, 200.0, 20.7], 207.3, 2.07),
+            g_ax: (0..edges)
+                .map(|e| 2.0e-8 * (1.0 + 0.05 * e as f64))
+                .collect(),
+            parent: (0..edges).collect(),
+            child: (1..n).collect(),
+            active: [true; 6],
+            gating: gating(),
+            stim: Stim::EpsgPair {
+                start: 5.0,
+                td: 0.2,
+                amp: 100.0,
+                k: 0,
+                w: default_epsg(),
+            },
+        }
+    }
+
+    /// V from -75 mV in 0.7 mV steps, the six gates a fixed pattern in
+    /// 0.05..0.95.
+    fn state() -> Vec<f64> {
+        (0..7 * 45)
+            .map(|j| {
+                if j < 45 {
+                    -75.0 + 0.7 * j as f64
+                } else {
+                    0.05 + 0.9 * ((j * 37 % 101) as f64 / 100.0)
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn eval_keeps_the_values_captured_before_the_gating_moved_to_python() {
+        let mut out = vec![0.0; 7 * 45];
+        model().eval(5.1, &state(), &mut out);
+        // every 23rd of the 315 outputs, from the code before this change
+        let sampled: [f64; 14] = [
+            -4.413877638942935e0,
+            1.5664623361151598e-3,
+            -1.6087343526101417e1,
+            -1.1683193512611474e0,
+            8.837880264411313e-2,
+            1.374628095108558e-1,
+            -1.701359809791315e-1,
+            -2.3789557480257964e-1,
+            -1.9384294020535559e-1,
+            -2.774157034887882e-1,
+            6.681458243998471e-3,
+            -9.598634051855456e-3,
+            3.922629037735645e-4,
+            -1.367808281399423e-3,
+        ];
+        for (i, want) in sampled.into_iter().enumerate() {
+            let got = out[23 * i];
+            if BITWISE {
+                assert_eq!(got.to_bits(), want.to_bits(), "out[{}]", 23 * i);
+            } else {
+                // elementwise, so the cancellation in (x_inf - x) / tau shows
+                assert!(
+                    (got - want).abs() <= 1e-9 * want.abs() + 1e-12,
+                    "out[{}]: {got:e} vs {want:e}",
+                    23 * i
+                );
+            }
+        }
+        if BITWISE {
+            // FNV-1a over the bits of all 315 outputs
+            let mut hash: u64 = 0xcbf29ce484222325;
+            for v in &out {
+                for byte in v.to_bits().to_le_bytes() {
+                    hash = (hash ^ byte as u64).wrapping_mul(0x100000001b3);
+                }
+            }
+            assert_eq!(hash, 0x4c8fdc374248577f);
+        }
+    }
+
+    #[test]
+    fn eval_follows_a_changed_constant() {
+        let (x, mut out, mut moved) = (state(), vec![0.0; 315], vec![0.0; 315]);
+        let mut rhs = model();
+        rhs.eval(5.1, &x, &mut out);
+        rhs.gating.v_na += 1.0;
+        rhs.eval(5.1, &x, &mut moved);
+        assert_ne!(out[0], moved[0]); // dV of the soma
+        assert_eq!(out[45..], moved[45..]); // the gates don't see V_Na
+    }
+
     #[test]
     fn unitary_keeps_its_value_at_a_reachable_time() {
         // captured from the code before the clamp was added
