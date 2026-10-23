@@ -1,6 +1,7 @@
 """The analysis layer: parallel helpers, threshold sweeps, coincidence trials,
 somatic measurements and passive measurements."""
 
+import warnings
 from concurrent import futures
 
 import numpy as np
@@ -432,3 +433,64 @@ def test_window_when_nothing_fires_returns_no_window():
         "two", 0.03, v0=-58, model_kw=kw, criterion=30.0
     )
     assert np.isnan(w) and th0 == np.inf
+
+
+# --- epsg_unitary far from onset (synaptic.py) --------------------------------
+
+# epsg_unitary(t) for t > 0, captured from the code before the t <= -71 ms fix
+# (which clamps t before the exponentials and must not move a bit here)
+EPSG_UNITARY_AFTER_ONSET = {
+    0.05: 0.7080474207643337,
+    0.1: 0.9657736997044162,
+    0.18: 0.9503239337141989,
+    1.0: 0.01792241032842484,
+    5.0: 4.050776728174052e-12,
+}
+
+EPSG_FAR_FROM_ONSET = pytest.mark.xfail(
+    strict=True, reason="epsg_unitary NaN, fixed by the single-source PR"
+)
+
+
+def test_epsg_unitary_after_onset_is_bit_for_bit_unchanged():
+    for t, expected in EPSG_UNITARY_AFTER_ONSET.items():
+        assert synaptic.epsg_unitary(t) == expected
+    got = synaptic.epsg_unitary(np.array(list(EPSG_UNITARY_AFTER_ONSET)))
+    np.testing.assert_array_equal(got, list(EPSG_UNITARY_AFTER_ONSET.values()))
+
+
+def test_epsg_unitary_just_before_onset_is_a_signed_zero():
+    # (t > 0) * (negative difference of exponentials): -0.0 for t < 0, +0.0 at
+    # the onset. Reachable today, so the fix must keep these bits.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        got = synaptic.epsg_unitary(np.array([-70.0, -1e-9, 0.0]))
+    assert np.all(got == 0)
+    assert list(np.signbit(got)) == [True, True, False]
+
+
+@EPSG_FAR_FROM_ONSET
+def test_epsg_unitary_far_before_onset_is_zero_not_nan():
+    # exp(-t / 0.1) overflows for t < about -71 ms, and inf * 0 is NaN
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        got = synaptic.epsg_unitary(
+            np.array([-200.0, -72.0, -70.0, -1e-9, 0.0])
+        )
+    assert not np.isnan(got).any()
+    assert np.all(got == 0)
+    assert list(np.signbit(got)) == [True, True, True, True, False]
+
+
+@EPSG_FAR_FROM_ONSET
+@pytest.mark.parametrize("model", ["multi", "two"])
+def test_epsg_pair_with_the_second_onset_80_ms_later_runs(model):
+    # at the second onset the first EPSG is 80 ms old; the second EPSG's
+    # waveform is evaluated 80 ms before its own onset until then
+    args = ("EPSGpair", 5, 85, 1.0, 3, "passive", 90, -68.0, 1)
+    if model == "multi":
+        t, y = msoaxon.mso_axon(*args, mode="exact")
+    else:
+        t, y = msoaxon.two_cpt(*args)
+    assert t[-1] == 90
+    assert np.isfinite(y).all()
