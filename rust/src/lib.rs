@@ -13,15 +13,84 @@
 //!
 //! msoaxon builds one `MultiRhs` per `mso_axon` call, holding every per-model
 //! constant, and scipy's BDF solver calls it as `f(t, x)`.
+//!
+//! This file has no model number of its own: the reversal potentials and the
+//! gating kinetics' constants come from Python (see `Gating`), so a change to
+//! `multi.py` or `constants.py` reaches both implementations. What stays
+//! here is structure: the exponents (`m**4`), the `1.0`s and the unit
+//! conversions of `_rhs`.
 
 use numpy::{PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
-const V_NA: f64 = 69.0;
-const V_K: f64 = -90.0;
-const V_H: f64 = -35.0;
+/// Declares `Gating`, one `f64` per name, and its constructor from the dict
+/// that `_fast._gating()` passes. Each field is named for the
+/// `msoaxon.constants` function (or `multi` constant) its number belongs to;
+/// the Python side lists the same names with the values and their sources.
+macro_rules! gating {
+    ($($(#[$doc:meta])* $field:ident),* $(,)?) => {
+        /// The constants of the currents and the gating kinetics.
+        #[derive(Clone, Debug)]
+        struct Gating {
+            $($(#[$doc])* $field: f64,)*
+        }
+
+        impl Gating {
+            /// Reads every field from `map`; a missing or unknown name is an
+            /// error, so a typo on either side cannot go unnoticed.
+            fn from_map(map: &HashMap<String, f64>) -> PyResult<Self> {
+                const NAMES: &[&str] = &[$(stringify!($field)),*];
+                if let Some(name) = map.keys().find(|k| !NAMES.contains(&k.as_str())) {
+                    return Err(PyValueError::new_err(format!(
+                        "unknown gating constant {name:?}"
+                    )));
+                }
+                let get = |name: &str| {
+                    map.get(name).copied().ok_or_else(|| {
+                        PyValueError::new_err(format!("missing gating constant {name:?}"))
+                    })
+                };
+                Ok(Gating {
+                    $($field: get(stringify!($field))?,)*
+                })
+            }
+        }
+    };
+}
+
+gating! {
+    /// `multi.V_NA`, `V_K`, `V_H`: the reversal potentials [mV].
+    v_na, v_k, v_h,
+    /// `na_open`: the inactivating fraction and the floor, 0.993 h + 0.007.
+    na_open_h, na_open_floor,
+    /// `minf`: (V + v) / k.
+    minf_v, minf_k,
+    /// `taum`: (a + b / (1 + exp((v - V) / k))) / div.
+    taum_a, taum_b, taum_v, taum_k, taum_div,
+    /// `hinf`: (V + vhalf) / k, with vhalf per compartment.
+    hinf_k,
+    /// `tauh`: (a + b / (1 + exp((v - V) / k))) / div.
+    tauh_a, tauh_b, tauh_v, tauh_k, tauh_div,
+    /// `pinf`: 1 / (1 + exp(-(V + v) / k)).
+    pinf_v, pinf_k,
+    /// `taup`: temp * (num / (a exp((V + v) / ka) + b exp(-(V + v) / kb)) + c).
+    taup_temp, taup_num, taup_a, taup_ka, taup_b, taup_kb, taup_v, taup_c,
+    /// `winf`: (V + v) / k.
+    winf_v, winf_k,
+    /// `tauw`: num / (a exp((V + v) / ka) + b exp(-(V + v) / kb)) + c.
+    tauw_num, tauw_a, tauw_ka, tauw_b, tauw_kb, tauw_v, tauw_c,
+    /// `zinf`: (1 - floor) / (1 + exp((V + v) / k)) + floor.
+    zinf_floor, zinf_v, zinf_k,
+    /// `tauz`: num / (a exp((V + va) / ka) + exp(-(V + vb) / kb)) + c.
+    tauz_num, tauz_a, tauz_va, tauz_ka, tauz_vb, tauz_kb, tauz_c,
+    /// `ainf`: 1 / (1 + exp(k (V + v))).
+    ainf_k, ainf_v,
+    /// `taua`: temp * (c + a exp(-(V + v)^2 / k)).
+    taua_temp, taua_c, taua_a, taua_v, taua_k,
+}
 
 /// The unitary EPSG waveform (`synaptic.epsg_unitary`).
 ///
@@ -305,8 +374,7 @@ struct MultiRhs {
     parent: Vec<usize>,
     child: Vec<usize>,
     active: [bool; 6],
-    p_temp: f64,
-    a_temp: f64,
+    gating: Gating,
     stim: Stim,
 }
 
@@ -314,6 +382,7 @@ impl MultiRhs {
     /// Writes dx/dt for state `x` at time `t` into `out` (both 7n long).
     fn eval(&self, t: f64, x: &[f64], out: &mut [f64]) {
         let n = self.n;
+        let c = &self.gating;
         let (v, rest) = x.split_at(n);
         let (m, rest) = rest.split_at(n);
         let (h, rest) = rest.split_at(n);
@@ -324,10 +393,13 @@ impl MultiRhs {
         let mut total = vec![0.0f64; n];
         for i in 0..n {
             let vi = v[i];
-            let ina = self.g_na[i] * m[i].powf(4.0) * (0.993 * h[i] + 0.007) * (vi - V_NA);
-            let ikht = self.g_kht[i] * p[i] * (vi - V_K);
-            let iklt = self.g_klt[i] * w[i].powf(4.0) * z[i] * (vi - V_K);
-            let ih = self.g_h[i] * a[i] * (vi - V_H);
+            let ina = self.g_na[i]
+                * m[i].powf(4.0)
+                * (c.na_open_h * h[i] + c.na_open_floor)
+                * (vi - c.v_na);
+            let ikht = self.g_kht[i] * p[i] * (vi - c.v_k);
+            let iklt = self.g_klt[i] * w[i].powf(4.0) * z[i] * (vi - c.v_k);
+            let ih = self.g_h[i] * a[i] * (vi - c.v_h);
             let ilk = self.g_lk[i] * (vi - self.vlk[i]);
             total[i] = ina + ikht + iklt + ih + ilk;
         }
@@ -357,50 +429,57 @@ impl MultiRhs {
         for i in 0..n {
             let vi = v[i];
             dm[i] = if act_m {
-                let minf = 1.0 / (1.0 + ((vi + 46.0) / -11.0).exp());
-                let taum = (0.141 + (-0.0826 / (1.0 + ((-20.5 - vi) / 10.8).exp()))) / 3.0;
+                let minf = 1.0 / (1.0 + ((vi + c.minf_v) / c.minf_k).exp());
+                let taum = (c.taum_a + (c.taum_b / (1.0 + ((c.taum_v - vi) / c.taum_k).exp())))
+                    / c.taum_div;
                 (minf - m[i]) / taum
             } else {
                 0.0
             };
             dh[i] = if act_h {
-                let hinf = 1.0 / (1.0 + ((vi + self.na_vhalf[i]) / 7.77).exp());
-                let tauh = (4.0 + (-3.74 / (1.0 + ((-40.6 - vi) / 5.05).exp()))) / 3.0;
+                let hinf = 1.0 / (1.0 + ((vi + self.na_vhalf[i]) / c.hinf_k).exp());
+                let tauh = (c.tauh_a + (c.tauh_b / (1.0 + ((c.tauh_v - vi) / c.tauh_k).exp())))
+                    / c.tauh_div;
                 (hinf - h[i]) / tauh
             } else {
                 0.0
             };
             dp[i] = if act_p {
-                let pinf = 1.0 / (1.0 + (-(vi + 23.0) / 6.0).exp());
-                let taup = self.p_temp
-                    * (100.0
-                        / (4.0 * ((vi + 60.0) / 32.0).exp() + 5.0 * (-(vi + 60.0) / 22.0).exp())
-                        + 5.0);
+                let pinf = 1.0 / (1.0 + (-(vi + c.pinf_v) / c.pinf_k).exp());
+                let taup = c.taup_temp
+                    * (c.taup_num
+                        / (c.taup_a * ((vi + c.taup_v) / c.taup_ka).exp()
+                            + c.taup_b * (-(vi + c.taup_v) / c.taup_kb).exp())
+                        + c.taup_c);
                 (pinf - p[i]) / taup
             } else {
                 0.0
             };
             dw[i] = if act_w {
-                let winf = 1.0 / (1.0 + ((vi + 57.34) / -11.7).exp());
-                let tauw = 21.5
-                    / (6.0 * ((vi + 60.0) / 7.0).exp() + 24.0 * (-(vi + 60.0) / 50.6).exp())
-                    + 0.35;
+                let winf = 1.0 / (1.0 + ((vi + c.winf_v) / c.winf_k).exp());
+                let tauw = c.tauw_num
+                    / (c.tauw_a * ((vi + c.tauw_v) / c.tauw_ka).exp()
+                        + c.tauw_b * (-(vi + c.tauw_v) / c.tauw_kb).exp())
+                    + c.tauw_c;
                 (winf - w[i]) / tauw
             } else {
                 0.0
             };
             dz[i] = if act_z {
-                let zinf = (1.0 - 0.27) / (1.0 + ((vi + 67.0) / 6.16).exp()) + 0.27;
-                let tauz =
-                    170.0 / (5.0 * ((vi + 60.0) / 10.0).exp() + (-(vi + 70.0) / 8.0).exp()) + 10.7;
+                let zinf = (1.0 - c.zinf_floor) / (1.0 + ((vi + c.zinf_v) / c.zinf_k).exp())
+                    + c.zinf_floor;
+                let tauz = c.tauz_num
+                    / (c.tauz_a * ((vi + c.tauz_va) / c.tauz_ka).exp()
+                        + (-(vi + c.tauz_vb) / c.tauz_kb).exp())
+                    + c.tauz_c;
                 (zinf - z[i]) / tauz
             } else {
                 0.0
             };
             da[i] = if act_a {
-                let ainf = 1.0 / (1.0 + (0.1 * (vi + 80.4)).exp());
-                let s = vi + 61.5;
-                let taua = self.a_temp * (79.0 + 417.0 * (-(s * s) / 800.0).exp());
+                let ainf = 1.0 / (1.0 + (c.ainf_k * (vi + c.ainf_v)).exp());
+                let s = vi + c.taua_v;
+                let taua = c.taua_temp * (c.taua_c + c.taua_a * (-(s * s) / c.taua_k).exp());
                 (ainf - a[i]) / taua
             } else {
                 0.0
@@ -438,11 +517,12 @@ impl MultiRhs {
     /// (one entry per axial edge, 0-based). `stim_type` is one of
     /// `multi.MSO_STIM_TYPES` or "none"; the stimulus keywords are the
     /// fields of `_common.stimulus`, with `k`/`k2` the 0-based input
-    /// compartments and `epsg` = (1 / peak, decay, rise).
+    /// compartments and `epsg` = (1 / peak, decay, rise). `gating` maps
+    /// every name declared in `Gating` to its value (`_fast._gating()`).
     #[new]
     #[pyo3(signature = (
         *, g_na, g_kht, g_klt, g_h, g_lk, vlk, na_vhalf, cap, sa, g_ax,
-        parent, child, active, p_temp, a_temp, stim_type, start=0.0,
+        parent, child, active, gating, stim_type, start=0.0,
         stop=0.0, amp=0.0, k=0, k2=0, f=0.0, epsg=(1.0, 1.0, 1.0),
         t_syn=None, g_syn=None, vsyn=0.0, diff=None
     ))]
@@ -461,8 +541,7 @@ impl MultiRhs {
         parent: PyReadonlyArray1<'_, i64>,
         child: PyReadonlyArray1<'_, i64>,
         active: [bool; 6],
-        p_temp: f64,
-        a_temp: f64,
+        gating: HashMap<String, f64>,
         stim_type: &str,
         start: f64,
         stop: f64,
@@ -610,8 +689,7 @@ impl MultiRhs {
             parent,
             child,
             active,
-            p_temp,
-            a_temp,
+            gating: Gating::from_map(&gating)?,
             stim,
         })
     }

@@ -23,6 +23,7 @@ from msoaxon import (
     _parallel,
     _solve,
     coincidence,
+    constants,
     multi,
     synaptic,
     two,
@@ -187,6 +188,57 @@ def test_rust_rhs_rejects_a_wrong_state_length():
     args, _ = setup("EPSGpair")
     with pytest.raises(ValueError, match="315"):
         _fast._build(*args)(5.0, np.zeros(10))
+
+
+# the constants the Rust side takes from Python: (module, name, new value)
+PASSED_CONSTANTS = [
+    (multi, "V_NA", multi.V_NA + 1.0),
+    (multi, "V_K", multi.V_K + 1.0),
+    (multi, "V_H", multi.V_H + 1.0),
+    (constants, "_P_TEMP", constants._P_TEMP * 1.5),
+    (constants, "_A_TEMP", constants._A_TEMP * 1.5),
+]
+
+
+@needs_ext
+@pytest.mark.parametrize(
+    ("module", "name", "value"),
+    PASSED_CONSTANTS,
+    ids=[f"{m.__name__}.{n}" for m, n, _ in PASSED_CONSTANTS],
+)
+def test_rust_rhs_follows_a_changed_python_constant(
+    monkeypatch, module, name, value
+):
+    # the Rust side has no numbers of its own: move one in Python and its
+    # right-hand side must move exactly as multi._rhs does, so a change to
+    # the model can't be mistaken for hardware drift
+    args, _ = setup("EPSGpair")
+    n = args[5].n
+    x = states(n, np.random.default_rng(5), 1)[1]
+    before = multi._rhs(5.1, x, *args)
+    with monkeypatch.context() as mp:
+        mp.setattr(module, name, value)
+        want = multi._rhs(5.1, x, *args)
+        assert not np.array_equal(want, before)
+        assert_same(_fast._build(*args)(5.1, x), want, n)
+    # and back to the original once the patch is undone
+    assert_same(_fast._build(*args)(5.1, x), before, n)
+
+
+@needs_ext
+@pytest.mark.parametrize("change", ["unknown", "missing"])
+def test_rust_rhs_rejects_a_mismatched_gating_dict(monkeypatch, change):
+    args, _ = setup("EPSGpair")
+    gating = dict(_fast._GATING)
+    if change == "unknown":
+        gating["tauq_c"] = 1.0
+        match = 'unknown gating constant "tauq_c"'
+    else:
+        del gating["tauz_c"]
+        match = 'missing gating constant "tauz_c"'
+    monkeypatch.setattr(_fast, "_GATING", gating)
+    with pytest.raises(ValueError, match=match):
+        _fast._build(*args)
 
 
 @needs_ext

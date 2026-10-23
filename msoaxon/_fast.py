@@ -128,6 +128,103 @@ def _f64(a: np.ndarray) -> np.ndarray:
     return np.asarray(a, dtype=np.float64)
 
 
+# The numbers inside constants.py's gating functions are literals there, so
+# they are repeated here once, grouped by the function each belongs to; the
+# Rust side (rust/src/lib.rs, `Gating`) has none of its own. A name is the
+# function's and the number's role in it, the signs are as the function
+# writes them. Changing a literal in constants.py means changing it here;
+# the bitwise tests (tests/test_fast.py) fail if the two disagree. The
+# values the module does name (the reversal potentials in multi, the Q10
+# factors in constants) are read when a run is built, see _gating().
+_GATING = {
+    # na_open: g * m**4 * (0.993 h + 0.007)
+    "na_open_h": 0.993,
+    "na_open_floor": 0.007,
+    # minf: 1 / (1 + exp((V + 46) / -11))
+    "minf_v": 46.0,
+    "minf_k": -11.0,
+    # taum: (0.141 + -0.0826 / (1 + exp((-20.5 - V) / 10.8))) / 3
+    "taum_a": 0.141,
+    "taum_b": -0.0826,
+    "taum_v": -20.5,
+    "taum_k": 10.8,
+    "taum_div": 3.0,
+    # hinf: 1 / (1 + exp((V + vhalf) / 7.77)); vhalf is Membrane.na_vhalf
+    "hinf_k": 7.77,
+    # tauh: (4 + -3.74 / (1 + exp((-40.6 - V) / 5.05))) / 3
+    "tauh_a": 4.0,
+    "tauh_b": -3.74,
+    "tauh_v": -40.6,
+    "tauh_k": 5.05,
+    "tauh_div": 3.0,
+    # pinf: 1 / (1 + exp(-(V + 23) / 6))
+    "pinf_v": 23.0,
+    "pinf_k": 6.0,
+    # taup: _P_TEMP * (100 / (4 exp((V + 60) / 32) + 5 exp(-(V + 60) / 22))
+    # + 5); both 60s are one value here
+    "taup_num": 100.0,
+    "taup_a": 4.0,
+    "taup_ka": 32.0,
+    "taup_b": 5.0,
+    "taup_kb": 22.0,
+    "taup_v": 60.0,
+    "taup_c": 5.0,
+    # winf: 1 / (1 + exp((V + 57.34) / -11.7))
+    "winf_v": 57.34,
+    "winf_k": -11.7,
+    # tauw: 21.5 / (6 exp((V + 60) / 7) + 24 exp(-(V + 60) / 50.6)) + 0.35;
+    # both 60s are one value here
+    "tauw_num": 21.5,
+    "tauw_a": 6.0,
+    "tauw_ka": 7.0,
+    "tauw_b": 24.0,
+    "tauw_kb": 50.6,
+    "tauw_v": 60.0,
+    "tauw_c": 0.35,
+    # zinf: (1 - 0.27) / (1 + exp((V + 67) / 6.16)) + 0.27
+    "zinf_floor": 0.27,
+    "zinf_v": 67.0,
+    "zinf_k": 6.16,
+    # tauz: 170 / (5 exp((V + 60) / 10) + exp(-(V + 70) / 8)) + 10.7
+    "tauz_num": 170.0,
+    "tauz_a": 5.0,
+    "tauz_va": 60.0,
+    "tauz_ka": 10.0,
+    "tauz_vb": 70.0,
+    "tauz_kb": 8.0,
+    "tauz_c": 10.7,
+    # ainf: 1 / (1 + exp(0.1 (V + 80.4)))
+    "ainf_k": 0.1,
+    "ainf_v": 80.4,
+    # taua: _A_TEMP * (79 + 417 exp(-(V + 61.5)**2 / 800))
+    "taua_c": 79.0,
+    "taua_a": 417.0,
+    "taua_v": 61.5,
+    "taua_k": 800.0,
+}
+
+
+def _gating() -> dict[str, float]:
+    """Returns every constant the Rust right-hand side takes from Python.
+
+    Read when a run is built, not at import, so a change to multi's
+    reversal potentials or constants' Q10 factors reaches the Rust side
+    exactly as it reaches multi._rhs.
+
+    Returns:
+        name -> value, the names of `Gating` in rust/src/lib.rs.
+    """
+    multi = importlib.import_module("msoaxon.multi")
+    return {
+        "v_na": float(multi.V_NA),
+        "v_k": float(multi.V_K),
+        "v_h": float(multi.V_H),
+        "taup_temp": float(constants._P_TEMP),
+        "taua_temp": float(constants._A_TEMP),
+        **_GATING,
+    }
+
+
 def build(
     stim_type: str,
     s: _common.Stimulus,
@@ -202,8 +299,7 @@ def _build(
         parent=np.asarray(morph.parent, dtype=np.int64),
         child=np.asarray(morph.child, dtype=np.int64),
         active=tuple(bool(a) for a in active),
-        p_temp=constants._P_TEMP,
-        a_temp=constants._A_TEMP,
+        gating=_gating(),
         **stim,
     )
 
