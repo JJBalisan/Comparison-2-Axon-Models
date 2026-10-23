@@ -1,6 +1,6 @@
 [project]
 name = "msoaxon"
-version = "1.2.1"
+version = "1.3.0"
 description = "Python port of the 2-compartment vs 45-compartment MSO axon model comparison"
 requires-python = ">=3.11"
 dependencies = ["numpy", "scipy", "matplotlib"]

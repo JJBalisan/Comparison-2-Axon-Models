@@ -5,6 +5,77 @@ package is the reference: a release pins the numbers the analysis produces,
 and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least.
 
+## 1.3.0 (23 Oct 2026)
+
+Results are unchanged: the golden traces, thresholds, windows and the
+somatic table keep their numbers. `spike_amplitude` gains a flag, the
+`somatic` and BinarySearch.m searches gain model keywords, three bad inputs
+fail early, and fast mode ships as wheels.
+
+### Added
+
+- `model_kw` on `somatic.fires`, `response`, `rheobase` and
+  `spike_amplitude`, and on `threshold.binary_search`, passed to the models
+  per call the way `coincidence.threshold` does: `mode`, `morph`,
+  `model_type`, `max_step` and, for "two", `r1`/`tau_est`. `mem=` stays as
+  a shorthand for `model_kw={"mem": ...}` and raises if given both ways.
+  Goldwyn's rheobase (2070 pA) is now reproducible through the public API,
+  `somatic.rheobase("two", v0=-58, model_kw={"r1": 8.5, "tau_est": 0.34})`
+  (#40, #29).
+- Prebuilt `msoaxon-fast` wheels (Linux x86_64 and aarch64, macOS arm64 and
+  x86_64, Windows x86_64; one abi3 wheel per platform covers Python
+  3.11-3.13) are built, smoke-tested and attached to each GitHub release by
+  `.github/workflows/wheels.yml`, so fast mode no longer needs cargo;
+  PYTHON.md says how to install one. The 0.1.0 wheels are also on the
+  1.2.1 release, whose crate is identical (#39).
+
+### Fixed
+
+- `somatic.spike_amplitude` no longer returns a number when the soma has
+  no distinct inflection: about 0 mV at 10x rheobase, where the axon crosses
+  the criterion before the inflection window opens, and inflated 9-12 mV at
+  1.05x and 1.2x, a smooth hump. The result carries a `distinct` flag; when
+  it is False, `amplitude`, `t_inflection` and `v_inflection` are None while
+  `peak_above_rest`, `t_spike` and `trace` stay valid. The inflection counts
+  as distinct when the d2V/dt2 peak in the search window is the largest
+  before the spike peak, is not at a window edge, and is at least
+  `somatic.D2_MIN` = 100 mV/ms^2. PYTHON.md states the valid range, about
+  1.35x to 4.5x rheobase for the multi and two models; the published 1.5x,
+  2x and 3x values are unchanged (#38).
+- `two_cpt` and `mso_axon` reject a `ramp` or `ramp2` with `stop <= start`
+  with `ValueError("ramp needs stop > start")` before any mode dispatch;
+  `stop == start` used to raise `ZeroDivisionError` and `stop < start` gave
+  a negative slope silently (#37).
+- `coincidence.window()` returns `(nan, th0)` when the threshold is not
+  finite (nothing fires up to the ceiling, e.g. a fixed 30 mV criterion
+  with Goldwyn's calibration) instead of failing inside scipy with
+  `ValueError: array must not contain infs or NaNs` (#37).
+
+### Changed
+
+- `threshold.sweep_setting("Synaptic", ...)`, and so
+  `binary_search("Synaptic", ...)`, raise "not supported" like
+  `SynapticPair`; MATLAB's pinned `I = 0` only ever reported the ceiling
+  (#37).
+- Fast mode has no ramp exception any more: `_fast.covers()` is gone and
+  every configuration `multi._rhs` handles runs in `mode="fast"` (#37).
+
+### Tests
+
+- `tests/test_threshold_search.py` pins `threshold._search`'s probe
+  sequence, returned value and run count with a fake predicate, including
+  the never-fires case (#46).
+- `tests/conftest.py` adds a `fresh_quiet_cache` fixture; the quiet-prefix
+  cache tests use it instead of clearing `_solve._QUIET_CACHE` by hand
+  (#46).
+- pytest runs with `--strict-markers`, so a misspelt marker fails instead
+  of silently running in the `-m "not slow"` jobs (#46).
+- The dendrotoxin spike-amplitude test bounds the 1.5x and 3x amplitudes
+  (20-40 mV) instead of pinning them: Linux gives 25.97 mV at 1.5x where
+  macOS gives 25.08, so that membrane's inflection pick is platform
+  sensitive at about 1 mV; the PYTHON.md dendrotoxin row (25.1, 31.9 mV)
+  is from macOS (#38).
+
 ## 1.2.1 (13 Oct 2026)
 
 Tests and housekeeping only; results are unchanged.

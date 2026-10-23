@@ -151,8 +151,7 @@ def test_solver_failure_is_reported():
         )  # blows up at t = 1
 
 
-def test_quiet_cache_is_bounded():
-    _solve._QUIET_CACHE.clear()
+def test_quiet_cache_is_bounded(fresh_quiet_cache):
     rhs = lambda t, y: -y  # noqa: E731
     n = _solve._QUIET_CACHE_SIZE + 5
     for i in range(n):
@@ -165,7 +164,6 @@ def test_quiet_cache_is_bounded():
         "test",
         n - 1,
     ) in keys  # oldest out first
-    _solve._QUIET_CACHE.clear()
 
 
 def test_remaining_argument_errors():
@@ -219,9 +217,7 @@ def test_count_rising_edges():
     )  # a marker at the first sample isn't an edge
 
 
-def test_stimulus_at_time_zero_skips_the_prestimulus_cache():
-
-    _solve._QUIET_CACHE.clear()
+def test_stimulus_at_time_zero_skips_the_prestimulus_cache(fresh_quiet_cache):
     t, y = msoaxon.mso_axon("step", 0, 5, 500.0, 3, "active-full", 5, -68.0, 1)
     assert not _solve._QUIET_CACHE  # nothing stimulus-free to share
     assert y[-1, 0] > -68.0  # the step is on from the start
