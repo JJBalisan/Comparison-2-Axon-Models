@@ -425,7 +425,13 @@ def test_window_without_a_finite_threshold_reports_no_window(th0):
 
 @pytest.mark.filterwarnings("ignore:overflow:RuntimeWarning")
 def test_window_when_nothing_fires_returns_no_window():
-    # a fixed 30 mV criterion is out of reach for Goldwyn's calibration
+    # a fixed 30 mV criterion is out of reach for Goldwyn's calibration: the
+    # peak stays at 16-20 mV all the way up the search to its ceiling. The
+    # overflow warnings are not from the model (every peak is finite) but
+    # from _bisect._predict, whose log-amplitude extrapolation along that
+    # flat curve overflows in np.exp; smallest_crossing then clamps the
+    # step to 2x, so the answer is unaffected. A guard belongs in
+    # _predict (np.errstate, or clipping est), after which this filter can go.
     kw = {k: v for k, v in two.GOLDWYN_2019.items() if k != "v0"}
     w, th0 = coincidence.window(
         "two", 0.03, v0=-58, model_kw=kw, criterion=30.0

@@ -16,7 +16,8 @@ from concurrent import futures
 
 import numpy as np
 
-from msoaxon import _parallel, coincidence, synaptic, two
+import msoaxon
+from msoaxon import coincidence, synaptic, two
 
 MYOGA_US = (
     221  # AP-probability half-width without inhibition (Myoga et al 2014)
@@ -63,7 +64,7 @@ def main() -> None:
     )
     a = ap.parse_args()
     # one pool for every parallel call below
-    with _parallel.process_pool() as pool:
+    with msoaxon.process_pool() as pool:
         run(a, pool)
 
 

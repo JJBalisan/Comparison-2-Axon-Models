@@ -138,6 +138,21 @@ def test_spiking_reset_carries_across_columns_mult():
     np.testing.assert_array_equal(s[:, 2], [0, 0, 0, 1])
 
 
+@pytest.mark.parametrize(
+    ("model", "ncols"),
+    [("two", 2), ("Two", 2), ("multi", 45), ("Mult", 45)],
+)
+def test_spiking_model_names(model, ncols):
+    x = np.zeros((4, 315))
+    assert spiking.spiking(x, 30, model).shape == (4, ncols)
+
+
+@pytest.mark.parametrize("model", ["multi ", "mutli", "TWO", "", "45"])
+def test_spiking_rejects_unknown_model_names(model):
+    with pytest.raises(ValueError, match=repr(model)):
+        spiking.spiking(np.zeros((4, 315)), 30, model)
+
+
 # EPSGpair thresholds on the grid of the repo's EPSGpair_Thresholds_CPT*.jpg
 # (making_threshold_graphs.py --only EPSGpair --jpg-grid), delays 0-0.6 ms.
 # The halving search only returns multiples of Q, so its output is pinned

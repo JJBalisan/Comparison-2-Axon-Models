@@ -4,16 +4,27 @@ The models live in msoaxon.multi and msoaxon.two (named after the
 model="multi" / "two" switch the analysis functions use); the package
 re-exports their entry points, mso_axon and two_cpt, and DriftWarning, the
 warning mso_axon's Rust right-hand side (mode="fast") issues on first use.
+It also re-exports process_pool and map_tasks, the worker-pool helpers the
+analysis scripts share.
 """
 
 import importlib.metadata
 
 # the package's public API: re-exported names, so `msoaxon.mso_axon` works
 from msoaxon._fast import DriftWarning
+from msoaxon._parallel import map_tasks, process_pool
 from msoaxon.multi import mso_axon
 from msoaxon.synaptic import SynParams
 from msoaxon.two import two_cpt
 
 __version__ = importlib.metadata.version("msoaxon")
 
-__all__ = ["DriftWarning", "SynParams", "__version__", "mso_axon", "two_cpt"]
+__all__ = [
+    "DriftWarning",
+    "SynParams",
+    "__version__",
+    "map_tasks",
+    "mso_axon",
+    "process_pool",
+    "two_cpt",
+]

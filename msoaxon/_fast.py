@@ -75,7 +75,7 @@ def requested(mode: str | None = None) -> str | None:
     return mode
 
 
-def effective(mode: str | None, covered: bool = True) -> str:
+def effective(mode: str | None) -> str:
     """Returns the mode a run will use, without warning.
 
     For cache keys: what mso_axon will run, not what was asked for, so a
@@ -83,37 +83,29 @@ def effective(mode: str | None, covered: bool = True) -> str:
 
     Args:
         mode: The mode passed to mso_axon, or None.
-        covered: Whether the configuration is ported (always, today).
 
     Returns:
         "fast" or "exact".
     """
     want = requested(mode)
-    return (
-        "fast" if want != "exact" and _ext is not None and covered else "exact"
-    )
+    return "fast" if want != "exact" and _ext is not None else "exact"
 
 
-def resolve(mode: str | None, covered: bool = True) -> str:
+def resolve(mode: str | None) -> str:
     """Returns the mode one run uses, warning if "fast" can't run.
 
     Args:
         mode: The mode passed to mso_axon, or None.
-        covered: Whether the configuration is ported (always, today).
 
     Returns:
         "fast" or "exact".
     """
-    if effective(mode, covered) == "fast":
+    if effective(mode) == "fast":
         return "fast"
     if requested(mode) == "fast":
-        why = (
-            "the msoaxon-fast extension is not installed (uv sync --extra fast)"
-            if _ext is None
-            else "the Rust port does not cover this configuration"
-        )
         warnings.warn(
-            f'mode="fast" asked for, but {why}; running mode="exact"',
+            'mode="fast" asked for, but the msoaxon-fast extension is not '
+            'installed (uv sync --extra fast); running mode="exact"',
             stacklevel=3,
         )
     return "exact"

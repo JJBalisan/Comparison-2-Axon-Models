@@ -8,6 +8,10 @@ from collections.abc import Sequence
 
 import numpy as np
 
+# model name -> number of columns spiking() examines; "Two" and "Mult" are
+# the names Spiking.m's callers used, kept for the scripts that port them
+_NCOLS = {"two": 2, "Two": 2, "multi": 45, "Mult": 45}
+
 
 def spiking(x: np.ndarray, factor: float, model: str) -> np.ndarray:
     """Marks where each compartment first exceeds the soma by `factor`.
@@ -19,13 +23,21 @@ def spiking(x: np.ndarray, factor: float, model: str) -> np.ndarray:
     Args:
         x: A run's state, voltages in the first columns.
         factor: The spike criterion: compartment - soma [mV].
-        model: "Two" or "two" for the two-compartment model (2
-            columns); anything else means 45 columns.
+        model: "two" for the two-compartment model (2 columns) or
+            "multi" for the 45-compartment one (45 columns); "Two" and
+            "Mult" are accepted as aliases, the names Spiking.m used.
 
     Returns:
         An array like x[:, :ncols] with 1 at each marked sample.
+
+    Raises:
+        ValueError: If `model` is not one of those names.
     """
-    ncols = 2 if model in ("Two", "two") else 45
+    if model not in _NCOLS:
+        raise ValueError(
+            f"model must be one of {sorted(_NCOLS)}, got {model!r}"
+        )
+    ncols = _NCOLS[model]
     diff = x[:, :ncols] - x[:, [0]]
     spikes = np.zeros_like(diff)
     reset = False

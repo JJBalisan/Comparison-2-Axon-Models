@@ -32,7 +32,7 @@ from typing import Any
 import numpy as np
 
 import msoaxon
-from msoaxon import _parallel, coincidence, measure, multi, somatic, synaptic
+from msoaxon import coincidence, measure, multi, somatic, synaptic
 
 V0 = -68.0
 UNITARY = 26.7  # "unitary EPSG" of the MATLAB code
@@ -150,7 +150,7 @@ def main() -> None:
     )
     a = ap.parse_args()
     # one pool for every parallel call below
-    with _parallel.process_pool() as pool:
+    with msoaxon.process_pool() as pool:
         run(a, pool)
 
 
