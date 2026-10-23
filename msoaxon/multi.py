@@ -578,7 +578,7 @@ def membrane(
         )
         mi, hi, pi, wi, zi, ai = gates
         I_ion = (
-            morph.g_na * mi**4 * (0.993 * hi + 0.007) * (V - V_NA)
+            C.na_open(mi, hi, morph.g_na) * (V - V_NA)
             + morph.g_kht * pi * (V - V_K)
             + g_klt * wi**4 * zi * (V - V_K)
             + morph.g_h * ai * (V - V_H)
@@ -631,7 +631,7 @@ def _dv(
         dV/dt per compartment [mV/ms].
     """
     V, m, h, p, w, z, a = x.reshape(7, morph.n)
-    INa = mem.g_na * m**4 * (0.993 * h + 0.007) * (V - V_NA)
+    INa = C.na_open(m, h, mem.g_na) * (V - V_NA)
     IKHT = morph.g_kht * p * (V - V_K)
     IKLT = mem.g_klt * w**4 * z * (V - V_K)
     Ih = morph.g_h * a * (V - V_H)
@@ -670,7 +670,7 @@ def _rhs(
     out = np.empty_like(x)
     d = out.reshape(7, n)
 
-    INa = mem.g_na * m**4 * (0.993 * h + 0.007) * (V - V_NA)
+    INa = C.na_open(m, h, mem.g_na) * (V - V_NA)
     IKHT = morph.g_kht * p * (V - V_K)
     IKLT = mem.g_klt * w**4 * z * (V - V_K)
     # linear in activation, as in RM03 (no power given in Lehnert or Baumann)

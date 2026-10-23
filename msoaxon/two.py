@@ -172,11 +172,11 @@ def get_params(
     gh2 = h2 * gTot2 / C.ainf(Vr)
     glk1 = (1 - klt1 - h1 - na1) * gTot1
     glk2 = (1 - klt2 - h2) * gTot2
-    gNa1 = na1 * gTot1 / (C.minf(Vr) ** 4 * (0.993 * C.hinf(Vr) + 0.007))
+    gNa1 = na1 * gTot1 / C.na_open(C.minf(Vr), C.hinf(Vr))
     ENa = 69.0
 
     # resting offsets subtracted so each current is zero at Vrest
-    na_rest = C.minf(Vr) ** 4 * (0.993 * C.hinf(Vr) + 0.007) * (Vr - ENa)
+    na_rest = C.na_open(C.minf(Vr), C.hinf(Vr)) * (Vr - ENa)
     klt_rest = C.winf(Vr) ** 4 * C.zinf(Vr) * (Vr - EK)
     h_rest = C.ainf(Vr) * (Vr - Vh)
     return TwoCptParams(
@@ -306,12 +306,12 @@ def _dv(
     V1, V2, w1, h1, w2, m1, m2, h2, p, a1, a2 = x
     z = P.z_rest
     IKHT = P.gKHT * p * (V1 - P.VK)
-    INa1 = P.gNa1 * m1**4 * (0.993 * h1 + 0.007) * (V1 - P.ENa) - P.INa0_1
+    INa1 = C.na_open(m1, h1, P.gNa1) * (V1 - P.ENa) - P.INa0_1
     Ilk1 = P.glk1 * (V1 - P.Elk)
     IKLT1 = P.gKLT1 * w1**4 * z * (V1 - P.EK) - P.IKLT0_1
     Ih1 = P.gh1 * a1 * (V1 - P.Vh) - P.Ih0_1
     Ilk2 = P.glk2 * (V2 - P.Elk)
-    INa2 = P.gNa2 * m2**4 * (0.993 * h2 + 0.007) * (V2 - P.ENa) - P.INa0_2
+    INa2 = C.na_open(m2, h2, P.gNa2) * (V2 - P.ENa) - P.INa0_2
     IKLT2 = P.gKLT2 * w2**4 * z * (V2 - P.EK) - P.IKLT0_2
     Ih2 = P.gh2 * a2 * (V2 - P.Vh) - P.Ih0_2
     IC = P.gC * (V1 - V2)
@@ -340,14 +340,14 @@ def _rhs(
     # soma: KHT exists only here. Na, KLT and h have their value at rest
     # subtracted (the *0 terms from get_params); KHT and leak don't
     IKHT = P.gKHT * p * (V1 - P.VK)
-    INa1 = P.gNa1 * m1**4 * (0.993 * h1 + 0.007) * (V1 - P.ENa) - P.INa0_1
+    INa1 = C.na_open(m1, h1, P.gNa1) * (V1 - P.ENa) - P.INa0_1
     Ilk1 = P.glk1 * (V1 - P.Elk)
     IKLT1 = P.gKLT1 * w1**4 * z * (V1 - P.EK) - P.IKLT0_1
     Ih1 = P.gh1 * a1 * (V1 - P.Vh) - P.Ih0_1
 
     # axon compartment: no KHT
     Ilk2 = P.glk2 * (V2 - P.Elk)
-    INa2 = P.gNa2 * m2**4 * (0.993 * h2 + 0.007) * (V2 - P.ENa) - P.INa0_2
+    INa2 = C.na_open(m2, h2, P.gNa2) * (V2 - P.ENa) - P.INa0_2
     IKLT2 = P.gKLT2 * w2**4 * z * (V2 - P.EK) - P.IKLT0_2
     Ih2 = P.gh2 * a2 * (V2 - P.Vh) - P.Ih0_2
 
