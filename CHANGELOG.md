@@ -5,6 +5,61 @@ package is the reference: a release pins the numbers the analysis produces,
 and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least.
 
+## 1.3.1 (23 Oct 2026)
+
+The published somatic spike table moves: `spike_amplitude`'s inflection
+pick is now stable across platforms, and the old values turn out to have
+been artefacts of the old pick. Everything else (golden traces, thresholds,
+windows, script outputs) is unchanged.
+
+### Fixed
+
+- `somatic.spike_amplitude` picks the inflection from the second derivative
+  of a cubic spline through the solver's own samples, evaluated on the 1 us
+  grid, instead of the argmax of a twice-differentiated linear interpolant.
+  The old pick turned every solver step into a tooth of d2V/dt2 and the
+  argmax into a lottery over the teeth, so it followed the solver's step
+  placement: the dendrotoxin row at 1.5x rheobase gave 25.08 mV on macOS and
+  25.97 mV on the Linux runners, and under small `max_step` changes the
+  2-compartment 2x value spread 12.8-17.6 mV. The published table changes
+  with the pick (at 1.5x / 2x / 3x rheobase): 45-compartment 7.4 / 13.3 /
+  18.2 mV (was 7.6 / 13.4 / 19.4), 2-compartment 6.4 / 13.0 / 17.8 mV (was
+  6.2 / 15.6 / 17.6), dendrotoxin 25.4 / 28.2 / 31.7 mV (was 25.1 / 27.9 /
+  31.9), and the dendritic variants' rows in PYTHON.md likewise. The new
+  values move by at most 0.06 mV under the same step changes (0.2 mV for the
+  2-compartment 3x point), and the dendrotoxin test is pinned to 0.1 mV
+  instead of bounded (#56).
+
+### Changed
+
+- `scripts/coincidence_window.py` and `scripts/dendrites.py` search each
+  delay-0 threshold once and share it between the windows (`threshold0=`)
+  and the curves: 18 searches become 6, and 12 become 5, for 130 and 82
+  fewer simulations per full run. `coincidence_window.py` and
+  `scripts/making_threshold_graphs.py` queue all their curve points and
+  sweeps on the shared pool at once instead of draining it between batches.
+  Every JSON output is byte-identical; the wall-clock gain is within noise,
+  since the windows now wait for the delay-0 job (#43).
+- `synaptic.synaptic()` caches its table on `(t_end, freq, gE, random_in)`,
+  the fields that fix the waveform, in a 16-entry cache, and returns
+  read-only arrays (#43).
+
+### Docs
+
+- README.md is a short landing page: what the repo is, quick start, the
+  scripts, and a table of the historical `.m` files with their Python
+  replacements. It replaces the 2019 to-do fragments and the unused
+  Zilany/Bruce/Carney note (#44).
+- Stale descriptions corrected: the `coincidence` module docstring
+  (predictive search, not bisection), the "simulations per point" counts in
+  `making_threshold_graphs.py` (about 8 for EPSGpair, about 14 for the other
+  sweeps) and PYTHON.md (about 10 per threshold on average, at most 13).
+  MATLAB-era claims in `constants.py`, `multi.py` and `_bisect.py` now say
+  that the golden traces, not bit-identity with MATLAB, pin the results
+  (#44).
+- PYTHON.md prose is wrapped to about 80 columns, with no wording changes
+  (#44).
+
 ## 1.3.0 (23 Oct 2026)
 
 Results are unchanged: the golden traces, thresholds, windows and the
