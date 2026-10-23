@@ -170,6 +170,50 @@ darwin-arm64), and `tests/test_golden.py` runs every multi-compartment trace in
 both modes. CI runs the suite without the extension (the fallback) on Linux and
 macOS, and with it on both (`pytest-fast`), which also prints the self-check.
 
+## Port contract
+
+[Issue #28](https://github.com/JJBalisan/Comparison-2-Axon-Models/issues/28)
+plans a Rust port with its own integrator; Python stays the reference. What the
+tests hold a new integrator to:
+
+**Survive any integrator** (Python against Python): `tests/test_settled.py`
+(`_dv` against `_rhs`, bit for bit), the step-time prefix checks in
+`tests/test_analysis.py` and `tests/test_coverage.py` (events must never alter
+the steps, as scipy's do not), the default-membrane check in
+`tests/test_somatic.py`, and `tests/test_solve.py`.
+
+**Retire or move:** the bitwise tests in `tests/test_fast.py` compare the Rust
+RHS with the numpy one through scipy, so they become an RHS-only comparison.
+`tests/test_golden.py`'s exact `t_last ==` needs the port to land on `t_end`.
+
+**Can flip with another step sequence** (JJ decides, nobody loosens): the 28
+jpg-grid halvings in `tests/test_coverage.py`, the one-flip budget at rel 2e-4
+in `tests/test_analysis.py` and `tests/test_scripts.py`, and the somatic table
+in `tests/test_somatic.py` (per-point tolerances from the `max_step` spread, see
+"How stable the numbers are").
+
+**Python-only behaviour to reproduce, or keep in Python:**
+- `spike_amplitude`: a not-a-knot `CubicSpline` on a float `np.arange` grid at
+  1 µs, after the `np.diff(t) > 0` filter.
+- Events: brentq on BDF's dense output. `settled_event` jumps from -1 to +1;
+  `spikes()` tells the stops apart by the final state, at `0.75 * factor`.
+- `breakpoints()`: a set, strictly inside `(0, t_end)`, plus 5.0 and
+  `stop + 5.0` for ramps. `input_end()`: one rule per stimulus.
+  `pre_stimulus_is_quiet()`: `cuts[0] <= min(start, stop)`, and `two_cpt` keeps
+  step, Synaptic and SynapticPair out of the shared prefix (`mso_axon` does
+  not). All pinned in `tests/test_solve.py`.
+- `interp_g` is `np.interp` with left = right = 0. `epsg_unitary` gives `-0.0`
+  for -70 ms < t < 0, which the bitwise tests rely on.
+- `matlab_round`, `half_width`, `passive_step`, `soma_on_grid`, the golden
+  sampler; no `first_step`, `jac_sparsity` with column grouping, every accepted
+  step as output.
+
+**Scope:** the Synaptic tables come from numpy's PCG64 and `np.convolve`, whose
+streams are not stable across releases, so the port takes the table as an input.
+`two._rhs` has no Rust counterpart: whether `two_cpt` is in scope is open.
+`uv.lock` pins two dependency sets (numpy 2.4.6 / scipy 1.17.1 below Python
+3.12, 2.5.3 / 1.18.1 above), so "the Python reference" is itself two.
+
 ## Validation
 
 There is no MATLAB here, so nothing was compared run-for-run. What was checked:
@@ -488,7 +532,10 @@ than the spike.
   d²V/dt², which lies on a solver sample, so it depends on where the solver put
   its steps. Rerunning with `max_step` 3, 4, 6 and 7 µs instead of 5 moves the
   dendrotoxin row by 0.00 mV and the multi rows by 0.00 mV; the 2-compartment
-  rows move by up to 0.06 mV (1.5×), 0.00 (2×) and 0.20 mV (3×). Before
+  rows move by up to 0.06 mV (1.5×), 0.00 (2×) and 0.20 mV (3×) (remeasured in
+  exact mode: 6.372–6.435 and 17.576–17.775 mV; the other rows move by under
+  0.0001 mV). `tests/test_somatic.py` gives each table point a tolerance from
+  its spread: 0.06 mV, but 0.1 and 0.25 mV for those two. Before
   issue #56 the pick was the argmax of d²V/dt² of the linearly interpolated
   trace, a comb with a tooth at every solver step. The dendrotoxin row then
   moved 0.6–1.9 mV under the same changes (25.08 mV on macOS against 25.97 mV on

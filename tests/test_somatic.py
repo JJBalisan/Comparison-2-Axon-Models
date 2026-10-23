@@ -86,6 +86,15 @@ TABLE = {
     "multi": {1.5: 7.4, 2.0: 13.3, 3.0: 18.2},
     "two": {1.5: 6.4, 2.0: 13.0, 3.0: 17.8},
 }
+# Per-point tolerance [mV], from rerunning each point with the fine rerun's
+# max_step at 0.003, 0.004, 0.006 and 0.007 instead of 0.005 (exact mode),
+# rounded up from the measured spread. multi and the dendrotoxin row: spread
+# under 0.0001 mV at every point. two: 0.06 at 1.5x (6.372 to 6.435), 0.00 at
+# 2x, 0.20 at 3x (17.576 to 17.775), which is why those two get more than 0.06.
+TOLERANCE = {
+    "multi": {1.5: 0.06, 2.0: 0.06, 3.0: 0.06},
+    "two": {1.5: 0.1, 2.0: 0.06, 3.0: 0.25},
+}
 
 
 @pytest.mark.parametrize(
@@ -95,7 +104,9 @@ TABLE = {
 def test_somatic_spike_table_points_are_distinct(model, k):
     r = somatic.spike_amplitude(model, k * RHEOBASE[model])
     assert r["distinct"]
-    assert r["amplitude"] == pytest.approx(TABLE[model][k], abs=0.06)
+    assert r["amplitude"] == pytest.approx(
+        TABLE[model][k], abs=TOLERANCE[model][k]
+    )
     assert r["t_inflection"] is not None and r["v_inflection"] is not None
 
 
