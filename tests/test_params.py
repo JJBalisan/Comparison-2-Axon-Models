@@ -5,7 +5,15 @@ import dataclasses
 import numpy as np
 import pytest
 
-from msoaxon import _common, _dispatch, coincidence, multi, synaptic, two
+from msoaxon import (
+    _common,
+    _dispatch,
+    coincidence,
+    constants as C,
+    multi,
+    synaptic,
+    two,
+)
 
 
 def stimulus(stim_type="step"):
@@ -185,3 +193,60 @@ def test_keys_feed_the_caches():
         "mem=membrane(v0=-68.0, soma_klt_scale=1.0, ais_klt_scale=1.0, "
         "soma_na_vhalf=-62.5, rebalance_rest=False, dendrite_klt_scale=1.0)"
     )
+
+
+def _old_multi_y0(morph, mem, v0):
+    """mso_axon's inline initial state before initial_state existed."""
+    n = morph.n
+    if mem.y0_gates is None:
+        return np.concatenate(
+            [np.full(n, float(v0))] + [np.full(n, g) for g in multi._GATE0]
+        )
+    return np.concatenate([np.full(n, float(v0)), *mem.y0_gates])
+
+
+@pytest.mark.parametrize("rebalance_rest", [False, True])
+@pytest.mark.parametrize("dendrites", [False, True])
+@pytest.mark.parametrize("v0", [-68.0, -60.0, -65])
+def test_multi_initial_state_equals_the_old_inline_code(
+    rebalance_rest, dendrites, v0
+):
+    morph = multi.with_dendrites() if dendrites else multi.LUMPED
+    mem = multi.membrane(v0, morph=morph, rebalance_rest=rebalance_rest)
+    new, old = (
+        multi.initial_state(morph, mem, v0),
+        _old_multi_y0(morph, mem, v0),
+    )
+    assert new.dtype == old.dtype
+    assert new.shape == (7 * morph.n,)
+    assert np.array_equal(new, old)
+    assert new.tobytes() == old.tobytes()
+
+
+def _old_two_x0(params):
+    """two_cpt's inline initial state before initial_state existed."""
+    Vr = params.Vrest
+    return [
+        Vr,
+        Vr,
+        C.winf(Vr),
+        C.hinf(Vr),
+        C.winf(Vr),
+        C.minf(Vr),
+        C.minf(Vr),
+        C.hinf(Vr),
+        C.pinf(Vr),
+        C.ainf(Vr),
+        C.ainf(Vr),
+    ]
+
+
+@pytest.mark.parametrize("v0", [-68.0, -58.0, -65])
+@pytest.mark.parametrize("model_type", ["passive", "active-full"])
+def test_two_initial_state_equals_the_old_inline_code(v0, model_type):
+    P = two.get_params(v0, 3, 1, model_type)
+    new = two.initial_state(P)
+    old = np.asarray(_old_two_x0(P), dtype=float)  # as integrate() takes it
+    assert new.dtype == old.dtype
+    assert np.array_equal(new, old)
+    assert new.tobytes() == old.tobytes()

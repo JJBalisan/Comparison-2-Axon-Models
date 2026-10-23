@@ -382,6 +382,38 @@ def _rhs(
     ]
 
 
+def initial_state(P: TwoCptParams) -> np.ndarray:
+    """Returns two_cpt's initial state: the steady state at P.Vrest.
+
+    Unlike multi's rounded _GATE0, every gate starts at its exact steady
+    state at Vrest (z is frozen there), and get_params subtracts each
+    current's value at rest, so the model has no rest drift.
+
+    Args:
+        P: The parameters (get_params); Vrest is the v0 of the run.
+
+    Returns:
+        The 11 states in the module docstring's order.
+    """
+    Vr = P.Vrest
+    return np.array(
+        [
+            Vr,
+            Vr,
+            C.winf(Vr),
+            C.hinf(Vr),
+            C.winf(Vr),
+            C.minf(Vr),
+            C.minf(Vr),
+            C.hinf(Vr),
+            C.pinf(Vr),
+            C.ainf(Vr),
+            C.ainf(Vr),
+        ],
+        dtype=float,
+    )
+
+
 def two_cpt(
     stim_type: str,
     start: float,
@@ -456,23 +488,7 @@ def two_cpt(
     syn = syn or synaptic.SynParams(t_end=t_end)
     P = get_params(v0, node, input_node, model_type, r1=r1, tau_est=tau_est)
     s = _common.stimulus(stim_type, start, stop, I, t_end, syn)
-    Vr = P.Vrest
-    # unlike multi's rounded _GATE0, every gate starts at its exact steady state
-    # at Vrest (z is frozen there), and get_params subtracts each current's
-    # value at rest, so the model has no rest drift
-    x0 = [
-        Vr,
-        Vr,
-        C.winf(Vr),
-        C.hinf(Vr),
-        C.winf(Vr),
-        C.minf(Vr),
-        C.minf(Vr),
-        C.hinf(Vr),
-        C.pinf(Vr),
-        C.ainf(Vr),
-        C.ainf(Vr),
-    ]
+    x0 = initial_state(P)
     cuts = _solve.breakpoints(stim_type, start, stop, t_end)
     quiet = None
     # step and the synaptic inputs are already on at t == start (TwoCptODE uses

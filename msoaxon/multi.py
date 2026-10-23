@@ -721,6 +721,27 @@ def _rhs(
     return out
 
 
+def initial_state(morph: Morphology, mem: Membrane, v0: float) -> np.ndarray:
+    """Returns mso_axon's initial state: V at v0, then the six gates.
+
+    Args:
+        morph: The morphology (its n sets the block length).
+        mem: The channel overrides; its y0_gates (rebalance_rest) are the
+            starting gates, else msoAxon.m's rounded _GATE0.
+        v0: The initial potential [mV].
+
+    Returns:
+        The state vector, 7 * morph.n long, in the module docstring's
+        layout.
+    """
+    n = morph.n
+    if mem.y0_gates is None:
+        return np.concatenate(
+            [np.full(n, float(v0))] + [np.full(n, g) for g in _GATE0]
+        )
+    return np.concatenate([np.full(n, float(v0)), *mem.y0_gates])
+
+
 def mso_axon(
     stim_type: str,
     start: float,
@@ -834,12 +855,7 @@ def mso_axon(
             "pass morph= to membrane()"
         )
     n = morph.n
-    if mem.y0_gates is None:
-        y0 = np.concatenate(
-            [np.full(n, float(v0))] + [np.full(n, g) for g in _GATE0]
-        )
-    else:
-        y0 = np.concatenate([np.full(n, float(v0)), *mem.y0_gates])
+    y0 = initial_state(morph, mem, v0)
     cuts = _solve.breakpoints(stim_type, start, stop, t_end)
     mode = _fast.resolve(mode)
     if mode == "fast":
