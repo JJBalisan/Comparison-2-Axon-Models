@@ -1,0 +1,153 @@
+name: wheels
+
+# Prebuilt msoaxon-fast wheels, so fast mode needs no cargo (#39).
+#
+# On a v* tag: build, smoke-test and attach the wheels to that tag's GitHub
+# release. By hand (workflow_dispatch) or on a pull request: the same build
+# and smoke test, with the wheels kept as workflow artifacts only.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  # A pull request that touches the crate or this file builds and smoke-tests
+  # the wheels too, so a broken build shows before a tag does (and a new
+  # workflow can run before it exists on main, where dispatch needs it).
+  pull_request:
+    paths: ["rust/**", ".github/workflows/wheels.yml"]
+
+# Building only reads the code; the one job that writes (the release upload)
+# raises its own token below.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: wheel (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Each wheel is built and smoke-tested on a native runner of its
+          # own platform. macOS minutes bill at 10x on private repos; the
+          # repo is public, so they are free.
+          - {name: linux-x86_64, os: ubuntu-latest, target: x86_64}
+          - {name: linux-aarch64, os: ubuntu-24.04-arm, target: aarch64}
+          - {name: macos-arm64, os: macos-latest, target: aarch64-apple-darwin}
+          - {name: macos-x86_64, os: macos-15-intel, target: x86_64-apple-darwin}
+          - {name: windows-x86_64, os: windows-latest, target: x64}
+    steps:
+      - uses: actions/checkout@v5
+      # rust/Cargo.toml builds pyo3 with abi3-py311 (a stable-ABI wheel,
+      # tagged cp311-abi3), so one wheel per platform covers Python 3.11,
+      # 3.12 and 3.13: the smoke test below installs it on 3.11 and 3.13.
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          working-directory: rust
+          args: --release --out dist
+          # manylinux on Linux (the default), ignored elsewhere
+          manylinux: auto
+      - uses: astral-sh/setup-uv@v7
+      # A fresh venv per Python: msoaxon from this checkout plus the wheel
+      # that was just built (not the path source, which would rebuild it),
+      # then import, the self-check and a fast run. The script lives outside
+      # the checkout so `import msoaxon` can only find the installed copy,
+      # and has a __main__ guard because Windows spawns the pool workers.
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheels=(rust/dist/*.whl)
+          [ "${#wheels[@]}" -eq 1 ] || { echo "expected one wheel: ${wheels[*]}" >&2; exit 1; }
+          wheel="${wheels[0]}"
+          case "$wheel" in *-cp311-abi3-*) ;; *) echo "not an abi3 wheel: $wheel" >&2; exit 1;; esac
+          printf '%s\n' "$SCRIPT" > "$RUNNER_TEMP/smoke.py"
+          : > summary.txt
+          for py in 3.11 3.13; do
+            venv="$RUNNER_TEMP/venv-$py"
+            uv venv --python "$py" "$venv"
+            if [ -d "$venv/Scripts" ]; then python="$venv/Scripts/python.exe"; else python="$venv/bin/python"; fi
+            uv pip install --python "$python" . "$wheel"
+            "$python" -c "import msoaxon_fast"
+            (cd "$RUNNER_TEMP" && "$python" -W ignore smoke.py) | tee line.txt
+            echo "- ${{ matrix.name }}, Python $py: $(cat line.txt)" >> summary.txt
+          done
+          {
+            echo "## msoaxon-fast wheel on ${{ matrix.name }}"
+            basename "$wheel"
+            echo
+            cat summary.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          SCRIPT: |
+            import sys
+
+            import msoaxon
+            from msoaxon import _fast, coincidence
+
+
+            def main():
+                assert _fast.available(), "msoaxon_fast did not import"
+                # one threshold search per mode, as test.yml's pytest-fast
+                th = {
+                    m: coincidence.threshold(
+                        "multi", 0.1, model_kw={"mode": m}
+                    )
+                    for m in _fast.MODES
+                }
+                # the pool: process_pool() spawns workers on Windows and
+                # macOS, so this also proves the extension loads in a worker
+                curve = coincidence.threshold_curve(
+                    "multi", [0.1, 0.2], workers=2, model_kw={"mode": "fast"}
+                )
+                assert curve[0] == th["fast"], (curve, th)
+                print(
+                    f"self_check {_fast.self_check(64)}; "
+                    f"threshold(delay 0.1) {th}; pool ok"
+                )
+                print(msoaxon.__file__, file=sys.stderr)
+
+
+            if __name__ == "__main__":
+                main()
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.name }}
+          path: rust/dist/*.whl
+          if-no-files-found: error
+
+  # Tags only: put the five wheels on the release. The release is normally
+  # written by hand after the tag, so this job may run before it exists; then
+  # it creates a *draft* with the wheels on it. Edit and publish that draft
+  # (don't create a second release for the tag). If the release exists
+  # already, the wheels are added to it; re-running replaces them.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+      - name: Attach to the release
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheels=(dist/*.whl)
+          printf '%s\n' "${wheels[@]}"
+          [ "${#wheels[@]}" -eq 5 ] || { echo "expected five wheels" >&2; exit 1; }
+          view=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" 2>&1 || true)
+          if [[ "$view" == *"release not found"* ]]; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
+              --verify-tag --title "$TAG" \
+              --notes "msoaxon-fast wheels only; write the notes, then publish."
+          fi
+          gh release upload "$TAG" dist/*.whl --repo "$GITHUB_REPOSITORY" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}

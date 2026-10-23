@@ -69,6 +69,21 @@ uv sync --extra fast        # builds rust/ with maturin; needs cargo (rustup.rs)
 uv sync                     # numpy only: no Rust toolchain needed
 ```
 
+**Without cargo.** Each release carries prebuilt `msoaxon-fast` wheels (Linux
+x86_64 and aarch64, macOS arm64 and x86_64, Windows x86_64; one wheel per
+platform covers Python 3.11-3.13). Download the one for your machine, or all of
+them, from the release's assets and install it next to `uv sync`:
+
+```bash
+gh release download vX.Y.Z -p 'msoaxon_fast-*' -D wheels   # or save them from the release page
+uv sync
+uv pip install --find-links wheels msoaxon-fast
+```
+
+`uv run` leaves the wheel in place; a later plain `uv sync` removes it again
+(use `uv sync --inexact`). The path source stays for development: it is what
+`uv sync --extra fast` builds when you change `rust/`.
+
 `mso_axon(..., mode=...)` picks the right-hand side; `_dispatch.run_model` passes
 `mode` on, so it also works in `model_kw` (`coincidence.threshold("multi", 0.1,
 model_kw={"mode": "exact"})`) and `measure.passive_step(..., mode=...)`. The
