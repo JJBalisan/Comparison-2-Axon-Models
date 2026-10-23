@@ -534,8 +534,8 @@ than the spike.
   dendrotoxin row by 0.00 mV and the multi rows by 0.00 mV; the 2-compartment
   rows move by up to 0.06 mV (1.5×), 0.00 (2×) and 0.20 mV (3×) (remeasured in
   exact mode: 6.372–6.435 and 17.576–17.775 mV; the other rows move by under
-  0.0001 mV). `tests/test_somatic.py` gives each table point a tolerance from its
-  spread: 0.06 mV, but 0.1 and 0.25 mV for those two. Before
+  0.0001 mV). `tests/test_somatic.py` gives each table point a tolerance from
+  its spread: 0.06 mV, but 0.1 and 0.25 mV for those two. Before
   issue #56 the pick was the argmax of d²V/dt² of the linearly interpolated
   trace, a comb with a tooth at every solver step. The dendrotoxin row then
   moved 0.6–1.9 mV under the same changes (25.08 mV on macOS against 25.97 mV on

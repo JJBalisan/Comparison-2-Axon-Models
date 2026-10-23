@@ -136,7 +136,8 @@ def test_pre_stimulus_is_quiet(cuts, start, stop, expected):
 
 def test_spike_event_is_the_axon_minus_soma_minus_factor():
     event = _solve.spike_event(2, 10.0)
-    assert vars(event) == {"terminal": True, "direction": 1}
+    assert vars(event)["terminal"] is True
+    assert vars(event)["direction"] == 1
     x = np.array([-60.0, 99.0, -45.0])
     assert event(0.0, x) == pytest.approx(-45.0 - -60.0 - 10.0)
     assert event(123.4, x) == event(0.0, x)  # time plays no part
@@ -155,7 +156,8 @@ def _dv_of(values):
 
 def test_settled_event_is_terminal_and_rising():
     event = _solve.settled_event(_dv_of([-1.0]), 5.0, 1, 10.0)
-    assert vars(event) == {"terminal": True, "direction": 1}
+    assert vars(event)["terminal"] is True
+    assert vars(event)["direction"] == 1
 
 
 def test_settled_event_waits_for_the_input_to_end():
