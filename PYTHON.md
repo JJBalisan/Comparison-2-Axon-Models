@@ -75,7 +75,7 @@ platform covers Python 3.11-3.13). Download the one for your machine, or all of
 them, from the release's assets and install it next to `uv sync`:
 
 ```bash
-gh release download v1.3.0 -p 'msoaxon_fast-*' -D wheels   # or save them from the release page
+gh release download vX.Y.Z -p 'msoaxon_fast-*' -D wheels   # or save them from the release page
 uv sync
 uv pip install --find-links wheels msoaxon-fast
 ```
