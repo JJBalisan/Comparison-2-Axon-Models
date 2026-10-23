@@ -184,6 +184,19 @@ def test_rust_rhs_reads_strided_states():
 
 
 @needs_ext
+def test_rust_epsg_pair_is_finite_far_before_the_second_onset():
+    # the second EPSG starts 80 ms after the first: the exponentials of its
+    # waveform overflow at te - td < -71 unless clamped (as in the Python)
+    syn = synaptic.SynParams(t_end=20.0)
+    s = _common.stimulus("EPSGpair", 5.0, 85.0, 100.0, 20.0, syn)
+    active = (True,) * 6
+    mem = multi.membrane(-68.0)
+    fast = _fast._build("EPSGpair", s, 1, active, mem, multi.LUMPED, None)
+    x = states(multi.N, np.random.default_rng(8), 1)[1]
+    assert np.all(np.isfinite(fast(5.1, x)))
+
+
+@needs_ext
 def test_rust_rhs_rejects_a_wrong_state_length():
     args, _ = setup("EPSGpair")
     with pytest.raises(ValueError, match="315"):

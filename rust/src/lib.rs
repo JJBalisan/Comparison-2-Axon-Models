@@ -107,7 +107,11 @@ impl Epsg {
     #[inline]
     fn unitary(&self, t: f64) -> f64 {
         let pos = if t > 0.0 { 1.0 } else { 0.0 };
-        (self.inv_peak * pos) * ((-t / self.decay).exp() - (-t / self.rise).exp())
+        // Far before onset the exponentials overflow and 0 * inf is NaN;
+        // like the Python, they see t no lower than -1 (the product is
+        // already 0 there, and t > -1 keeps its bits). NaN passes through.
+        let te = if t < -1.0 { -1.0 } else { t };
+        (self.inv_peak * pos) * ((-te / self.decay).exp() - (-te / self.rise).exp())
     }
 }
 
@@ -731,4 +735,52 @@ impl MultiRhs {
 fn msoaxon_fast(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<MultiRhs>()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Numpy and Rust call the same libm on the machine the port was written
+    /// on (darwin-arm64): bit-identical there, close elsewhere.
+    const BITWISE: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
+
+    fn assert_same(got: f64, want: f64, rel: f64) {
+        if BITWISE {
+            assert_eq!(got.to_bits(), want.to_bits(), "{got:e} vs {want:e}");
+        } else {
+            assert!(
+                (got - want).abs() <= rel * want.abs(),
+                "{got:e} vs {want:e}"
+            );
+        }
+    }
+
+    fn default_epsg() -> Epsg {
+        Epsg {
+            inv_peak: 1.0 / 0.21317,
+            decay: 0.18,
+            rise: 0.1,
+        }
+    }
+
+    #[test]
+    fn unitary_keeps_its_value_at_a_reachable_time() {
+        // captured from the code before the clamp was added
+        assert_same(default_epsg().unitary(0.1), 9.657736997044162e-1, 1e-14);
+    }
+
+    #[test]
+    fn unitary_is_negative_zero_far_before_onset() {
+        // exp(200 / 0.1) overflows: without the clamp this was 0 * inf = NaN
+        let far = default_epsg().unitary(-200.0);
+        assert_eq!(far, 0.0);
+        assert!(far.is_sign_negative(), "expected -0.0, got {far:?}");
+        // the same -0.0 just either side of the clamp, and at onset
+        for t in [-0.5, -1.0, -1.5, -70.0, -71.0] {
+            let u = default_epsg().unitary(t);
+            assert!(u == 0.0 && u.is_sign_negative(), "t={t}: {u:?}");
+        }
+        assert!(default_epsg().unitary(f64::NAN).is_nan());
+    }
 }
