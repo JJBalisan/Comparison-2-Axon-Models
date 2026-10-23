@@ -1,11 +1,11 @@
 # Python port
 
 A numpy/scipy port of the MATLAB model comparison. The Python package is the
-reference: its results, pinned by `tests/test_golden.py`, are the ones the analyses
-below use, on any hardware. The `.m` files are the historical original it was ported
-from. They stay in the repo, untouched, but the Python no longer has to match them:
-where this page says the port reproduces the MATLAB, that describes how it was built,
-not a promise for future changes.
+reference: its results, pinned by `tests/test_golden.py`, are the ones the
+analyses below use, on any hardware. The `.m` files are the historical original
+it was ported from. They stay in the repo, untouched, but the Python no longer
+has to match them: where this page says the port reproduces the MATLAB, that
+describes how it was built, not a promise for future changes.
 
 ```bash
 uv sync                                                    # or: uv sync --extra fast (Rust, below)
@@ -16,12 +16,13 @@ uv run scripts/making_threshold_graphs.py --node 3         # Making_Threshold_gr
 uv run scripts/making_threshold_graphs.py --only EPSGpair --jpg-grid   # the repo's jpgs
 ```
 
-`dendrites.py`, `coincidence_window.py` and `somatic_spike.py` take `--quick` (coarse
-delay grids, 1% threshold tolerance, fewer multiples), and `making_threshold_graphs.py`
-takes `--points N`. The same code runs in seconds instead of minutes; the numbers are
-for smoke tests, not results. `tests/test_scripts.py` runs every script this way; those
-tests are marked `slow` (`uv run pytest -m "not slow"` skips them), and CI runs them on
-Python 3.12 only.
+`dendrites.py`, `coincidence_window.py` and `somatic_spike.py` take `--quick`
+(coarse delay grids, 1% threshold tolerance, fewer multiples), and
+`making_threshold_graphs.py` takes `--points N`. The same code runs in seconds
+instead of minutes; the numbers are for smoke tests, not results.
+`tests/test_scripts.py` runs every script this way; those tests are marked
+`slow` (`uv run pytest -m "not slow"` skips them), and CI runs them on Python
+3.12 only.
 
 | MATLAB | Python |
 |---|---|
@@ -37,9 +38,10 @@ Python 3.12 only.
 
 `two_cpt` and `mso_axon` take the MATLAB argument order
 `(stimType, start, stop, I, node, type, tEnd, v0, inputNode, syn)`. `node` and
-`inputNode` stay **1-indexed** like the MATLAB code. Output arrays are 0-indexed:
-`y[:, node-1]` is compartment `node` of the 45-CPT model, and its 315 state columns
-keep MATLAB's column-major layout `[V(45), m, h, p, w, z, a]`, so `z1` is `y[:, 225]`.
+`inputNode` stay **1-indexed** like the MATLAB code. Output arrays are
+0-indexed: `y[:, node-1]` is compartment `node` of the 45-CPT model, and its 315
+state columns keep MATLAB's column-major layout `[V(45), m, h, p, w, z, a]`, so
+`z1` is `y[:, 225]`.
 
 Code that isn't a port of a MATLAB file:
 
@@ -84,10 +86,11 @@ uv pip install --find-links wheels msoaxon-fast
 (use `uv sync --inexact`). The path source stays for development: it is what
 `uv sync --extra fast` builds when you change `rust/`.
 
-`mso_axon(..., mode=...)` picks the right-hand side; `_dispatch.run_model` passes
-`mode` on, so it also works in `model_kw` (`coincidence.threshold("multi", 0.1,
-model_kw={"mode": "exact"})`) and `measure.passive_step(..., mode=...)`. The
-two-compartment model has only its numpy path and ignores it.
+`mso_axon(..., mode=...)` picks the right-hand side; `_dispatch.run_model`
+passes `mode` on, so it also works in `model_kw`
+(`coincidence.threshold("multi", 0.1, model_kw={"mode": "exact"})`) and
+`measure.passive_step(..., mode=...)`. The two-compartment model has only its
+numpy path and ignores it.
 
 | `mode` | Right-hand side |
 |---|---|
@@ -99,15 +102,16 @@ two-compartment model has only its numpy path and ignores it.
 worker processes included (pools hand their workers the parent's setting).
 
 **Drift.** The port keeps numpy's floating-point evaluation order expression for
-expression (`m**4` is `powf(4.0)`, not `powi`; `np.interp`'s fused multiply-add on
-arm64 is reproduced). On darwin-arm64, where numpy and Rust call the same libm, it
-is bit-identical to `multi._rhs`, and so are whole runs, thresholds and windows. On
-other hardware numpy may use its own SIMD `exp`/`pow` while Rust calls the system
-libm, so results can differ in the last bits; through a spike upstroke that grows
-to the size of the cross-platform drift the golden traces already tolerate. The
-first fast run in each process therefore checks the port against `multi._rhs` on
-24 fixed states (about 5 ms) and issues a `msoaxon.DriftWarning` saying whether it
-was bit-identical on this machine. Silence it with
+expression (`m**4` is `powf(4.0)`, not `powi`; `np.interp`'s fused multiply-add
+on arm64 is reproduced). On darwin-arm64, where numpy and Rust call the same
+libm, it is bit-identical to `multi._rhs`, and so are whole runs, thresholds and
+windows. On other hardware numpy may use its own SIMD `exp`/`pow` while Rust
+calls the system libm, so results can differ in the last bits; through a spike
+upstroke that grows to the size of the cross-platform drift the golden traces
+already tolerate. The first fast run in each process therefore checks the port
+against `multi._rhs` on 24 fixed states (about 5 ms) and issues a
+`msoaxon.DriftWarning` saying whether it was bit-identical on this machine.
+Silence it with
 
 ```python
 import warnings
@@ -118,12 +122,12 @@ warnings.filterwarnings("ignore", category=msoaxon.DriftWarning)
 ```
 
 or pass `mode="exact"` to use the reference. Everything `multi._rhs` handles is
-ported: every stimulus (Synaptic and SynapticPair included), the lumped chain and
-`with_dendrites()` trees, `membrane()` overrides and every model type, so
+ported: every stimulus (Synaptic and SynapticPair included), the lumped chain
+and `with_dendrites()` trees, `membrane()` overrides and every model type, so
 `mode="fast"` never falls back to `"exact"` for a configuration.
 
-**Speed** (Apple M1 Max, Python 3.12, best of 3; the machine was busy, so read the
-ratios rather than the seconds):
+**Speed** (Apple M1 Max, Python 3.12, best of 3; the machine was busy, so read
+the ratios rather than the seconds):
 
 | | `"exact"` | `"fast"` | Speed-up |
 |---|---|---|---|
@@ -149,49 +153,127 @@ macOS, and with it on both (`pytest-fast`), which also prints the self-check.
 
 There is no MATLAB here, so nothing was compared run-for-run. What was checked:
 
-- **Constants:** `Area.mat`, `Fractions.mat` and `Coupling.mat` match the Python values to 1e-12 (`tests/`).
-- **Rest:** with no input the 2-CPT model stays at `v0` to 1e-6 mV. The 45-CPT model settles about 0.9 mV away from it. The same happens in MATLAB, since `msoAxon.m` starts from rounded gating values and doesn't subtract resting currents.
-- **EPSGpair thresholds vs `EPSGpair_Thresholds*.jpg`:** every plotted value is a multiple of q = 150/128, i.e. raw output of the halving search. Re-running that grid (`--jpg-grid`, delays 0–0.6 ms, nodes 3 and 5, both models) matches 20 of 28 values exactly. The other 8 are one possible output away (2q ≈ 2.3 units, 2.5–5%). The curve shapes, the steep rise between 0.2 and 0.5 ms, and the plateau positions all agree. The misses aren't random: node-5 two-compartment sits one step low at four consecutive delays, and the node-3 multi-compartment plateau is 94.9 vs 97.3. `tests/test_coverage.py` pins all 28 Python values, with the jpg values alongside.
-  - Tightening the tolerances 1000× (1e-9, `max_step` 0.02) doesn't move any Python value, so the Python side is converged. The gap is either ode15s error in the original runs or a code change after the jpgs were made (they came from an older 11-point `BinarySearch.m`). Telling those apart needs MATLAB.
-- **Not validated numerically:** `step`, `ramp`, `ramp2`, `sine`, `EPSG`, and the synaptic inputs. Every stimulus, graph type and threshold sweep runs, and the traces look physiologically sensible, but there's no reference output to compare against.
+- **Constants:** `Area.mat`, `Fractions.mat` and `Coupling.mat` match the Python
+  values to 1e-12 (`tests/`).
+- **Rest:** with no input the 2-CPT model stays at `v0` to 1e-6 mV. The 45-CPT
+  model settles about 0.9 mV away from it. The same happens in MATLAB, since
+  `msoAxon.m` starts from rounded gating values and doesn't subtract resting
+  currents.
+- **EPSGpair thresholds vs `EPSGpair_Thresholds*.jpg`:** every plotted value is
+  a multiple of q = 150/128, i.e. raw output of the halving search. Re-running
+  that grid (`--jpg-grid`, delays 0–0.6 ms, nodes 3 and 5, both models) matches
+  20 of 28 values exactly. The other 8 are one possible output away (2q ≈ 2.3
+  units, 2.5–5%). The curve shapes, the steep rise between 0.2 and 0.5 ms, and
+  the plateau positions all agree. The misses aren't random: node-5
+  two-compartment sits one step low at four consecutive delays, and the node-3
+  multi-compartment plateau is 94.9 vs 97.3. `tests/test_coverage.py` pins all
+  28 Python values, with the jpg values alongside.
+  - Tightening the tolerances 1000× (1e-9, `max_step` 0.02) doesn't move any
+    Python value, so the Python side is converged. The gap is either ode15s
+    error in the original runs or a code change after the jpgs were made (they
+    came from an older 11-point `BinarySearch.m`). Telling those apart needs
+    MATLAB.
+- **Not validated numerically:** `step`, `ramp`, `ramp2`, `sine`, `EPSG`, and
+  the synaptic inputs. Every stimulus, graph type and threshold sweep runs, and
+  the traces look physiologically sensible, but there's no reference output to
+  compare against.
 
 ## Deliberate differences
 
-Where the port departs from the MATLAB, and why. Now that the Python is the reference
-these are history; they are not reverted.
+Where the port departs from the MATLAB, and why. Now that the Python is the
+reference these are history; they are not reverted.
 
-- **Solver:** `ode15s` → scipy `solve_ivp(method="BDF")` with the same tolerances (2-CPT 1e-6, `max_step` 0.1; 45-CPT 1e-8, `max_step` 0.1·tEnd, ode15s's default). Integration restarts at stimulus on/off times so the solver can't step over a narrow EPSG. The 45-CPT model gets a sparse Jacobian pattern.
-- **Threshold search stops each run at its first spike** (`stop_on_spike`), since it only needs yes or no. The stop is found on the continuous solution, not the saved solver steps, so in principle it could count a crossing that falls between two steps. Across every production sweep (184 thresholds) the results are identical to running each simulation to `tEnd`. The search used to also count spikes in the saved steps, as `BinarySearch.m` does; that never decided a result, since a sampled crossing is one the stop already caught, so it was dropped. Sweep points also run in parallel (`workers`, default all CPUs).
-- **Synaptic noise:** numpy's RNG can't reproduce MATLAB's `rng(seed); randn`, so `Synaptic`/`SynapticPair` runs are statistically equivalent, not identical.
-- **`interp1q` out of range** returns 0, not NaN. `TwoCptODE.m` already guarded this for `SynapticPair`. `msoAxon.m` didn't, which is likely the "Problem including Synaptic pair" comment in `Combine_all.m`.
-- **`BinarySearch.m`:** the two-compartment loop tested `location1` in its `while` condition. It now tests its own `location2`.
-- **`Combine_all.m`:** the 2-CPT spike count read column 1 (soma minus soma, always 0); it now reads the axon column. The second `TwoCpt` run used identical arguments; it now uses node 5 so the "Node 5" panels mean what they say. The default `ramp` stop was equal to start, a zero-length ramp; it's now 5.5.
-- **`Graphing.m`:** the `Input` panel reuses the model's own stimulus function instead of a hand-copied version that indexed 2-CPT voltages with multi-compartment time steps. The `z1`/`a` line fits (broken: `graph.graph.tEnd`, length mismatch) were not ported.
-- **EPSGpair threshold x-axis** shows the delay between the two EPSGs, like the jpgs do, rather than the second EPSG's absolute time (`5 + (i-1)/25`) that `Making_Threshold_graphs.m` plots.
-- **Thresholds and coincidence windows** come from the predictive search in `msoaxon/_bisect.py`, not a MATLAB-style bisection. Full reruns against plain bisection move windows by under 0.4 µs and thresholds by under 1e-4 (relative); one rounded value changed (Goldwyn, Myoga EPSG: 183 → 182 µs). These values are the reference. Single runs never depended on the search. Rheobase has used it since issue #19: the multi and two step responses rise smoothly through 10 mV like the EPSG pairs, so it takes 10–11 runs instead of 15 and moves by under 5e-5 (relative); with KLT blocked the response is all or none and the search makes bisection's runs, to the same value.
-- **Settled stop:** searches end a non-spiking run once the input is over and no spike can follow (`STOP_WHEN_SETTLED` in `msoaxon/_dispatch.py`; the single-run models leave it off). It stays: in the search benchmark it changed 0 of 365 spike decisions, for about 6% less solver time.
-- **`fitExp.m`** was not ported and won't be. It contains an unresolved merge conflict and fits 301 samples against a 49-point x-axis, and with MATLAB compatibility no longer a goal nothing here needs the fit. The `.m` file stays as part of the historical record.
+- **Solver:** `ode15s` → scipy `solve_ivp(method="BDF")` with the same
+  tolerances (2-CPT 1e-6, `max_step` 0.1; 45-CPT 1e-8, `max_step` 0.1·tEnd,
+  ode15s's default). Integration restarts at stimulus on/off times so the solver
+  can't step over a narrow EPSG. The 45-CPT model gets a sparse Jacobian
+  pattern.
+- **Threshold search stops each run at its first spike** (`stop_on_spike`),
+  since it only needs yes or no. The stop is found on the continuous solution,
+  not the saved solver steps, so in principle it could count a crossing that
+  falls between two steps. Across every production sweep (184 thresholds) the
+  results are identical to running each simulation to `tEnd`. The search used to
+  also count spikes in the saved steps, as `BinarySearch.m` does; that never
+  decided a result, since a sampled crossing is one the stop already caught, so
+  it was dropped. Sweep points also run in parallel (`workers`, default all
+  CPUs).
+- **Synaptic noise:** numpy's RNG can't reproduce MATLAB's `rng(seed); randn`,
+  so `Synaptic`/`SynapticPair` runs are statistically equivalent, not identical.
+- **`interp1q` out of range** returns 0, not NaN. `TwoCptODE.m` already guarded
+  this for `SynapticPair`. `msoAxon.m` didn't, which is likely the "Problem
+  including Synaptic pair" comment in `Combine_all.m`.
+- **`BinarySearch.m`:** the two-compartment loop tested `location1` in its
+  `while` condition. It now tests its own `location2`.
+- **`Combine_all.m`:** the 2-CPT spike count read column 1 (soma minus soma,
+  always 0); it now reads the axon column. The second `TwoCpt` run used
+  identical arguments; it now uses node 5 so the "Node 5" panels mean what they
+  say. The default `ramp` stop was equal to start, a zero-length ramp; it's now
+  5.5.
+- **`Graphing.m`:** the `Input` panel reuses the model's own stimulus function
+  instead of a hand-copied version that indexed 2-CPT voltages with
+  multi-compartment time steps. The `z1`/`a` line fits (broken:
+  `graph.graph.tEnd`, length mismatch) were not ported.
+- **EPSGpair threshold x-axis** shows the delay between the two EPSGs, like the
+  jpgs do, rather than the second EPSG's absolute time (`5 + (i-1)/25`) that
+  `Making_Threshold_graphs.m` plots.
+- **Thresholds and coincidence windows** come from the predictive search in
+  `msoaxon/_bisect.py`, not a MATLAB-style bisection. Full reruns against plain
+  bisection move windows by under 0.4 µs and thresholds by under 1e-4
+  (relative); one rounded value changed (Goldwyn, Myoga EPSG: 183 → 182 µs).
+  These values are the reference. Single runs never depended on the search.
+  Rheobase has used it since issue #19: the multi and two step responses rise
+  smoothly through 10 mV like the EPSG pairs, so it takes 10–11 runs instead of
+  15 and moves by under 5e-5 (relative); with KLT blocked the response is all or
+  none and the search makes bisection's runs, to the same value.
+- **Settled stop:** searches end a non-spiking run once the input is over and no
+  spike can follow (`STOP_WHEN_SETTLED` in `msoaxon/_dispatch.py`; the
+  single-run models leave it off). It stays: in the search benchmark it changed
+  0 of 365 spike decisions, for about 6% less solver time.
+- **`fitExp.m`** was not ported and won't be. It contains an unresolved merge
+  conflict and fits 301 samples against a 49-point x-axis, and with MATLAB
+  compatibility no longer a goal nothing here needs the fit. The `.m` file stays
+  as part of the historical record.
 
 ## Quirks kept on purpose
 
-These are in the MATLAB and are reproduced unchanged. They were kept so that the port matched the MATLAB; they are now kept for continuity with the results on this page. Any of them could be changed by a deliberate decision, which would move the golden traces (`tests/golden_traces.json`) and the numbers here:
+These are in the MATLAB and are reproduced unchanged. They were kept so that the
+port matched the MATLAB; they are now kept for continuity with the results on
+this page. Any of them could be changed by a deliberate decision, which would
+move the golden traces (`tests/golden_traces.json`) and the numbers here:
 
-- `TwoCpt.m` enables sodium for `'Active-sodium'` (capital A), so `active-sodium` means *no* Na in the 2-CPT model but Na-only in the 45-CPT model.
+- `TwoCpt.m` enables sodium for `'Active-sodium'` (capital A), so
+  `active-sodium` means *no* Na in the 2-CPT model but Na-only in the 45-CPT
+  model.
 - The 2-CPT model holds KLT inactivation `z` fixed at its resting value.
-- In `msoAxon.m`, `step` always injects into the soma whatever `inputNode` is; `ramp` only applies for `t > 5` (hardcoded); `EPSG`/`EPSGpair` scale by the input compartment's area while the other stimuli use the soma's.
-- `TwoCptODE.m` starts `ramp2` at t = 5 whatever `start` is; `msoAxon.m` starts it at `start`.
-- `TwoCpt.m` has calibrated axonal Na (`gNa2`) only for nodes 3 (119) and 5 (25.5). Every other node gets the placeholder 140, so 2-CPT runs at those nodes use an uncalibrated value.
+- In `msoAxon.m`, `step` always injects into the soma whatever `inputNode` is;
+  `ramp` only applies for `t > 5` (hardcoded); `EPSG`/`EPSGpair` scale by the
+  input compartment's area while the other stimuli use the soma's.
+- `TwoCptODE.m` starts `ramp2` at t = 5 whatever `start` is; `msoAxon.m` starts
+  it at `start`.
+- `TwoCpt.m` has calibrated axonal Na (`gNa2`) only for nodes 3 (119) and 5
+  (25.5). Every other node gets the placeholder 140, so 2-CPT runs at those
+  nodes use an uncalibrated value.
 - `Spiking.m` doesn't clear `reset` between columns.
-- `SA(2)` uses `1.66/3` where `0.66/2` was probably meant. The stored `Area.mat` was built with it.
-- `BinarySearch.m` reports the ceiling (`max`) when nothing fires, so a returned 15000 means "no threshold found", not "threshold ≈ 15000". It also assumes spiking gets easier as input grows. That fails for `EPSG` with factor 30: a very large conductance holds the soma near 0 mV, so the axon never gets 30 mV above it. The `ramp` sweep's first point (stop = 5.1) returns the ceiling in both models for the same reason.
+- `SA(2)` uses `1.66/3` where `0.66/2` was probably meant. The stored `Area.mat`
+  was built with it.
+- `BinarySearch.m` reports the ceiling (`max`) when nothing fires, so a returned
+  15000 means "no threshold found", not "threshold ≈ 15000". It also assumes
+  spiking gets easier as input grows. That fails for `EPSG` with factor 30: a
+  very large conductance holds the soma near 0 mV, so the axon never gets 30 mV
+  above it. The `ramp` sweep's first point (stop = 5.1) returns the ceiling in
+  both models for the same reason.
 
 ## Comparison with the literature
 
-`uv run scripts/coincidence_window.py` reproduces the numbers below; `figures/coincidence/` gets the plot and a JSON of every curve.
+`uv run scripts/coincidence_window.py` reproduces the numbers below;
+`figures/coincidence/` gets the plot and a JSON of every curve.
 
 ### Lineage
 
-The 45-compartment model follows Lehnert et al. 2014 ([doi](https://doi.org/10.1523/JNEUROSCI.4038-13.2014)). The two-compartment model is the coupling-constant framework of Goldwyn, Remme & Rinzel 2019 ([doi](https://doi.org/10.1371/journal.pcbi.1006476)).
+The 45-compartment model follows Lehnert et al. 2014
+([doi](https://doi.org/10.1523/JNEUROSCI.4038-13.2014)). The two-compartment
+model is the coupling-constant framework of Goldwyn, Remme & Rinzel 2019
+([doi](https://doi.org/10.1371/journal.pcbi.1006476)).
 
 `TwoCpt.m` changes Goldwyn's passive targets:
 
@@ -201,14 +283,19 @@ The 45-compartment model follows Lehnert et al. 2014 ([doi](https://doi.org/10.1
 | Soma time constant | 0.34 ms | 0.71 ms |
 | Resting potential | −58 mV | −68 mV (from Lehnert) |
 
-The old values survive as comments beside the new ones (`%8.5`, `%-58`). `GOLDWYN_2019` in `msoaxon/two.py` restores them: `two_cpt(..., v0=-58, r1=8.5, tau_est=0.34)`.
+The old values survive as comments beside the new ones (`%8.5`, `%-58`).
+`GOLDWYN_2019` in `msoaxon/two.py` restores them:
+`two_cpt(..., v0=-58, r1=8.5, tau_est=0.34)`.
 
 ### Coincidence window
 
-Measured the way Myoga et al. 2014 did in adult gerbil MSO at 35 °C ([doi](https://doi.org/10.1038/ncomms4790)):
+Measured the way Myoga et al. 2014 did in adult gerbil MSO at 35 °C
+([doi](https://doi.org/10.1038/ncomms4790)):
 - two identical EPSGs, their relative timing stepped in 20 µs;
-- inputs slightly above the coincident threshold, so spike probability peaks near 100%;
-- result: the full width of the spike-probability curve at half maximum. They measured **221 µs**.
+- inputs slightly above the coincident threshold, so spike probability peaks
+  near 100%;
+- result: the full width of the spike-probability curve at half maximum. They
+  measured **221 µs**.
 
 | Model | Model EPSG (decay 0.18 ms) | Myoga EPSG (decay 0.3 ms) |
 |---|---|---|
@@ -216,33 +303,73 @@ Measured the way Myoga et al. 2014 did in adult gerbil MSO at 35 °C ([doi](http
 | 2-compartment, `TwoCpt.m` | 199 µs | 217 µs |
 | 2-compartment, Goldwyn 2019 calibration | 167 µs | 182 µs |
 
-These widths use inputs 3% above threshold. At 0.5% they shrink to 70–91 µs. The margin matters a lot, and the paper's "200 pS (~3%)" is ambiguous: 200 pS is closer to 0.5% of their 43 nS EPSGs.
+These widths use inputs 3% above threshold. At 0.5% they shrink to 70–91 µs. The
+margin matters a lot, and the paper's "200 pS (~3%)" is ambiguous: 200 pS is
+closer to 0.5% of their 43 nS EPSGs.
 
 How the widths are computed:
-- `coincidence.window()` does what the experiment does: it fixes the input at (1 + margin) × the coincident threshold (resolved to 1e-4) and searches over delay, to 0.1 µs, for where that input stops spiking. Probability is 50% there. About 20 simulations per window, within 0.5 µs of the same search at 1e-7.
-- Both searches predict rather than halve. At the 10 mV criterion the peak of axon − soma rises smoothly through 10 mV (7.7, 9.7, 10.0, 10.3, 17.8 mV at −1%, −0.1%, 0, +0.1%, +1% of threshold), so each run that doesn't spike says how close it came. That takes about 10 simulations per threshold on average (125 for the twelve benchmark thresholds, at most 13) instead of 15.
-- Earlier versions read the crossing off a threshold curve on a 20 µs grid. Linear interpolation across a curve that bends upward read 0.1–4 µs low, most at the 0.5% margin.
-- Noisy trials check this: 1% amplitude jitter plus 5 µs onset jitter give 200 µs against `window()`'s 199 µs. If the noise is large enough to keep peak probability near 85%, the half-maximum width comes out about 10% wider.
+- `coincidence.window()` does what the experiment does: it fixes the input at
+  (1 + margin) × the coincident threshold (resolved to 1e-4) and searches over
+  delay, to 0.1 µs, for where that input stops spiking. Probability is 50%
+  there. About 20 simulations per window, within 0.5 µs of the same search at
+  1e-7.
+- Both searches predict rather than halve. At the 10 mV criterion the peak of
+  axon − soma rises smoothly through 10 mV (7.7, 9.7, 10.0, 10.3, 17.8 mV at
+  −1%, −0.1%, 0, +0.1%, +1% of threshold), so each run that doesn't spike says
+  how close it came. That takes about 10 simulations per threshold on average
+  (125 for the twelve benchmark thresholds, at most 13) instead of 15.
+- Earlier versions read the crossing off a threshold curve on a 20 µs grid.
+  Linear interpolation across a curve that bends upward read 0.1–4 µs low, most
+  at the 0.5% margin.
+- Noisy trials check this: 1% amplitude jitter plus 5 µs onset jitter give 200
+  µs against `window()`'s 199 µs. If the noise is large enough to keep peak
+  probability near 85%, the half-maximum width comes out about 10% wider.
 
 Findings:
-- With matched methods, the original calibration reproduces the measured window closely.
+- With matched methods, the original calibration reproduces the measured window
+  closely.
 - Goldwyn's faster membrane narrows it by about 17%.
-- An earlier estimate here (half-way point of the threshold curve, ~340 µs) measured a different quantity.
+- An earlier estimate here (half-way point of the threshold curve, ~340 µs)
+  measured a different quantity.
 
 #### Spike criterion
 
-A run counts as a spike once axon − soma exceeds 10 mV, as in the MATLAB EPSG-pair sweeps (`coincidence.FACTOR`, `somatic.FACTOR`). That fixed value means different things in different models:
-- **45-compartment and `TwoCpt.m`:** 10 mV is about 26% of their spike (38 mV of axon − soma). It sits on the foot of the takeoff, which comes 1–3% above that threshold.
-- **Goldwyn's calibration:** 10 mV is about 50% of its spike (20 mV). Its response is graded rather than all-or-none: the peak grows smoothly from 5.8 to 19.6 mV between 0.9× and 1.5× threshold. So for Goldwyn the criterion *defines* the threshold rather than locating it. A 5 or 15 mV criterion moves its coincident threshold by −13% or +8%. Its windows are robust, though: they move by at most 4%.
-- A fixed 20 or 30 mV criterion is out of reach for Goldwyn's calibration altogether.
+A run counts as a spike once axon − soma exceeds 10 mV, as in the MATLAB
+EPSG-pair sweeps (`coincidence.FACTOR`, `somatic.FACTOR`). That fixed value
+means different things in different models:
+- **45-compartment and `TwoCpt.m`:** 10 mV is about 26% of their spike (38 mV of
+  axon − soma). It sits on the foot of the takeoff, which comes 1–3% above that
+  threshold.
+- **Goldwyn's calibration:** 10 mV is about 50% of its spike (20 mV). Its
+  response is graded rather than all-or-none: the peak grows smoothly from 5.8
+  to 19.6 mV between 0.9× and 1.5× threshold. So for Goldwyn the criterion
+  *defines* the threshold rather than locating it. A 5 or 15 mV criterion moves
+  its coincident threshold by −13% or +8%. Its windows are robust, though: they
+  move by at most 4%.
+- A fixed 20 or 30 mV criterion is out of reach for Goldwyn's calibration
+  altogether.
 
-The criterion is an option (issue #21). `coincidence.threshold`, `threshold_curve`, `window` and `probability_trials`, and `somatic.fires`, `rheobase` and `spike_amplitude` take `criterion=`:
-- a float is absolute, in mV; the default is 10.0, so nothing changes unless you ask;
+The criterion is an option (issue #21). `coincidence.threshold`,
+`threshold_curve`, `window` and `probability_trials`, and `somatic.fires`,
+`rheobase` and `spike_amplitude` take `criterion=`:
+- a float is absolute, in mV; the default is 10.0, so nothing changes unless you
+  ask;
 - `coincidence.Relative(0.5)` is 50% of that configuration's own spike height.
 
-`coincidence.spike_height()` measures the height as the largest axon − soma of a coincident EPSG pair at 2× the 10 mV threshold, run with no spike stop. That costs one threshold search plus one run. The height is flat (within 2.5%) from 1.5× to 3× threshold, so the 10 mV seed doesn't bias it. It is cached per configuration: model, node, `v0`, EPSG kinetics, stimulus sites and every model keyword. Membranes and morphologies are keyed by their settings, so the dendritic and dendrotoxin variants, whose spikes differ, each get their own height. `somatic` measures the height with an EPSG pair on the same membrane. The MATLAB ports (`threshold.binary_search`, `spiking`, `combine_all.py --factor`) keep their absolute 10 and 30 mV: those values are part of what they reproduce.
+`coincidence.spike_height()` measures the height as the largest axon − soma of a
+coincident EPSG pair at 2× the 10 mV threshold, run with no spike stop. That
+costs one threshold search plus one run. The height is flat (within 2.5%) from
+1.5× to 3× threshold, so the 10 mV seed doesn't bias it. It is cached per
+configuration: model, node, `v0`, EPSG kinetics, stimulus sites and every model
+keyword. Membranes and morphologies are keyed by their settings, so the
+dendritic and dendrotoxin variants, whose spikes differ, each get their own
+height. `somatic` measures the height with an EPSG pair on the same membrane.
+The MATLAB ports (`threshold.binary_search`, `spiking`,
+`combine_all.py --factor`) keep their absolute 10 and 30 mV: those values are
+part of what they reproduce.
 
-At 50% of each model's height (model EPSG; `Relative(0.5)` against the 10 mV default):
+At 50% of each model's height (model EPSG; `Relative(0.5)` against the 10 mV
+default):
 
 | Model | Spike height | 50% | Coincident threshold | 3% window | Rheobase (100 ms step) |
 |---|---|---|---|---|---|
@@ -250,12 +377,27 @@ At 50% of each model's height (model EPSG; `Relative(0.5)` against the 10 mV def
 | 2-compartment, `TwoCpt.m` | 38.0 mV | 19.0 mV | 47.72 → 48.22 nS (+1.1%) | 199.0 → 198.0 µs (−0.5%) | 3848 → 3877 pA (+0.8%) |
 | 2-compartment, Goldwyn 2019 calibration | 20.2 mV | 10.1 mV | 26.35 → 26.39 nS (+0.1%) | 167.5 → 166.9 µs (−0.4%) | 2070 → 2072 pA (+0.1%) |
 
-- With the Myoga EPSG the shifts are the same size: the 3% windows go 219 → 217.5, 216.8 → 215.5 and 182.4 → 182.5 µs.
-- The 0.5% windows narrow by 0.5–0.7% for the 45-compartment and `TwoCpt.m` models.
-- At 50% Goldwyn's criterion is today's, so its results don't move. The other two models' criterion moves onto the steep upstroke, which raises their thresholds 1.0–1.8% and narrows their windows by at most 0.75%: about 2 µs on 200, inside the 0.5% vs 3% margin ambiguity above. Goldwyn still narrows the window by about 17% (−16.7% at 10 mV, −16.4% at 50%).
-- At 25% or 75% of the height, the 3% windows change by at most 1.8% (4% for Goldwyn). The coincident thresholds move more: up to 3%, and Goldwyn's by −13% at 25%, where the criterion is below its takeoff.
-- Goldwyn's rheobase is the same 100 ms step run with its calibration (`v0=-58, r1=8.5, tau_est=0.34`). `somatic.fires`, `response`, `rheobase` and `spike_amplitude` take a `model_kw` dict like `coincidence.threshold`, so the 2070 pA is `somatic.rheobase("two", v0=-58, model_kw={"r1": 8.5, "tau_est": 0.34})`. `model_kw` also carries `mode="exact"`, `morph`, `model_type` and `max_step`; `mem=` stays as a shorthand for `model_kw={"mem": ...}`.
-- The searches take about 7% more simulations at 50%: the interpolation still converges on the upstroke, a little less efficiently.
+- With the Myoga EPSG the shifts are the same size: the 3% windows go 219 →
+  217.5, 216.8 → 215.5 and 182.4 → 182.5 µs.
+- The 0.5% windows narrow by 0.5–0.7% for the 45-compartment and `TwoCpt.m`
+  models.
+- At 50% Goldwyn's criterion is today's, so its results don't move. The other
+  two models' criterion moves onto the steep upstroke, which raises their
+  thresholds 1.0–1.8% and narrows their windows by at most 0.75%: about 2 µs on
+  200, inside the 0.5% vs 3% margin ambiguity above. Goldwyn still narrows the
+  window by about 17% (−16.7% at 10 mV, −16.4% at 50%).
+- At 25% or 75% of the height, the 3% windows change by at most 1.8% (4% for
+  Goldwyn). The coincident thresholds move more: up to 3%, and Goldwyn's by −13%
+  at 25%, where the criterion is below its takeoff.
+- Goldwyn's rheobase is the same 100 ms step run with its calibration
+  (`v0=-58, r1=8.5, tau_est=0.34`). `somatic.fires`, `response`, `rheobase` and
+  `spike_amplitude` take a `model_kw` dict like `coincidence.threshold`, so the
+  2070 pA is
+  `somatic.rheobase("two", v0=-58, model_kw={"r1": 8.5, "tau_est": 0.34})`.
+  `model_kw` also carries `mode="exact"`, `morph`, `model_type` and `max_step`;
+  `mem=` stays as a shorthand for `model_kw={"mem": ...}`.
+- The searches take about 7% more simulations at 50%: the interpolation still
+  converges on the upstroke, a little less efficiently.
 
 ### Other benchmarks
 
@@ -269,7 +411,10 @@ Values are for the Python port.
 | Somatic spike, from inflection (100 ms step) | 7.4 / 13.3 / 18.2 mV at 1.5× / 2× / 3× rheobase | 17 ± 2 mV mature, 5–15 mV near threshold, graded |
 | Best frequency for half-wave sine input | 400–500 Hz | subthreshold resonance 242–300 Hz |
 
-An earlier version of this table listed a ~40 mV somatic spike as the clearest mismatch. That figure was measured from rest during an EPSG pair at 2× threshold, so it counted the synaptic depolarisation as spike. Measured like the experiments (next section), the spike matches mature cells.
+An earlier version of this table listed a ~40 mV somatic spike as the clearest
+mismatch. That figure was measured from rest during an EPSG pair at 2×
+threshold, so it counted the synaptic depolarisation as spike. Measured like the
+experiments (next section), the spike matches mature cells.
 
 ### Missing relative to current models
 
@@ -280,11 +425,20 @@ An earlier version of this table listed a ~40 mV somatic spike as the clearest m
 
 ### Somatic spike
 
-`uv run scripts/somatic_spike.py` reproduces this; `figures/somatic/` gets the traces and a JSON.
+`uv run scripts/somatic_spike.py` reproduces this; `figures/somatic/` gets the
+traces and a JSON.
 
-Scott et al. 2005 ([doi](https://doi.org/10.1523/JNEUROSCI.1016-05.2005)) evoked spikes with 100 ms somatic current steps and measured amplitude from the inflection point. Mature cells (≥P21) give **17 ± 2 mV**: 5–15 mV near threshold, growing with the stimulus. Blocking Kv1 (KLT) with dendrotoxin in P20–21 cells raised it **from 15 to 37 mV**.
+Scott et al. 2005 ([doi](https://doi.org/10.1523/JNEUROSCI.1016-05.2005)) evoked
+spikes with 100 ms somatic current steps and measured amplitude from the
+inflection point. Mature cells (≥P21) give **17 ± 2 mV**: 5–15 mV near
+threshold, growing with the stimulus. Blocking Kv1 (KLT) with dendrotoxin in
+P20–21 cells raised it **from 15 to 37 mV**.
 
-`msoaxon/somatic.py` measures the model the same way. The inflection is the peak of d²V/dt² (of a cubic spline through the solver's samples) after the first 0.15 ms of charging: MSO neurons fire at step onset, while the membrane is still charging at 50–80 mV/ms, so fixed dV/dt criteria pick up the charging rather than the spike.
+`msoaxon/somatic.py` measures the model the same way. The inflection is the peak
+of d²V/dt² (of a cubic spline through the solver's samples) after the first 0.15
+ms of charging: MSO neurons fire at step onset, while the membrane is still
+charging at 50–80 mV/ms, so fixed dV/dt criteria pick up the charging rather
+than the spike.
 
 | Somatic spike amplitude | 1.5× rheobase | 2× | 3× |
 |---|---|---|---|
@@ -292,37 +446,78 @@ Scott et al. 2005 ([doi](https://doi.org/10.1523/JNEUROSCI.1016-05.2005)) evoked
 | 45-compartment, KLT removed at soma + AIS, rest rebalanced (dendrotoxin) | 25.4 mV | 28.2 mV | 31.7 mV |
 | 2-compartment (`TwoCpt.m`) | 6.4 mV | 13.0 mV | 17.8 mV |
 
-- **The unmodified model already matches mature cells.** Lehnert et al. 2014 report "∼10 mV" for their model too.
-- **The KLT block reproduces the developmental mechanism:** the spike roughly doubles, and rheobase falls from 3784 to 200 pA. No tuning was needed.
-- **Valid range: about 1.35× to 4.5× rheobase** (multi and two models, 10 mV criterion). `spike_amplitude` returns `distinct=True` there. Outside it the step still fires but `distinct` is `False`, and `amplitude`, `t_inflection` and `v_inflection` are `None` (`peak_above_rest`, `t_spike` and `trace` stay valid). The inflection is distinct when the d²V/dt² peak in the search window is the largest before the spike peak (so the takeoff was not left in the skipped charging window), is not at either end of the window, and is at least `somatic.D2_MIN` = 100 mV/ms². Below the range the soma is a smooth hump with no upstroke curvature (1.05× and 1.2× used to return 9–12 mV from a flat d²V/dt² ≈ 0 plateau). Above it the takeoff falls in the skipped window, and the old picker returned ≈0 mV from the upstroke next to the peak at 10× rheobase. The limits move with the membrane: with KLT removed every step from 1.05× to 10× is distinct.
-- **How stable the numbers are:** the pick is the maximum of the spline's d²V/dt², which lies on a solver sample, so it depends on where the solver put its steps. Rerunning with `max_step` 3, 4, 6 and 7 µs instead of 5 moves the dendrotoxin row by 0.00 mV and the multi rows by 0.00 mV; the 2-compartment rows move by up to 0.06 mV (1.5×), 0.00 (2×) and 0.20 mV (3×). Before issue #56 the pick was the argmax of d²V/dt² of the linearly interpolated trace, a comb with a tooth at every solver step. The dendrotoxin row then moved 0.6–1.9 mV under the same changes (25.08 mV on macOS against 25.97 mV on Linux CI at 1.5×), and so did the controls (2-compartment 2× spread 12.8–17.6 mV). The old control values (7.6 / 13.4 / 19.4 and 6.2 / 15.6 / 17.6 mV) were single teeth of that comb: the 2-compartment 2× value is 13.0 mV, not 15.6.
-- **Spikes driven by EPSG pairs** measure 9–11 mV at 2× threshold, against 8.5 ± 1.3 mV in vivo (van der Heijden et al. 2013). Near threshold the EPSP and spike merge and the inflection is ambiguous.
+- **The unmodified model already matches mature cells.** Lehnert et al. 2014
+  report "∼10 mV" for their model too.
+- **The KLT block reproduces the developmental mechanism:** the spike roughly
+  doubles, and rheobase falls from 3784 to 200 pA. No tuning was needed.
+- **Valid range: about 1.35× to 4.5× rheobase** (multi and two models, 10 mV
+  criterion). `spike_amplitude` returns `distinct=True` there. Outside it the
+  step still fires but `distinct` is `False`, and `amplitude`, `t_inflection`
+  and `v_inflection` are `None` (`peak_above_rest`, `t_spike` and `trace` stay
+  valid). The inflection is distinct when the d²V/dt² peak in the search window
+  is the largest before the spike peak (so the takeoff was not left in the
+  skipped charging window), is not at either end of the window, and is at least
+  `somatic.D2_MIN` = 100 mV/ms². Below the range the soma is a smooth hump with
+  no upstroke curvature (1.05× and 1.2× used to return 9–12 mV from a flat
+  d²V/dt² ≈ 0 plateau). Above it the takeoff falls in the skipped window, and
+  the old picker returned ≈0 mV from the upstroke next to the peak at 10×
+  rheobase. The limits move with the membrane: with KLT removed every step from
+  1.05× to 10× is distinct.
+- **How stable the numbers are:** the pick is the maximum of the spline's
+  d²V/dt², which lies on a solver sample, so it depends on where the solver put
+  its steps. Rerunning with `max_step` 3, 4, 6 and 7 µs instead of 5 moves the
+  dendrotoxin row by 0.00 mV and the multi rows by 0.00 mV; the 2-compartment
+  rows move by up to 0.06 mV (1.5×), 0.00 (2×) and 0.20 mV (3×). Before
+  issue #56 the pick was the argmax of d²V/dt² of the linearly interpolated
+  trace, a comb with a tooth at every solver step. The dendrotoxin row then
+  moved 0.6–1.9 mV under the same changes (25.08 mV on macOS against 25.97 mV on
+  Linux CI at 1.5×), and so did the controls (2-compartment 2× spread 12.8–17.6
+  mV). The old control values (7.6 / 13.4 / 19.4 and 6.2 / 15.6 / 17.6 mV) were
+  single teeth of that comb: the 2-compartment 2× value is 13.0 mV, not 15.6.
+- **Spikes driven by EPSG pairs** measure 9–11 mV at 2× threshold, against 8.5 ±
+  1.3 mV in vivo (van der Heijden et al. 2013). Near threshold the EPSP and
+  spike merge and the inflection is ambiguous.
 
 `mso_axon(..., mem=membrane(v0, ...))` exposes the knobs used for the block:
 - `soma_klt_scale` and `ais_klt_scale`
-- `soma_na_vhalf`: Scott et al. 2010 measured −77 mV for somatic Na inactivation; the model uses −62.5.
-- `rebalance_rest`: sets each leak reversal so rest stays at `v0`. Without it, removing KLT makes the cell fire with no input.
+- `soma_na_vhalf`: Scott et al. 2010 measured −77 mV for somatic Na
+  inactivation; the model uses −62.5.
+- `rebalance_rest`: sets each leak reversal so rest stays at `v0`. Without it,
+  removing KLT makes the cell fire with no input.
 
 The defaults are `msoAxon.m`'s membrane, unchanged.
 
 ## Dendrites
 
-`mso_axon(..., morph=with_dendrites())` adds two dendrites, following the dendritic variant in Lehnert et al. 2014 (their Fig. 8). The lumped model's 8750 µm² "soma" stands for soma plus dendrites: in the paper's words it "combines the somatic and dendritic membrane surface", sized for 70 pF. So the dendrites take their membrane from it rather than being added on top:
+`mso_axon(..., morph=with_dendrites())` adds two dendrites, following the
+dendritic variant in Lehnert et al. 2014 (their Fig. 8). The lumped model's 8750
+µm² "soma" stands for soma plus dendrites: in the paper's words it "combines the
+somatic and dendritic membrane surface", sized for 70 pF. So the dendrites take
+their membrane from it rather than being added on top:
 - two unbranched dendrites, each 200 µm × 5 µm, five compartments each;
 - the soma reduced to 2467 µm², so total membrane stays 8750 µm²;
 - somatic Na density scaled up so total Na is unchanged;
 - no Na or KHT in the dendrites;
-- KLT and h decaying along the dendrites with a 74 µm length constant (Mathews et al. 2010, [doi](https://doi.org/10.1038/nn.2530)).
+- KLT and h decaying along the dendrites with a 74 µm length constant (Mathews
+  et al. 2010, [doi](https://doi.org/10.1038/nn.2530)).
 
 How to use it:
-- Dendrite compartments are appended after the axon, so compartments 1–45 keep their meaning. Numbers 46–50 are the lateral (ipsilateral) dendrite, 51–55 the medial (contralateral), proximal to distal.
-- New stimulus `EPSGbilateral`: one EPSG at `input_node` at `start`, the other at `input_node2` at `stop`.
+- Dendrite compartments are appended after the axon, so compartments 1–45 keep
+  their meaning. Numbers 46–50 are the lateral (ipsilateral) dendrite, 51–55 the
+  medial (contralateral), proximal to distal.
+- New stimulus `EPSGbilateral`: one EPSG at `input_node` at `start`, the other
+  at `input_node2` at `stop`.
 - `membrane(..., morph=D, dendrite_klt_scale=...)` scales dendritic KLT.
 - `uv run scripts/dendrites.py` runs every check below.
 
 Two things the paper doesn't state:
-- **Axial resistivity.** The model's 100 Ω·cm is kept by default; Mathews used 200. `with_dendrites(dendrite_ra=200)` (script: `--dendrite-ra 200`) changes it for the dendrites only, and the results are in the section after this one.
-- **Whether total KLT and h were conserved.** `conserve_totals=True` (default) keeps soma + dendrite totals equal to the lumped model's. `False` starts the gradient at the soma's Table 2 density, halving total KLT.
+- **Axial resistivity.** The model's 100 Ω·cm is kept by default; Mathews
+  used 200. `with_dendrites(dendrite_ra=200)` (script: `--dendrite-ra 200`)
+  changes it for the dendrites only, and the results are in the section after
+  this one.
+- **Whether total KLT and h were conserved.** `conserve_totals=True` (default)
+  keeps soma + dendrite totals equal to the lumped model's. `False` starts the
+  gradient at the soma's Table 2 density, halving total KLT.
 
 | | Lumped | Dendrites, totals conserved (default) | Dendrites, KLT from soma density | Literature |
 |---|---|---|---|---|
@@ -336,17 +531,24 @@ Two things the paper doesn't state:
 | EPSG-pair threshold curve at the soma vs lumped (max difference) | — | 12% | 50% | "almost identical" (Lehnert) |
 | Somatic spike at 1.5 / 2 / 3× rheobase | 7.4 / 13.3 / 18.2 mV | 16.7 / 20.9 / 25.9 mV | 21.1 / 26.1 / 30.8 mV | 17 ± 2 mV mature |
 
-Conserving the totals is the default because it reproduces what Lehnert et al. reported for their own dendritic variant: tuning almost identical to the lumped model. It also fixes the EPSP width and keeps the somatic spike near mature size.
+Conserving the totals is the default because it reproduces what Lehnert et al.
+reported for their own dendritic variant: tuning almost identical to the lumped
+model. It also fixes the EPSP width and keeps the somatic spike near mature
+size.
 
 Neither variant matches everything:
 - **Conserving totals** narrows the coincidence window below Myoga's value.
-- **The soma-density gradient** matches the input resistance and the window, but leaves the spike too large.
+- **The soma-density gradient** matches the input resistance and the window, but
+  leaves the spike too large.
 
-Both reproduce the qualitative dendritic results: attenuation along the cable, EPSP sharpening by dendritic KLT, and the bilateral advantage.
+Both reproduce the qualitative dendritic results: attenuation along the cable,
+EPSP sharpening by dendritic KLT, and the bilateral advantage.
 
 ### Dendritic axial resistivity 200 Ω·cm
 
-`with_dendrites(dendrite_ra=200)` uses Mathews et al.'s 200 Ω·cm in the dendrites. The soma and axon keep 100, so their conductances stay bit-identical. Values below are for Ra = 100 → 200.
+`with_dendrites(dendrite_ra=200)` uses Mathews et al.'s 200 Ω·cm in the
+dendrites. The soma and axon keep 100, so their conductances stay bit-identical.
+Values below are for Ra = 100 → 200.
 
 | | Totals conserved, 100 → 200 | KLT from soma density, 100 → 200 |
 |---|---|---|
@@ -361,9 +563,18 @@ Both reproduce the qualitative dendritic results: attenuation along the cable, E
 | Somatic spike at 1.5 / 2 / 3× rheobase | 16.7 / 20.9 / 25.9 → 19.8 / 24.5 / 29.5 mV | 21.1 / 26.1 / 30.8 → 25.8 / 30.9 / 35.4 mV |
 
 What the higher resistivity does:
-- **It isolates the soma from the dendrites.** Somatic EPSPs get larger and narrower, dendritic EPSPs are attenuated more, and the soma sees less of the dendritic membrane.
-- **It makes the bilateral advantage much stronger.** With conserved totals, two EPSGs on one dendrite need 2.7× the bilateral threshold, up from 1.4×. The local depolarisation saturates the synaptic driving force, and dendritic KLT shunts it (Scott et al. 2010's argument).
+- **It isolates the soma from the dendrites.** Somatic EPSPs get larger and
+  narrower, dendritic EPSPs are attenuated more, and the soma sees less of the
+  dendritic membrane.
+- **It makes the bilateral advantage much stronger.** With conserved totals, two
+  EPSGs on one dendrite need 2.7× the bilateral threshold, up from 1.4×. The
+  local depolarisation saturates the synaptic driving force, and dendritic KLT
+  shunts it (Scott et al. 2010's argument).
 - **Summation stays linear**, within 2%.
-- **It moves each variant away from what it already matched.** With conserved totals the window narrows further from Myoga's 221 µs, and the curve drifts from Lehnert's "almost identical". With the soma-density gradient the window is still close (230 µs with the Myoga EPSG), but the spike grows further past 17 mV.
+- **It moves each variant away from what it already matched.** With conserved
+  totals the window narrows further from Myoga's 221 µs, and the curve drifts
+  from Lehnert's "almost identical". With the soma-density gradient the window
+  is still close (230 µs with the Myoga EPSG), but the spike grows further past
+  17 mV.
 
 So 200 Ω·cm doesn't reconcile the two variants. 100 stays the default.
