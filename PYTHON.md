@@ -240,7 +240,7 @@ At 50% of each model's height (model EPSG; `Relative(0.5)` against the 10 mV def
 - The 0.5% windows narrow by 0.5–0.7% for the 45-compartment and `TwoCpt.m` models.
 - At 50% Goldwyn's criterion is today's, so its results don't move. The other two models' criterion moves onto the steep upstroke, which raises their thresholds 1.0–1.8% and narrows their windows by at most 0.75%: about 2 µs on 200, inside the 0.5% vs 3% margin ambiguity above. Goldwyn still narrows the window by about 17% (−16.7% at 10 mV, −16.4% at 50%).
 - At 25% or 75% of the height, the 3% windows change by at most 1.8% (4% for Goldwyn). The coincident thresholds move more: up to 3%, and Goldwyn's by −13% at 25%, where the criterion is below its takeoff.
-- Goldwyn's rheobase is the same 100 ms step run with its calibration (`v0=-58, r1=8.5, tau_est=0.34`); `somatic` itself doesn't take those keywords.
+- Goldwyn's rheobase is the same 100 ms step run with its calibration (`v0=-58, r1=8.5, tau_est=0.34`). `somatic.fires`, `response`, `rheobase` and `spike_amplitude` take a `model_kw` dict like `coincidence.threshold`, so the 2070 pA is `somatic.rheobase("two", v0=-58, model_kw={"r1": 8.5, "tau_est": 0.34})`. `model_kw` also carries `mode="exact"`, `morph`, `model_type` and `max_step`; `mem=` stays as a shorthand for `model_kw={"mem": ...}`.
 - The searches take about 7% more simulations at 50%: the interpolation still converges on the upstroke, a little less efficiently.
 
 ### Other benchmarks

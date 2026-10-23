@@ -29,15 +29,40 @@ CHARGING = 0.15  # ms after step onset excluded from the inflection search
 LOOKBACK = 0.5  # ms before the spike-detection time searched for the takeoff
 
 
+def _merge_kw(
+    mem: types.SimpleNamespace | None, model_kw: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Folds the `mem` shorthand into the model keywords.
+
+    Args:
+        mem: Channel overrides from multi.membrane(), or None. A
+            shorthand for model_kw={"mem": mem}.
+        model_kw: Further model keywords, or None.
+
+    Returns:
+        A new dict of the model keywords, with mem among them if given.
+
+    Raises:
+        ValueError: If mem is given both as `mem` and in model_kw.
+    """
+    kw = dict(model_kw or {})
+    if mem is not None:
+        if kw.get("mem") is not None:
+            raise ValueError(
+                "mem is given twice: as mem= and in model_kw; use one"
+            )
+        kw["mem"] = mem
+    return kw
+
+
 def _factor(
     criterion: coincidence.Criterion,
     model: str,
     node: int,
     v0: float,
-    mem: types.SimpleNamespace | None,
+    model_kw: dict[str, Any],
 ) -> float:
-    """Resolves a criterion to mV, a Relative one on this membrane."""
-    model_kw = {} if mem is None else {"mem": mem}
+    """Resolves a criterion to mV, a Relative one on this configuration."""
     return coincidence.resolve_criterion(
         criterion, model, node, v0, model_kw=model_kw
     )
@@ -51,6 +76,7 @@ def fires(
     mem: types.SimpleNamespace | None = None,
     *,
     criterion: coincidence.Criterion = FACTOR,
+    model_kw: dict[str, Any] | None = None,
 ) -> bool:
     """Returns whether a 100 ms somatic step makes compartment `node` spike.
 
@@ -59,13 +85,21 @@ def fires(
         I: Step amplitude [pA].
         node: The compartment compared with the soma, 1-indexed.
         v0: Initial potential [mV].
-        mem: Channel overrides from multi.membrane(), or None.
+        mem: Channel overrides from multi.membrane(), or None. A
+            shorthand for model_kw={"mem": mem}.
         criterion: The spike criterion: axon - soma [mV], or a
             coincidence.Relative fraction of the spike height.
+        model_kw: Further model keywords, as in coincidence.threshold():
+            mode, morph, model_type, max_step, or r1/tau_est for "two"
+            (Goldwyn 2019: v0=-58, r1=8.5, tau_est=0.34).
 
     Returns:
         True if it spikes.
+
+    Raises:
+        ValueError: If mem is given both as `mem` and in model_kw.
     """
+    kw = _merge_kw(mem, model_kw)
     return _dispatch.spikes(
         model,
         "step",
@@ -76,8 +110,8 @@ def fires(
         T_END,
         v0,
         1,
-        mem=mem,
-        factor=_factor(criterion, model, node, v0, mem),
+        factor=_factor(criterion, model, node, v0, kw),
+        **kw,
     )
 
 
@@ -89,6 +123,7 @@ def response(
     mem: types.SimpleNamespace | None = None,
     *,
     criterion: coincidence.Criterion = FACTOR,
+    model_kw: dict[str, Any] | None = None,
 ) -> tuple[bool, float]:
     """Runs a 100 ms somatic step like fires(), and says how close it came.
 
@@ -97,13 +132,19 @@ def response(
         I: Step amplitude [pA].
         node: The compartment compared with the soma, 1-indexed.
         v0: Initial potential [mV].
-        mem: Channel overrides from multi.membrane(), or None.
+        mem: Channel overrides from multi.membrane(), or None. A
+            shorthand for model_kw={"mem": mem}.
         criterion: The spike criterion (see fires()).
+        model_kw: Further model keywords (see fires()).
 
     Returns:
         (spiked, peak): fires()'s answer, and the largest axon - soma of
         the run [mV] (about the criterion if it spiked).
+
+    Raises:
+        ValueError: If mem is given both as `mem` and in model_kw.
     """
+    kw = _merge_kw(mem, model_kw)
     return _dispatch.response(
         model,
         "step",
@@ -114,8 +155,8 @@ def response(
         T_END,
         v0,
         1,
-        mem=mem,
-        factor=_factor(criterion, model, node, v0, mem),
+        factor=_factor(criterion, model, node, v0, kw),
+        **kw,
     )
 
 
@@ -128,6 +169,7 @@ def rheobase(
     guess: float = 2000.0,
     *,
     criterion: coincidence.Criterion = FACTOR,
+    model_kw: dict[str, Any] | None = None,
 ) -> float:
     """Finds the smallest 100 ms somatic step that fires.
 
@@ -144,21 +186,27 @@ def rheobase(
         model: "multi" or "two".
         node: The compartment compared with the soma, 1-indexed.
         v0: Initial potential [mV].
-        mem: Channel overrides from multi.membrane(), or None.
+        mem: Channel overrides from multi.membrane(), or None. A
+            shorthand for model_kw={"mem": mem}.
         rel_tol: The relative tolerance.
         guess: The first amplitude tried [pA].
         criterion: The spike criterion (see fires()).
+        model_kw: Further model keywords (see fires()).
 
     Returns:
         The rheobase [pA], or inf if nothing up to 1e6 pA fires.
 
     Raises:
         _bisect.FiresWithoutInputError: If the cell fires with no input.
+        ValueError: If mem is given both as `mem` and in model_kw.
     """
-    factor = _factor(criterion, model, node, v0, mem)
+    kw = _merge_kw(mem, model_kw)
+    factor = _factor(criterion, model, node, v0, kw)
     try:
         return _bisect.smallest_crossing(
-            lambda I: response(model, I, node, v0, mem, criterion=factor),
+            lambda I: response(
+                model, I, node, v0, criterion=factor, model_kw=kw
+            ),
             guess,
             1e6,
             rel_tol,
@@ -166,7 +214,14 @@ def rheobase(
             descent=2.0,
         )
     except _bisect.FiresWithoutInputError as e:
-        config = _dispatch.describe(model, node, v0, mem)
+        extra = sorted(k for k in kw if k != "mem")
+        config = _dispatch.describe(
+            model,
+            node,
+            v0,
+            kw.get("mem"),
+            **({"model_kw": extra} if extra else {}),
+        )
         raise _bisect.FiresWithoutInputError(
             f"somatic.rheobase({config}): {e}"
         ) from e
@@ -180,6 +235,7 @@ def spike_amplitude(
     mem: types.SimpleNamespace | None = None,
     *,
     criterion: coincidence.Criterion = FACTOR,
+    model_kw: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Measures the somatic spike amplitude from the inflection point.
 
@@ -188,16 +244,23 @@ def spike_amplitude(
         I: Step amplitude [pA].
         node: The compartment compared with the soma, 1-indexed.
         v0: Initial potential [mV].
-        mem: Channel overrides from multi.membrane(), or None.
+        mem: Channel overrides from multi.membrane(), or None. A
+            shorthand for model_kw={"mem": mem}.
         criterion: The spike criterion (see fires()); it also sets
             t_spike, which anchors the inflection search.
+        model_kw: Further model keywords (see fires()); the finely
+            sampled second run keeps its own max_step of 0.005 ms.
 
     Returns:
         dict(amplitude, peak_above_rest, t_spike, t_inflection,
         v_inflection, trace) in mV and ms, where trace = (t, x) is the
         finely sampled run up to 2 ms after the spike; or None if the
         step doesn't fire.
+
+    Raises:
+        ValueError: If mem is given both as `mem` and in model_kw.
     """
+    kw = _merge_kw(mem, model_kw)
     t0, _ = _dispatch.run_model(
         model,
         "step",
@@ -208,8 +271,7 @@ def spike_amplitude(
         T_END,
         v0,
         1,
-        mem=mem,
-        stop_on_spike=_factor(criterion, model, node, v0, mem),
+        **{**kw, "stop_on_spike": _factor(criterion, model, node, v0, kw)},
     )
     ts = t0[-1]
     if ts >= T_END:
@@ -224,8 +286,7 @@ def spike_amplitude(
         ts + 2.0,
         v0,
         1,
-        mem=mem,
-        max_step=0.005,
+        **{**kw, "max_step": 0.005},
     )
     grid = np.arange(START + 0.001, ts + 2.0, 0.001)
     V = np.interp(grid, t, x[:, 0])

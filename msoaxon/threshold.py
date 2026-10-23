@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from concurrent import futures
+from typing import Any
 
 from msoaxon import _dispatch, _parallel, spiking, synaptic
 
@@ -111,13 +112,13 @@ def _search(
 
 
 def _point(
-    task: tuple[str, str, int, int, float, float, float, float],
+    task: tuple[str, str, int, int, float, float, float, float, dict[str, Any]],
 ) -> float:
     """Searches one sweep point for one model.
 
     Module-level so worker processes can import it.
     """
-    model, stim_type, i, node, factor, max_I, zoom, epsg_pair_dt = task
+    model, stim_type, i, node, factor, max_I, zoom, epsg_pair_dt, kw = task
 
     def spiked_at(
         stim: str,
@@ -138,8 +139,8 @@ def _point(
             V0,
             INPUT_NODE,
             syn,
-            model_type=MODEL_TYPE,
             factor=factor,
+            **{"model_type": MODEL_TYPE, **kw},
         )
 
     return _search(spiked_at, stim_type, i, factor, max_I, zoom, epsg_pair_dt)
@@ -156,6 +157,8 @@ def binary_search(
     rounded: bool = True,
     workers: int | None = None,
     executor: futures.Executor | None = None,
+    *,
+    model_kw: dict[str, Any] | None = None,
 ) -> tuple[list[float], list[float]]:
     """Runs BinarySearch.m's threshold search for both models.
 
@@ -182,6 +185,11 @@ def binary_search(
             processes by re-importing the main module.
         executor: An existing process pool to use instead (see
             _parallel.map_tasks).
+        model_kw: Model keywords for every run, passed on to
+            _dispatch.spikes: mode, max_step, model_type (default
+            "active-full"), ... The same dict reaches both models, so
+            a keyword only one of them has (mem, morph for "multi";
+            r1, tau_est for "two") fails in the other.
 
     Returns:
         (thresholds_multi, thresholds_two), one value per sweep point.
@@ -189,8 +197,9 @@ def binary_search(
     # multi-compartment points first: they take ~10x longer, so starting them
     # early keeps the pool busy while the cheap two-compartment points fill the
     # gaps
+    kw = dict(model_kw or {})
     tasks = [
-        (model, stim_type, i, node, factor, max_I, zoom, epsg_pair_dt)
+        (model, stim_type, i, node, factor, max_I, zoom, epsg_pair_dt, kw)
         for model in ("multi", "two")
         for i in range(1, n_points + 1)
     ]
