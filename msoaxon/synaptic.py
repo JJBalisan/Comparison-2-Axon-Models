@@ -10,6 +10,10 @@ EPSG_TAU = (
     0.18,
 )  # (rise, decay) [ms], the Franken et al 2015 waveform used by the MATLAB
 
+# The unitary EPSG's peak for EPSG_TAU, from the MATLAB code. Kept as the
+# literal (fast mode's _fast._epsg and rust/src/lib.rs hold their own copies).
+EPSG_NORM = 0.21317
+
 
 def epsg_unitary(
     t: float | np.ndarray, tau: tuple[float, float] = EPSG_TAU
@@ -17,7 +21,7 @@ def epsg_unitary(
     """Returns the unitary EPSG waveform (difference of exponentials).
 
     The peak is 1. The default kinetics keep the MATLAB expression,
-    peak-normalised by 0.21317, so results are unchanged; other
+    peak-normalised by EPSG_NORM, so results are unchanged; other
     (rise, decay) pairs are normalised exactly.
 
     Args:
@@ -28,7 +32,9 @@ def epsg_unitary(
         The waveform at t.
     """
     if tau == EPSG_TAU:
-        return (1 / 0.21317) * (t > 0) * (np.exp(-t / 0.18) - np.exp(-t / 0.1))
+        return (
+            (1 / EPSG_NORM) * (t > 0) * (np.exp(-t / 0.18) - np.exp(-t / 0.1))
+        )
     rise, decay = tau
     t_peak = np.log(decay / rise) * rise * decay / (decay - rise)
     peak = np.exp(-t_peak / decay) - np.exp(-t_peak / rise)

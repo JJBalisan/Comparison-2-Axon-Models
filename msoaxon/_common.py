@@ -27,6 +27,14 @@ MODEL_TYPES = (
     "active-full",
 )
 
+# The analysis defaults (coincidence, threshold and somatic import them under
+# the same names): the stimulus onset and run length [ms] of the EPSG sweeps,
+# and the spike criterion, a compartment's rise above the soma [mV] (somatic
+# keeps its own longer run).
+START = 5.0
+T_END = 20.0
+FACTOR = 10.0
+
 
 def check_args(
     stim_type: str,

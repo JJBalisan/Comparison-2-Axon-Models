@@ -17,6 +17,13 @@ from msoaxon import _common, _solve, constants as C, synaptic
 # replaced them with.
 GOLDWYN_2019 = {"r1": 8.5, "tau_est": 0.34, "v0": -58.0}
 
+# BDF solver settings of two_cpt (TwoCpt.m's ode15s options). Unlike
+# multi.mso_axon, whose max_step is a fraction of t_end, this model's is a
+# fixed 0.1 ms.
+RTOL = 1e-6
+ATOL = 1e-6
+MAX_STEP = 0.1  # [ms]
+
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class TwoCptParams:
@@ -248,7 +255,8 @@ def applied_current(  # noqa: PLR0911
     if stim_type == "ramp2":
         slope = 1 / (s.stop - s.start)
         return min(
-            s.I, float(t >= 5) * s.I * (t - 5) * slope
+            s.I,
+            float(t >= _solve.RAMP_RISE) * s.I * (t - _solve.RAMP_RISE) * slope,
         )  # start hardcoded to 5
     if stim_type == "sine":
         wave = np.sin(2 * np.pi * s.f * (t - s.start) / 1000)
@@ -386,7 +394,7 @@ def two_cpt(
     stop_on_spike: float | None = None,
     r1: float = 10.0,
     tau_est: float = 0.71,
-    max_step: float = 0.1,
+    max_step: float = MAX_STEP,
     stop_when_settled: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Runs the two-compartment model.
@@ -447,6 +455,9 @@ def two_cpt(
     P = get_params(v0, node, input_node, model_type, r1=r1, tau_est=tau_est)
     s = _common.stimulus(stim_type, start, stop, I, t_end, syn)
     Vr = P.Vrest
+    # unlike multi's rounded _GATE0, every gate starts at its exact steady state
+    # at Vrest (z is frozen there), and get_params subtracts each current's
+    # value at rest, so the model has no rest drift
     x0 = [
         Vr,
         Vr,
@@ -482,8 +493,8 @@ def two_cpt(
         x0,
         t_end,
         cuts,
-        rtol=1e-6,
-        atol=1e-6,
+        rtol=RTOL,
+        atol=ATOL,
         max_step=max_step,
         quiet=quiet,
         stop_event=_common._stops(

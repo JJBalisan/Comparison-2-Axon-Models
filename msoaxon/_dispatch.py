@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from msoaxon import multi, synaptic, two
+from msoaxon import _solve, multi, synaptic, two
 
 
 def run_model(
@@ -162,9 +162,9 @@ def response(
     )
     axon = node - 1 if model == "multi" else 1
     margin = x[:, axon] - x[:, 0]
-    return bool(t[-1] < t_end and margin[-1] > 0.75 * factor), float(
-        margin.max()
-    )
+    return bool(
+        t[-1] < t_end and margin[-1] > _solve.SPIKE_TEST_FRACTION * factor
+    ), float(margin.max())
 
 
 def spikes(
@@ -189,8 +189,9 @@ def spikes(
     end before t_end, so the final state tells them apart: a spike stop
     ends with axon - soma at `factor`, a settled stop at or below
     factor / 2 (see _solve.settled_event). The test sits at
-    0.75 * factor, away from both: the settled event can fire exactly as
-    axon - soma falls through factor / 2, so testing at factor / 2
+    0.75 * factor (_solve.SPIKE_TEST_FRACTION), away from both: the
+    settled event can fire exactly as axon - soma falls through
+    factor / 2 (_solve.SETTLED_FRACTION), so testing at factor / 2
     itself misread three near-threshold ramp runs as spikes.
 
     Args:
@@ -226,7 +227,10 @@ def spikes(
         **kw,
     )
     axon = node - 1 if model == "multi" else 1
-    return bool(t[-1] < t_end and x[-1, axon] - x[-1, 0] > 0.75 * factor)
+    return bool(
+        t[-1] < t_end
+        and x[-1, axon] - x[-1, 0] > _solve.SPIKE_TEST_FRACTION * factor
+    )
 
 
 # the fields of multi.membrane()'s cache key, in order

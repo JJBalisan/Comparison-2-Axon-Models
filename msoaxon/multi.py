@@ -44,7 +44,18 @@ ACTIVE_GATES = {
     "active-KHT": (0, 0, 1, 0, 0, 0),
 }
 
-# initial gating values (steady state at -68 mV, as in msoAxon.m)
+# BDF solver settings of mso_axon (msoAxon.m's ode15s options). max_step is
+# MAX_STEP_FRACTION * t_end unless given: ode15s's default MaxStep.
+RTOL = 1e-8
+ATOL = 1e-8
+MAX_STEP_FRACTION = 0.1
+
+# Initial gating values (m, h, p, w, z, a), as in msoAxon.m: the steady state
+# at -68 mV rounded to two decimals (exact: 0.1192, 0.6699, 0.0006, 0.2868,
+# 0.6646, 0.2244; w and z are 0.01 off). The gates therefore start slightly
+# off steady state, which is the source of the ~0.9 mV drift of the rest
+# potential in membranes built without rebalance_rest. They must stay these
+# literals: the golden traces and the Rust port both start from them.
 _GATE0 = (0.12, 0.67, 0.0, 0.28, 0.67, 0.22)
 
 
@@ -422,10 +433,10 @@ def external_current(  # noqa: PLR0911, PLR0912
     k = input_node - 1
     if stim_type == "ramp":
         slope = 1 / (s.stop - s.start)
-        t_end_local = s.stop + 5  # msoAxon.m rebinds tEnd here
+        t_end_local = s.stop + _solve.RAMP_RISE  # msoAxon.m rebinds tEnd here
         t_top = s.start + 1 / slope
         I0 = float(s.start <= t <= t_top) * s.I * (t - s.start) * slope / 1000
-        if 5 < t <= t_end_local:  # 5 is hardcoded in the original
+        if _solve.RAMP_RISE < t <= t_end_local:  # hardcoded 5 in the original
             return k, -I0 * 1e3 / sa[0]
     elif stim_type == "ramp2":
         slope = 1 / (s.stop - s.start)
@@ -857,9 +868,9 @@ def mso_axon(
         y0,
         t_end,
         cuts,
-        rtol=1e-8,
-        atol=1e-8,
-        max_step=max_step or 0.1 * t_end,
+        rtol=RTOL,
+        atol=ATOL,
+        max_step=max_step or MAX_STEP_FRACTION * t_end,
         jac_sparsity=morph.jac,
         quiet=quiet,
         stop_event=_common._stops(

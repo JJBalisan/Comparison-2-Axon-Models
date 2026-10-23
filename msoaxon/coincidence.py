@@ -32,13 +32,12 @@ from typing import Any
 
 import numpy as np
 
-from msoaxon import _bisect, _dispatch, _fast, _parallel, synaptic
+from msoaxon import _bisect, _common, _dispatch, _fast, _parallel, synaptic
 
-START = 5.0
-T_END = 20.0
-FACTOR = (
-    10.0  # spike = axon rises this far above soma (as in the EPSGpair sweeps)
-)
+START = _common.START
+T_END = _common.T_END
+# spike = axon rises this far above soma (as in the EPSGpair sweeps)
+FACTOR = _common.FACTOR
 HEIGHT_AT = 2.0  # spike_height's run, as a multiple of the 10 mV threshold
 HEIGHT_REL_TOL = 1e-3  # that threshold's tolerance: the height is flat there
 
