@@ -13,6 +13,10 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 pyo3 = { version = "0.25", features = ["abi3-py311"] }
 numpy = "0.25"
+# default-features = false: the `nalgebra`/`faer` features only forward to
+# diffsol-la/-nl, which diffsol already enables unconditionally, so the empty
+# set still gives FaerSparseMat + FaerSparseLU + OdeBuilder + bdf.
+diffsol = { version = "=0.18.0", default-features = false }
 
 [profile.release]
 opt-level = 3

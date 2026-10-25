@@ -159,10 +159,46 @@ fn interp(xs: PyReadonlyArray1<'_, f64>, ys: PyReadonlyArray1<'_, f64>, x: f64) 
     Ok(table.interp(x))
 }
 
+/// Experiment: runs the diffsol sparse Faer BDF solver on a stiff 45-state
+/// chain (x_i' = -k_i x_i + c (x_{i-1} - x_i)) to `t_end` and returns
+/// (x[0] at t_end, number of steps taken). Only here so the linker keeps
+/// diffsol's code while the packaging cost is measured.
+#[pyfunction]
+fn diffsol_probe(t_end: f64) -> PyResult<(f64, usize)> {
+    use diffsol::{DenseMatrix, FaerSparseLU, FaerSparseMat, OdeBuilder, OdeSolverMethod};
+    const N: usize = 45;
+    let err = |e: diffsol::DiffsolError| PyValueError::new_err(e.to_string());
+    let problem = OdeBuilder::<FaerSparseMat<f64>>::new()
+        .rhs_implicit(
+            |x, _p, _t, y| {
+                for i in 0..N {
+                    let k = 1.0 + 100.0 * i as f64;
+                    let left = if i > 0 { x[i - 1] - x[i] } else { 0.0 };
+                    y[i] = -k * x[i] + left;
+                }
+            },
+            |_x, _p, _t, v, y| {
+                for i in 0..N {
+                    let k = 1.0 + 100.0 * i as f64;
+                    let left = if i > 0 { v[i - 1] - v[i] } else { 0.0 };
+                    y[i] = -k * v[i] + left;
+                }
+            },
+        )
+        .init(|_p, _t, y| y.fill(1.0), N)
+        .build()
+        .map_err(err)?;
+    let mut solver = problem.bdf::<FaerSparseLU<f64>>().map_err(err)?;
+    let (ys, ts, _) = solver.solve(t_end).map_err(err)?;
+    let last = ts.len().saturating_sub(1);
+    Ok((ys.get_index(0, last), ts.len()))
+}
+
 /// The Rust right-hand side of msoaxon's 45-compartment model.
 #[pymodule]
 fn msoaxon_fast(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<MultiRhs>()?;
     m.add_function(wrap_pyfunction!(interp, m)?)?;
+    m.add_function(wrap_pyfunction!(diffsol_probe, m)?)?;
     Ok(())
 }
