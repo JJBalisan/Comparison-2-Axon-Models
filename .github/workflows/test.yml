@@ -88,8 +88,11 @@ jobs:
         os: [ubuntu-24.04, macos-26]
     steps:
       - uses: actions/checkout@v5
+      # the toolchain is pinned (rust/rust-toolchain.toml says why); the
+      # action stays on its major tag, the compiler version is its input
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.99.1
           components: rustfmt, clippy
       - uses: astral-sh/setup-uv@v7
         with:
