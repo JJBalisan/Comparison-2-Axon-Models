@@ -532,11 +532,12 @@ experiments (next section), the spike matches mature cells.
 
 Each item has an issue (label `literature-2026-10`):
 
-- glycinergic inhibition: no inhibitory conductance or reversal anywhere
+- glycinergic inhibition as a protocol: an inhibitory event is one `Event`
+  with a reversal below rest (below), but no `dt_inh` axis on the window yet
   (#77)
-- stochastic, history-bearing input: fibre counts, Poisson arrivals, pre-pulse
-  trains; `probability_trials` jitters a pair and `Synaptic` is one filtered
-  noise table (#78)
+- protocols on the event-list input (below): fibre counts, Poisson arrivals,
+  pre-pulse trains, and reaching it from the searches, which build their own
+  `SynParams`; and its Rust right-hand side (#78)
 - axon geometry as parameters: internode length, diameter, node length, AIS
   length and start and myelin capacitance are folded into the constants
   (#81)
@@ -628,6 +629,46 @@ than the spike.
   removing KLT makes the cell fire with no input.
 
 The defaults are `msoAxon.m`'s membrane, unchanged.
+
+## Event-list input
+
+`stim_type="Events"` drives either model with any number of synaptic
+conductance events, each an `msoaxon.Event(t, node, g, tau, e_rev)`: an
+EPSG-shaped conductance (`epsg_unitary`, peak `g` nS) from onset `t`,
+entering compartment `node` with reversal `e_rev` and its own `(rise, decay)`.
+Events add, never end, and may share a compartment or an onset. The run's `I`
+scales every peak, so `I=1.0` uses them as given; `start`, `stop` and
+`input_node` are ignored. Pass them in `SynParams(events=(...))`:
+
+```python
+syn = msoaxon.SynParams(
+    t_end=20.0,
+    events=(
+        msoaxon.Event(4.7, 1, 30.0, (0.28, 1.5), -80.0),  # a leading IPSG
+        msoaxon.Event(5.0, 1, 50.0),  # the EPSG pair
+        msoaxon.Event(5.2, 1, 50.0),
+    ),
+)
+t, x = msoaxon.two_cpt("Events", 0, 0, 1.0, 3, "active-full", 20, -68, 1, syn)
+```
+
+What it shares with the other stimuli: every onset is a breakpoint, the
+stimulus-free prefix before the first onset is cached, the settled stop uses
+the slowest event's decay, and `two_cpt` maps node 1 to the soma and any other
+node to the axon. Two things it does differently, on purpose:
+
+- **It is not bit-identical to `EPSGpair`.** The pair multiplies amplitude and
+  driving force after summing its two waveforms; a list sums per event. The
+  right-hand sides agree to 1e-12, and a single event is bit-identical to the
+  matching `EPSG` (`tests/test_events.py`). The old names keep their own code
+  paths, which the golden traces pin.
+- **Each event drives its own compartment**, in `two_cpt` too, where `EPSG`
+  keeps `TwoCptODE.m`'s soma driving force even for axonal input.
+
+Not yet: the Rust right-hand side (`mode="fast"` falls back to `"exact"` with
+a warning), the searches (`coincidence`, `somatic` build their own
+`SynParams`), and a breakpoint policy for dense lists, where a Casarez-style
+hundred-synapse drive would mean hundreds of solver restarts (#78).
 
 ## Dendrites
 

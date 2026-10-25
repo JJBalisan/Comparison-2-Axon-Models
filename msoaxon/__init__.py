@@ -22,13 +22,14 @@ from msoaxon.initiation import (
     sustained_input,
 )
 from msoaxon.multi import mso_axon
-from msoaxon.synaptic import SynParams
+from msoaxon.synaptic import Event, SynParams
 from msoaxon.two import two_cpt
 
 __version__ = importlib.metadata.version("msoaxon")
 
 __all__ = [
     "DriftWarning",
+    "Event",
     "Fractions",
     "Spike",
     "SynParams",

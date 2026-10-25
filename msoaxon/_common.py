@@ -15,6 +15,7 @@ STIM_TYPES = (
     "SynapticPair",
     "EPSG",
     "EPSGpair",
+    "Events",
 )
 MODEL_TYPES = (
     "passive",
@@ -118,6 +119,9 @@ class Stimulus:
             stop + _solve.RAMP_RISE; "ramp" only.
         two_pi_f: Angular frequency of the sine [rad/s], 2 * pi * f;
             "sine" only.
+        events: synaptic.event_arrays of the event list; "Events" only.
+            For it, start and stop are the first and last onset, and I
+            scales every event's peak.
 
     The last five are derived once here instead of on every right-hand
     side call, and are named after the Rust port's fields. Each is the
@@ -140,6 +144,7 @@ class Stimulus:
     t_top: float | None = None
     t_end_local: float | None = None
     two_pi_f: float | None = None
+    events: dict[str, np.ndarray] | None = None
 
 
 def stimulus(
@@ -155,18 +160,32 @@ def stimulus(
     Args:
         stim_type: The stimulus name; "sine" and the synaptic inputs
             take extra settings from `syn`.
-        start: Stimulus start [ms].
-        stop: Stimulus stop [ms] (its meaning depends on stim_type).
-        I: Stimulus amplitude (pA or nS, depending on stim_type).
+        start: Stimulus start [ms]; "Events" replaces it with the first
+            onset.
+        stop: Stimulus stop [ms] (its meaning depends on stim_type);
+            "Events" replaces it with the last onset.
+        I: Stimulus amplitude (pA or nS, depending on stim_type); the
+            scale of every event's peak for "Events".
         t_end: End of the run [ms].
         syn: A SynParams with the waveform settings.
 
     Returns:
         A Stimulus with start, stop, I, t_end, epsg_tau and inv_peak,
         plus f and two_pi_f for "sine", slope for "ramp" and "ramp2"
-        with t_top and t_end_local for "ramp", and t_syn, g_syn, VsynE
-        and diff for the synaptic inputs (None for the other stimuli).
+        with t_top and t_end_local for "ramp", t_syn, g_syn, VsynE and
+        diff for the synaptic inputs, and events for "Events" (None for
+        the other stimuli).
+
+    Raises:
+        ValueError: For "Events" with no event (see synaptic.check_events
+            for the full check the models run).
     """
+    events = None
+    if stim_type == "Events":
+        if not syn.events:
+            raise ValueError('"Events" needs at least one Event in syn.events')
+        events = synaptic.event_arrays(tuple(syn.events))
+        start, stop = float(events["t"].min()), float(events["t"].max())
     f = syn.f if stim_type == "sine" else None
     two_pi_f = 2 * np.pi * f if f is not None else None
     slope = t_top = t_end_local = None
@@ -195,6 +214,7 @@ def stimulus(
         t_top=t_top,
         t_end_local=t_end_local,
         two_pi_f=two_pi_f,
+        events=events,
     )
 
 
@@ -219,7 +239,12 @@ def _stops(
     events = [_solve.spike_event(axon_col, stop_on_spike)]
     if stop_when_settled:
         t_off = _solve.input_end(
-            stim_type, s.start, s.stop, s.t_end, s.epsg_tau
+            stim_type,
+            s.start,
+            s.stop,
+            s.t_end,
+            s.epsg_tau,
+            ev_decay=None if s.events is None else s.events["decay"],
         )
         if t_off < s.t_end:
             events.append(
