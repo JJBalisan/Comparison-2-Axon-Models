@@ -1,0 +1,10 @@
+# The Rust toolchain the crate is built and linted with, locally and in CI.
+# Pinned (not "stable") so a new clippy lint or codegen change cannot turn a
+# PR red without a code change; the fast-mode self-check is bit-identical to
+# the numpy reference on each platform and a compiler bump can move those
+# bits. Bump here, in rust/Cargo.toml's rust-version and in the two workflow
+# files together, as its own PR, after running cargo clippy and the fast
+# tests on it.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
