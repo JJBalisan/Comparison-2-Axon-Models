@@ -250,3 +250,30 @@ def test_two_initial_state_equals_the_old_inline_code(v0, model_type):
     assert new.dtype == old.dtype
     assert np.array_equal(new, old)
     assert new.tobytes() == old.tobytes()
+
+
+@pytest.mark.parametrize(
+    "bundle",
+    [
+        multi.LUMPED,
+        multi.with_dendrites(),
+        multi.membrane(-68.0),
+        multi.membrane(-60.0, soma_klt_scale=0.5, rebalance_rest=True),
+        multi.membrane(-68.0, morph=multi.with_dendrites()),
+    ],
+    ids=["lumped", "dendrites", "membrane", "rebalanced", "dendritic-mem"],
+)
+def test_bundle_arrays_are_read_only(bundle):
+    # a mutated bundle would poison the quiet-prefix cache and the spike
+    # heights, which are keyed by the bundle's settings
+    arrays = []
+    for field in dataclasses.fields(bundle):
+        value = getattr(bundle, field.name)
+        for a in value if isinstance(value, tuple) else (value,):
+            if isinstance(a, np.ndarray):
+                arrays.append(a)
+    assert arrays
+    for a in arrays:
+        assert not a.flags.writeable
+        with pytest.raises(ValueError, match="read-only"):
+            a[...] = 0

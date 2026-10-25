@@ -48,14 +48,36 @@ def pool_context(
     return ctx
 
 
+def worker_init(
+    env_mode: str | None, warned: bool, stop_when_settled: bool
+) -> None:
+    """Gives a new pool worker this process's module state.
+
+    The MSOAXON_MODE and DriftWarning state (_fast.inherit) and
+    _dispatch.STOP_WHEN_SETTLED, which scripts/benchmark_search.py
+    toggles: a forkserver or spawned worker would otherwise keep the
+    import defaults.
+
+    Args:
+        env_mode: The parent's MSOAXON_MODE (None if unset).
+        warned: Whether the parent issued the DriftWarning.
+        stop_when_settled: The parent's _dispatch.STOP_WHEN_SETTLED.
+    """
+    from msoaxon import _dispatch  # noqa: PLC0415  (imports _parallel)
+
+    _fast.inherit(env_mode, warned)
+    _dispatch.STOP_WHEN_SETTLED = stop_when_settled
+
+
 def process_pool(
     max_workers: int | None = None,
 ) -> futures.ProcessPoolExecutor:
     """Returns a ProcessPoolExecutor using pool_context().
 
     Use this for every worker pool. Workers adopt this process's
-    MSOAXON_MODE and DriftWarning state (_fast.inherit): a forkserver
-    worker would otherwise see the environment of the server's start.
+    MSOAXON_MODE and DriftWarning state and its STOP_WHEN_SETTLED
+    (worker_init): a forkserver worker would otherwise see the state of
+    the server's start.
 
     Args:
         max_workers: The number of processes (default: all CPUs).
@@ -63,11 +85,13 @@ def process_pool(
     Returns:
         A concurrent.futures.ProcessPoolExecutor.
     """
+    from msoaxon import _dispatch  # noqa: PLC0415  (imports _parallel)
+
     return futures.ProcessPoolExecutor(
         max_workers=max_workers,
         mp_context=pool_context(),
-        initializer=_fast.inherit,
-        initargs=_fast.parent_state(),
+        initializer=worker_init,
+        initargs=(*_fast.parent_state(), _dispatch.STOP_WHEN_SETTLED),
     )
 
 

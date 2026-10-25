@@ -8,6 +8,7 @@ fake or hide the extension).
 """
 
 import multiprocessing
+import os
 import platform
 import sys
 import warnings
@@ -269,22 +270,34 @@ def test_runs_are_bit_identical_here(name):
 
 
 @needs_ext
-def test_self_check_passes_and_is_cheap():
-    import time  # noqa: PLC0415
-
-    best = np.inf
-    for _ in range(3):
-        t0 = time.perf_counter()
-        differ, total, worst = _fast.self_check()
-        best = min(best, time.perf_counter() - t0)
+def test_self_check_passes():
+    differ, total, worst = _fast.self_check()
     assert total == 24
-    assert best < 0.05
     if BITWISE:
         assert (differ, worst) == (0, 0.0)
     else:
         # elementwise, so cancellation in (x_inf - x) / tau shows; GitHub's
         # ubuntu x86_64 runner measured 2.7e-13 (every state differed)
         assert worst < 1e-10
+
+
+@needs_ext
+def test_self_check_is_cheap():
+    # a wall-clock bound, so it is skipped (not loosened) when the machine
+    # is busier than its CPUs: it read 0.45 s at a load average near 180
+    import time  # noqa: PLC0415
+
+    getloadavg = getattr(os, "getloadavg", None)
+    if getloadavg is not None:
+        load, cpus = getloadavg()[0], os.cpu_count() or 1
+        if load > cpus:
+            pytest.skip(f"load average {load:.0f} on {cpus} CPUs")
+    best = np.inf
+    for _ in range(3):
+        t0 = time.perf_counter()
+        _fast.self_check()
+        best = min(best, time.perf_counter() - t0)
+    assert best < 0.05
 
 
 # --- Table::interp against np.interp -----------------------------------------
@@ -518,6 +531,43 @@ def test_pool_workers_inherit_the_mode_env(monkeypatch, no_env):
     with _parallel.process_pool(1) as pool:
         state = pool.submit(_fast.parent_state).result()
     assert state == ("exact", True)
+
+
+@pytest.mark.skipif(
+    "forkserver" not in multiprocessing.get_all_start_methods(),
+    reason="no forkserver start method (Windows); the spawn path is covered",
+)
+def test_pool_workers_inherit_the_settled_stop(monkeypatch):
+    ctx = multiprocessing.get_context("forkserver")
+    monkeypatch.setattr(_parallel, "pool_context", lambda: ctx)
+    for value in (False, True):
+        monkeypatch.setattr(_dispatch, "STOP_WHEN_SETTLED", value)
+        with _parallel.process_pool(1) as pool:
+            assert pool.submit(_dispatch.settled_stop).result() is value
+
+
+def test_a_missing_extension_imports_silently():
+    def missing(name):
+        raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert _fast._import_ext(missing) is None
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ImportError("dlopen(msoaxon_fast.abi3.so): symbol not found"),
+        ModuleNotFoundError("No module named 'numpy.core'", name="numpy.core"),
+    ],
+)
+def test_a_broken_extension_warns_and_falls_back(error):
+    def broken(name):
+        raise error
+
+    with pytest.warns(UserWarning, match="installed but failed to import"):
+        assert _fast._import_ext(broken) is None
 
 
 def test_inherit_unsets_a_stale_env(monkeypatch):
