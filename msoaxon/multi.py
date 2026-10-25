@@ -485,13 +485,13 @@ def external_current(  # noqa: PLR0911, PLR0912
     elif stim_type == "Synaptic":
         if s.start < t <= s.stop:
             g = synaptic.interp_g(s.t_syn, s.g_syn, t)
-            return k, g * (V[0] - s.VsynE) / sa[0]
+            return k, g * (V[k] - s.VsynE) / sa[0]
     elif stim_type == "SynapticPair":
         if s.start < t <= s.stop:
             g = synaptic.interp_g(s.t_syn, s.g_syn, t) + synaptic.interp_g(
                 s.t_syn, s.g_syn, t + s.diff
             )
-            return k, g * (V[0] - s.VsynE) / sa[0]
+            return k, g * (V[k] - s.VsynE) / sa[0]
     elif stim_type == "EPSG":
         te = t - s.start
         if s.start < t <= s.stop:

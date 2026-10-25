@@ -8,8 +8,9 @@
 //! two terminal events of `_solve` (`spike_event`, `settled_event`).
 //!
 //! The pattern is `core::tree_jac_sparsity` of the run's own morphology
-//! plus the stimulus's own coupling (`MultiRhs::stim_jac_entries`), handed to diffsol through a hand-written `OdeEquations` (diffsol's
-//! builder can only detect one, by NaN probes); the Jacobian is filled by
+//! (every stimulus couples a compartment only to itself), handed to diffsol
+//! through a hand-written `OdeEquations` (diffsol's builder can only detect
+//! one, by NaN probes); the Jacobian is filled by
 //! forward-difference `Jv` products, one per colour of that pattern.
 //! `max_step` is not a diffsol option: it is emulated with stop-time hops,
 //! set only when the next step would be longer.
@@ -245,11 +246,7 @@ impl Integrator {
         let nstates = 7 * rhs.n();
         let (parent, child) = rhs.edges();
         let (rows, cols) = tree_jac_sparsity(rhs.n(), parent, child);
-        let mut pairs: Vec<(usize, usize)> = rows.into_iter().zip(cols).collect();
-        // plus the stimulus's own coupling, kept in CSC order
-        pairs.extend(rhs.stim_jac_entries());
-        pairs.sort_unstable_by_key(|&(r, c)| (c, r));
-        pairs.dedup();
+        let pairs: Vec<(usize, usize)> = rows.into_iter().zip(cols).collect();
         let ctx = C::default();
         let sparsity = <<M as Matrix>::Sparsity as MatrixSparsity<M>>::try_from_indices(
             nstates,
@@ -424,11 +421,11 @@ mod tests {
     }
 
     #[test]
-    fn a_synaptic_input_off_the_soma_adds_its_soma_column_entry() {
-        // (1, 0) is a chain entry already; (2, 0) is not
-        assert_eq!(Integrator::new(synaptic_model(0)).unwrap().nnz(), 943);
-        assert_eq!(Integrator::new(synaptic_model(1)).unwrap().nnz(), 943);
-        assert_eq!(Integrator::new(synaptic_model(2)).unwrap().nnz(), 944);
+    fn a_synaptic_input_off_the_soma_adds_no_entry() {
+        // the input drives its own compartment, a diagonal entry already
+        for k in 0..3 {
+            assert_eq!(Integrator::new(synaptic_model(k)).unwrap().nnz(), 943);
+        }
     }
 
     #[test]

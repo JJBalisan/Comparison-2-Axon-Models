@@ -200,9 +200,8 @@ spike decisions). The first native run in a process issues its own
 
 **Jacobian.** diffsol is given the pattern explicitly, not left to detect it:
 `core::tree_jac_sparsity` of the run's own morphology (the Rust twin of
-`multi._tree_jac_sparsity`) plus the one entry a stimulus adds, dV[k]/dV[0] for
-a synaptic input at compartment k (its driving force is the soma's); scipy's
-pattern lacks that entry. The Jacobian is filled by forward-difference
+`multi._tree_jac_sparsity`; every stimulus couples a compartment only to
+itself). The Jacobian is filled by forward-difference
 products `J v` on two right-hand-side calls (step `1e-7 (1 + max |x|)`), one
 per colour of the pattern.
 
