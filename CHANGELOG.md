@@ -6,6 +6,66 @@ and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least. The `msoaxon-fast` crate in `rust/` carries the
 same version as the package, bumped in the same release PR.
 
+## 1.4.0 (25 Oct 2026)
+
+The last batch before the Rust port (#28): a general synaptic input, a
+measurement of where spikes start, two corrected helpers, documentation
+brought up to the 25 Oct 2026 literature review, and a CI that can hold long
+port runs. Model results are unchanged: the golden traces, the 28 pinned
+thresholds, the somatic table and the benchmark's 300 runs all hold. Only
+`measure.passive_step` on a membrane that is not rest-balanced returns
+different, now correct, numbers.
+
+### Added
+
+- `stim_type="Events"` for both models: a list of synaptic conductance events
+  (`msoaxon.Event`, in `SynParams.events`), each with its own onset,
+  compartment, peak, kinetics and reversal, so inhibitory and multi-fibre
+  inputs can be composed; every onset is a breakpoint and the settled stop and
+  quiet-prefix cache apply. It sits beside the EPSG stimuli rather than
+  replacing them, whose float order the golden traces pin; a single event is
+  bit-identical to `EPSG`. `mode="fast"` falls back to `"exact"` with a
+  warning until the Rust side follows (#78).
+- `msoaxon.initiation`: reads which compartment of the 45-compartment model
+  fires first for each spike (`find_spikes`, `group_fractions`,
+  `sustained_input`), with `scripts/initiation_site.py` sweeping input
+  frequency and conductance. PYTHON.md's spike initiation row is now a
+  measurement: the AIS for an EPSG pair, and 1–8% of spikes at node 1 or 2
+  under sustained input at the default drive (#80).
+
+### Changed
+
+- The Rust toolchain is pinned to 1.99.1 (`rust/rust-toolchain.toml`,
+  `rust-version`, and the CI and wheels workflows) so compiler releases cannot
+  change CI results or the extension's bits unasked.
+- CI: every job has a `timeout-minutes`, runners are pinned (`ubuntu-24.04`,
+  `macos-26`, `windows-2025-vs2026`), and the suite also runs on Windows and
+  Python 3.14. The two tests that need a forkserver context are skipped on
+  Windows (#70).
+- PYTHON.md follows the 25 Oct 2026 literature review: the "Missing relative
+  to current models" list names each remaining gap with its issue; the
+  input-resistance benchmark names the membrane behind each value (2.4 / 4.7
+  MΩ rebalanced, 2.5 / 4.8 MΩ default); the best-frequency row compares
+  against Mikiel-Hunter 2016's 285 / 317 Hz; the coincidence-window findings,
+  the `soma_na_vhalf` note (33% of somatic Na inactivated at rest against
+  Scott 2010's 92%) and the dendrites section carry their literature targets;
+  and a section documents the event-list input (#87).
+
+### Fixed
+
+- `measure.passive_step` gave wrong input resistance and time constant on a
+  membrane that is not rest-balanced (61 / 69 MΩ and τ 0 for the default
+  membrane, instead of about 2.5 / 4.8 MΩ and 0.12 ms) and for a positive
+  step current: it subtracted `v0` rather than the drift-free baseline and
+  assumed a negative step. It now subtracts an identical run without the
+  step, works for either sign of `I`, and raises `ValueError` for `I == 0`.
+  Results on rest-balanced membranes, and so the dendrites table, are
+  unchanged (#68).
+- `coincidence.threshold`, `threshold_curve`, `window`, `somatic.rheobase`
+  and `threshold.binary_search` raise `ValueError` for a `guess`, `rel_tol`,
+  `delay_tol` or `zoom` that is not > 0 (and `_bisect.smallest_crossing` for
+  a `descent` not > 1), instead of searching for ever (#69).
+
 ## 1.3.3 (23 Oct 2026)
 
 Preparation for the Rust port (#28): every number the port must copy has one
