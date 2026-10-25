@@ -482,10 +482,46 @@ Values are for the Python port.
 | | Model | Literature |
 |---|---|---|
 | EPSP half-width at soma | 523–549 µs | 0.52–0.6 ms; PSP half-width 467 µs with the 0.3 ms EPSG (Myoga et al. 2014) |
-| Spike initiation site | AIS by construction: nothing measures which compartment crosses first (#80) | AIS; 5–60% of spikes start at node 1 or 2 under sustained input (Lehnert 2014) |
+| Spike initiation site | AIS (compartment 3) for an EPSG pair at 1.25–3× threshold; under sustained input 0–36% of spikes start at node 1 or 2 where 50 or more spikes fired, 8% at 350 Hz and the default `gE` (`initiation.py`, #80) | AIS; 5–60% of spikes start at node 1 or 2 under sustained input (Lehnert 2014) |
 | Input resistance, active, at rest | 2.4 MΩ steady, ~4.7 MΩ peak | 5 MΩ (Lehnert's model); ~7 MΩ measured |
 | Somatic spike, from inflection (100 ms step) | 7.4 / 13.3 / 18.2 mV at 1.5× / 2× / 3× rheobase | 17 ± 2 mV mature, 5–15 mV near threshold, graded |
 | Best frequency for half-wave sine input | 400–500 Hz | spike resonance 285 Hz, EPSC-train threshold minimum 317 Hz; subthreshold resonance 242 Hz (Mikiel-Hunter et al. 2016, [doi](https://doi.org/10.1371/journal.pcbi.1005166)); a suprathreshold measure belongs against the first two (#83) |
+
+The initiation site is read from a finished run by `msoaxon.initiation`. It
+cannot use a fraction of each compartment's own peak: the input enters at the
+soma, so the EPSP half-rises before the AIS has fired (60 nS pair: soma 5.15 ms,
+AIS 5.33 ms). Instead each spike gets the time of the steepest rise (peak dV/dt)
+of every AIS and node compartment, taken just before the steepest rise of the
+last node, and the site is the earliest. A compartment that rises no faster than
+the soma did is following the EPSP and does not count. The AIS leads node 1 by
+about 20 µs when it initiates.
+
+Fraction of spikes starting at node 1 or 2 (spikes pooled over 3 noise seeds of
+200 ms; `uv run scripts/initiation_site.py`):
+
+| `gE` | 200 Hz | 350 Hz | 500 Hz | 800 Hz |
+|---|---|---|---|---|
+| 0.65e7 | 10% (103) | 36% (80) | no spikes | no spikes |
+| 1.3e7 (default) | 1% (111) | 8% (165) | 50% (10) | no spikes |
+| 2.6e7 | 1% (114) | 3% (191) | 11% (111) | no spikes |
+| 5.2e7 | 0% (116) | 1% (197) | 4% (223) | no spikes |
+| 1.04e8 | 0% (117) | 1% (201) | 1% (267) | 1 spike |
+
+Spike counts are in brackets. Distal initiation grows as the drive weakens, and
+only the weakly driven cells (350 Hz at 0.65e7, 500 Hz at 1.3e7) reach into
+Lehnert's 5–60%; 800 Hz hardly fires at all. Of 39 spikes that started beyond
+the AIS in the 350 Hz / 0.65e7 (3 seeds), 500 Hz / 1.3e7 (3 seeds) and 200 Hz /
+0.65e7 (1 seed) runs, 14 had no AIS upstroke at all (the AIS was only dragged
+along), and 12 of the other 25 led the AIS by under 10 µs. Node 1 and node 2 are
+not told apart that finely. The pair protocol is AIS from 1.25× threshold up; at
+1.02–1.05× node 1 leads the AIS by 0–11 µs, a tie at the criterion's resolution.
+
+The 36% (350 Hz, 0.65e7) depends on how far ahead of the last node's upstroke
+the others are searched: 38% for 0.4 ms, 36% for 0.6 ms (used), 23% for 0.8 ms
+and 5% for 1.0 ms. The AIS leads the last node by 0.35–0.4 ms, and past that an
+EPSP's own peak in the AIS starts to pass for its upstroke. The share does not
+move with the other settings tried (the 60 mV rise that marks a spike, 40–80 mV;
+how high a dV/dt peak must be to count, 30–90% of the highest).
 
 An earlier version of this table listed a ~40 mV somatic spike as the clearest
 mismatch. That figure was measured from rest during an EPSG pair at 2×
