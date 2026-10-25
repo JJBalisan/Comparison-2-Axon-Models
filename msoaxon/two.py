@@ -296,6 +296,32 @@ def applied_current(  # noqa: PLR0911
     raise ValueError(f"unknown stimType {stim_type!r}")
 
 
+def event_currents(
+    t: float, V1: float, V2: float, s: _common.Stimulus
+) -> tuple[float, float]:
+    """Returns the "Events" input currents [pA] into the soma and the axon.
+
+    Each event drives its own compartment (node 1 the soma, any other
+    the axon), with the driving force there; positive depolarises, as
+    applied_current's values do. (EPSG and EPSGpair keep TwoCptODE.m's
+    soma driving force even for axonal input; see the table above
+    multi.external_current.)
+
+    Args:
+        t: Time [ms].
+        V1: Soma voltage [mV].
+        V2: Axon voltage [mV].
+        s: The stimulus settings (_common.stimulus), with s.events.
+
+    Returns:
+        (Iapp1, Iapp2).
+    """
+    ev = s.events
+    soma = ev["k"] == 0
+    i = synaptic.event_currents(t, np.where(soma, V1, V2), ev, s.I)
+    return float(i[soma].sum()), float(i[~soma].sum())
+
+
 def _dv(
     t: float,
     x: np.ndarray,
@@ -325,8 +351,11 @@ def _dv(
     IKLT2 = P.gKLT2 * w2**4 * z * (V2 - P.EK) - P.IKLT0_2
     Ih2 = P.gh2 * a2 * (V2 - P.Vh) - P.Ih0_2
     IC = P.gC * (V1 - V2)
-    Iapp = applied_current(t, V1, stim_type, s)
-    Iapp1, Iapp2 = (Iapp, 0.0) if P.IappLoc == 1 else (0.0, Iapp)
+    if stim_type == "Events":
+        Iapp1, Iapp2 = event_currents(t, V1, V2, s)
+    else:
+        Iapp = applied_current(t, V1, stim_type, s)
+        Iapp1, Iapp2 = (Iapp, 0.0) if P.IappLoc == 1 else (0.0, Iapp)
     return [
         (-Ilk1 - IKLT1 - IC + Iapp1 - INa1 - Ih1 - IKHT) / P.cap1,
         (-Ilk2 - IKLT2 + IC + Iapp2 - INa2 - Ih2) / P.cap2,
@@ -362,8 +391,11 @@ def _rhs(
     Ih2 = P.gh2 * a2 * (V2 - P.Vh) - P.Ih0_2
 
     IC = P.gC * (V1 - V2)  # coupling current, soma to axon
-    Iapp = applied_current(t, V1, stim_type, s)
-    Iapp1, Iapp2 = (Iapp, 0.0) if P.IappLoc == 1 else (0.0, Iapp)
+    if stim_type == "Events":
+        Iapp1, Iapp2 = event_currents(t, V1, V2, s)
+    else:
+        Iapp = applied_current(t, V1, stim_type, s)
+        Iapp1, Iapp2 = (Iapp, 0.0) if P.IappLoc == 1 else (0.0, Iapp)
 
     # same order as the state vector; the gates relax to steady state with the
     # shared time constants in constants.py
@@ -441,7 +473,11 @@ def two_cpt(
       2 (the axon); step, ramp and sine are on for start <= t < stop (or
       <= stop) rather than start < t <= stop;
     - ramp2 always starts at t = 5, whatever `start` is;
-    - EPSG is not cut off at stop.
+    - EPSG is not cut off at stop;
+    - "Events" (syn.events, see synaptic.Event): node 1 is the soma and
+      any other node the axon compartment, each event with the driving
+      force at its own compartment; I scales every peak; start, stop
+      and input_node are ignored.
 
     Args:
         stim_type: One of _common.STIM_TYPES.
@@ -486,10 +522,20 @@ def two_cpt(
         stop=stop,
     )
     syn = syn or synaptic.SynParams(t_end=t_end)
+    if stim_type == "Events":
+        synaptic.check_events(tuple(syn.events), C.N_CPT, t_end)
     P = get_params(v0, node, input_node, model_type, r1=r1, tau_est=tau_est)
     s = _common.stimulus(stim_type, start, stop, I, t_end, syn)
+    if stim_type == "Events":
+        start, stop = s.start, s.stop  # the first and last onset
     x0 = initial_state(P)
-    cuts = _solve.breakpoints(stim_type, start, stop, t_end)
+    cuts = _solve.breakpoints(
+        stim_type,
+        start,
+        stop,
+        t_end,
+        onsets=() if s.events is None else s.events["t"],
+    )
     quiet = None
     # step and the synaptic inputs are already on at t == start (TwoCptODE uses
     # t >= start), and the first segment's last step evaluates there, so sharing

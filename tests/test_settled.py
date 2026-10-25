@@ -39,6 +39,21 @@ STIMULI = (
     ("EPSGpair", 5.0, 5.2, 100.0, 1, None, {}),
     ("EPSGpair", 5.0, 5.3, 49.0, 3, None, {"epsg_tau": MYOGA}),
     ("EPSGbilateral", 5.0, 5.2, 60.0, 1, 3, {}),
+    (
+        "Events",
+        5.0,
+        5.2,
+        1.0,
+        1,
+        None,
+        {
+            "events": (
+                synaptic.Event(5.0, 1, 60.0),
+                synaptic.Event(5.2, 3, 40.0, MYOGA),
+                synaptic.Event(4.8, 1, 30.0, (0.28, 1.5), -80.0),
+            )
+        },
+    ),
 )
 
 

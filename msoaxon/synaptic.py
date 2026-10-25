@@ -18,6 +18,126 @@ EPSG_NORM = 0.21317
 EPSG_T_FLOOR = -1.0
 
 
+@dataclasses.dataclass(frozen=True)
+class Event:
+    """One synaptic conductance event of the "Events" stimulus.
+
+    The conductance is g times the unitary EPSG waveform (epsg_unitary,
+    peak 1) from t, driving the compartment's voltage towards e_rev; an
+    event never ends (it decays). Events add; any number may share a
+    compartment or an onset.
+
+    Attributes:
+        t: Onset [ms], at or after 0 and before the run's t_end.
+        node: The compartment it enters, 1-indexed. In two_cpt, 1 is the
+            soma and anything else the axon compartment.
+        g: Peak conductance [nS]; mso_axon's and two_cpt's `I` scales
+            every event's g, so pass I=1.0 to use the peaks as given.
+        tau: The (rise, decay) time constants [ms], 0 < rise < decay.
+        e_rev: Reversal potential [mV]: 0 for an EPSG, below rest for a
+            glycinergic IPSG.
+    """
+
+    t: float
+    node: int = 1
+    g: float = 1.0
+    tau: tuple[float, float] = EPSG_TAU
+    e_rev: float = 0.0
+
+
+def check_events(
+    events: tuple[Event, ...], n_max: int | None, t_end: float
+) -> None:
+    """Rejects an "Events" list the right-hand sides could not evaluate.
+
+    Args:
+        events: The SynParams.events tuple.
+        n_max: The number of compartments an event may enter, or None
+            to skip that check.
+        t_end: End of the run [ms].
+
+    Raises:
+        ValueError: If there is no event, a node is out of range, an
+            onset is before 0 or not before t_end, rise is not below
+            decay (epsg_inv_peak divides by their difference) or either
+            is not positive, or g or e_rev is not finite.
+    """
+    if not events:
+        raise ValueError('"Events" needs at least one Event in syn.events')
+    for i, e in enumerate(events):
+        rise, decay = e.tau
+        if n_max is not None and not 1 <= e.node <= n_max:
+            raise ValueError(
+                f"events[{i}].node must be 1..{n_max} (1-indexed), got {e.node}"
+            )
+        if not 0 <= e.t < t_end:
+            raise ValueError(
+                f"events[{i}].t must be in [0, t_end={t_end}), got {e.t}"
+            )
+        if not 0 < rise < decay:
+            raise ValueError(
+                f"events[{i}].tau needs 0 < rise < decay, got {e.tau}"
+            )
+        if not (np.isfinite(e.g) and np.isfinite(e.e_rev)):
+            raise ValueError(
+                f"events[{i}] needs finite g and e_rev, got {e.g}, {e.e_rev}"
+            )
+
+
+def event_arrays(events: tuple[Event, ...]) -> dict[str, np.ndarray]:
+    """Lays the events out as read-only arrays for the right-hand sides.
+
+    Args:
+        events: The SynParams.events tuple (see check_events).
+
+    Returns:
+        dict with t, k (0-based compartment), g, rise, decay, inv_peak
+        (epsg_inv_peak per event) and e_rev, one entry per event.
+    """
+    out = {
+        "t": np.array([e.t for e in events], dtype=float),
+        "k": np.array([e.node - 1 for e in events], dtype=np.intp),
+        "g": np.array([e.g for e in events], dtype=float),
+        "rise": np.array([e.tau[0] for e in events], dtype=float),
+        "decay": np.array([e.tau[1] for e in events], dtype=float),
+        "inv_peak": np.array(
+            [epsg_inv_peak(tuple(e.tau)) for e in events], dtype=float
+        ),
+        "e_rev": np.array([e.e_rev for e in events], dtype=float),
+    }
+    for a in out.values():
+        a.flags.writeable = False
+    return out
+
+
+def event_currents(
+    t: float, v: np.ndarray, ev: dict[str, np.ndarray], scale: float
+) -> np.ndarray:
+    """Returns each event's current [pA] at time t; positive depolarises.
+
+    scale * g * (e_rev - v) * waveform per event, the waveform being
+    epsg_unitary's expression with the same float order (the mask
+    (t > 0) and the clamp at EPSG_T_FLOOR included).
+
+    Args:
+        t: Time [ms].
+        v: The voltage [mV] of each event's compartment, one per event.
+        ev: event_arrays(...).
+        scale: The run's I, multiplying every peak.
+
+    Returns:
+        The currents, one per event.
+    """
+    te = t - ev["t"]
+    tc = np.maximum(te, EPSG_T_FLOOR)
+    wave = (
+        ev["inv_peak"]
+        * (te > 0)
+        * (np.exp(-tc / ev["decay"]) - np.exp(-tc / ev["rise"]))
+    )
+    return scale * ev["g"] * (ev["e_rev"] - v) * wave
+
+
 def epsg_inv_peak(tau: tuple[float, float] = EPSG_TAU) -> float:
     """Returns the factor that makes epsg_unitary's peak 1.
 
@@ -86,6 +206,8 @@ class SynParams:
         f: Sine frequency [Hz].
         epsg_tau: EPSG/EPSGpair (rise, decay) [ms]; Myoga et al 2014
             used decay 0.3.
+        events: The "Events" stimulus: any number of Event records (see
+            Event); ignored by the other stimuli.
     """
 
     t_end: float = 20.0
@@ -97,6 +219,7 @@ class SynParams:
     f: float = 200.0  # sine frequency [Hz]
     # EPSG/EPSGpair (rise, decay) [ms]; Myoga et al 2014 used decay 0.3
     epsg_tau: tuple = EPSG_TAU
+    events: tuple[Event, ...] = ()  # the "Events" stimulus (see Event)
 
 
 def synaptic(syn: SynParams) -> tuple[np.ndarray, np.ndarray]:

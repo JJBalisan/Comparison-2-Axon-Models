@@ -46,10 +46,13 @@ from msoaxon import _common, _solve, synaptic
         ("EPSGpair", 5, 5.3, 20, [5, 5.3]),
         ("EPSGpair", 9, 4, 20, [4, 9]),
         ("EPSGbilateral", 5, 5.3, 20, [5, 5.3]),
+        # "Events" passes its onsets; start and stop are the first and last
+        ("Events", 5, 12.5, 20, [5, 7, 12.5]),
     ],
 )
 def test_breakpoints(stim_type, start, stop, t_end, expected):
-    got = _solve.breakpoints(stim_type, start, stop, t_end)
+    onsets = [7.0, 5.0, 12.5] if stim_type == "Events" else ()
+    got = _solve.breakpoints(stim_type, start, stop, t_end, onsets)
     assert isinstance(got, list)
     assert got == sorted(got)
     assert got == pytest.approx(expected, abs=0, rel=0)
@@ -62,6 +65,8 @@ TAU = (0.1, 0.3)  # 20 * max(TAU) = 6 ms
 
 
 def _expected_input_end(stim_type, start, stop, t_end):
+    if stim_type == "Events":
+        return t_end  # without the events' decays: the safe answer
     if stim_type == "EPSG":
         return start + 6.0
     if stim_type in ("EPSGpair", "EPSGbilateral"):
@@ -91,6 +96,7 @@ def test_input_end_covers_every_stimulus_name():
         "EPSG",
         "EPSGpair",
         "EPSGbilateral",
+        "Events",
     }
 
 

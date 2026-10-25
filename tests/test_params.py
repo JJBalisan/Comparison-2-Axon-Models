@@ -77,7 +77,7 @@ def test_dataclasses_declare_every_field():
 def test_stimulus_optional_fields():
     plain = stimulus("EPSG")
     assert (plain.f, plain.t_syn, plain.g_syn) == (None, None, None)
-    assert (plain.VsynE, plain.diff) == (None, None)
+    assert (plain.VsynE, plain.diff, plain.events) == (None, None, None)
     assert plain.epsg_tau == synaptic.EPSG_TAU
     assert stimulus("sine").f == synaptic.SynParams().f
     syn = stimulus("SynapticPair")

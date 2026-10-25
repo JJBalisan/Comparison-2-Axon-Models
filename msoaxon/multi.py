@@ -13,6 +13,7 @@ has 7 blocks of n = 45 + dendrite compartments.
 """
 
 import dataclasses
+import warnings
 from typing import Any
 
 import numpy as np
@@ -527,6 +528,32 @@ def bilateral_current(
     return (a, ia), (b, ib)
 
 
+def events_current(
+    t: float, V: np.ndarray, s: _common.Stimulus, sa: np.ndarray
+) -> np.ndarray:
+    """Returns the "Events" input current density per compartment.
+
+    Each event's current (synaptic.event_currents, with the driving
+    force at its own compartment, as EPSG and EPSGpair have it) divided
+    by its compartment's area, summed per compartment; negative
+    depolarises, as external_current's values do.
+
+    Args:
+        t: Time [ms].
+        V: Voltage per compartment [mV].
+        s: The stimulus settings (_common.stimulus), with s.events.
+        sa: Membrane area per compartment [um^2].
+
+    Returns:
+        The densities [pA/um^2], one per compartment (0.0 where no event
+        enters).
+    """
+    ev = s.events
+    k = ev["k"]
+    i = synaptic.event_currents(t, V[k], ev, s.I)
+    return np.bincount(k, weights=-i / sa[k], minlength=len(sa))
+
+
 def membrane(
     v0: float,
     soma_klt_scale: float = 1.0,
@@ -660,6 +687,8 @@ def _dv(
             t, V, s, input_node - 1, input_node2 - 1, morph.sa
         ):
             total[k] += iext
+    elif stim_type == "Events":
+        total += events_current(t, V, s, morph.sa)
     else:
         k, iext = external_current(t, V, stim_type, s, input_node, morph.sa)
         total[k] += iext
@@ -703,6 +732,8 @@ def _rhs(
             t, V, s, input_node - 1, input_node2 - 1, morph.sa
         ):
             total[k] += iext
+    elif stim_type == "Events":
+        total += events_current(t, V, s, morph.sa)
     else:
         k, iext = external_current(t, V, stim_type, s, input_node, morph.sa)
         total[k] += iext  # the other compartments would add an exact 0.0
@@ -780,7 +811,14 @@ def mso_axon(
             EPSGbilateral: first EPSG at input_node at start, second at
                 input_node2 at stop;
             Synaptic, SynapticPair: I is ignored; the conductance comes
-                from `syn`, applied from start to stop.
+                from `syn`, applied from start to stop;
+            Events: the event list in `syn.events` (synaptic.Event: any
+                number of EPSG-shaped conductances, each with its own
+                onset, compartment, peak, kinetics and reversal, never
+                cut off); I scales every peak (1.0 uses them as given);
+                start, stop and input_node are ignored. Not in the Rust
+                right-hand side yet: mode="fast" falls back to "exact"
+                with a warning.
         start: See stim_type [ms].
         stop: See stim_type [ms].
         I: See stim_type.
@@ -845,8 +883,12 @@ def mso_axon(
     if model_type not in ACTIVE_GATES:
         raise ValueError(f"unknown model type {model_type!r}")
     syn = syn or synaptic.SynParams(t_end=t_end)
+    if stim_type == "Events":
+        synaptic.check_events(tuple(syn.events), morph.n, t_end)
 
     s = _common.stimulus(stim_type, start, stop, I, t_end, syn)
+    if stim_type == "Events":
+        start, stop = s.start, s.stop  # the first and last onset
     active = tuple(bool(g) for g in ACTIVE_GATES[model_type])
     mem = mem or membrane(v0, morph=morph)
     if mem.morph_key != morph.key:
@@ -856,8 +898,21 @@ def mso_axon(
         )
     n = morph.n
     y0 = initial_state(morph, mem, v0)
-    cuts = _solve.breakpoints(stim_type, start, stop, t_end)
+    cuts = _solve.breakpoints(
+        stim_type,
+        start,
+        stop,
+        t_end,
+        onsets=() if s.events is None else s.events["t"],
+    )
     mode = _fast.resolve(mode)
+    if stim_type == "Events" and mode == "fast":
+        warnings.warn(
+            '"Events" is not in the Rust right-hand side yet; running '
+            'mode="exact"',
+            stacklevel=2,
+        )
+        mode = "exact"
     if mode == "fast":
         rhs = _fast.build(
             stim_type, s, input_node, active, mem, morph, input_node2

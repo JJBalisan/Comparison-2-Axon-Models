@@ -33,7 +33,11 @@ SPIKE_TEST_FRACTION = 0.75
 
 
 def breakpoints(
-    stim_type: str, start: float, stop: float, t_end: float
+    stim_type: str,
+    start: float,
+    stop: float,
+    t_end: float,
+    onsets: Any = (),
 ) -> list[float]:
     """Returns the times where the stimulus switches on or off.
 
@@ -46,11 +50,14 @@ def breakpoints(
         start: Stimulus start [ms].
         stop: Stimulus stop [ms].
         t_end: End of the run [ms].
+        onsets: Further switch times [ms]: every onset of "Events" (each
+            one restarts the integrator, so a dense list means many
+            short segments; the policy for hundreds of events is open).
 
     Returns:
         The sorted breakpoints strictly between 0 and t_end.
     """
-    pts = {start, stop}
+    pts = {start, stop, *(float(o) for o in onsets)}
     if stim_type in ("ramp", "ramp2"):
         pts |= {RAMP_RISE, stop + RAMP_RISE}
     return sorted(p for p in pts if 0 < p < t_end)
@@ -62,14 +69,16 @@ def input_end(
     stop: float,
     t_end: float,
     epsg_tau: tuple[float, float],
+    ev_decay: Any = None,
 ) -> float:
     """Returns the time after which the stimulus no longer drives the cell.
 
     EPSGs: the last onset plus EPSG_TAIL decay constants, when the conductance
     is below ~2e-9 of its peak (neither model's EPSG ends sooner:
-    two_cpt never cuts it off). step, ramp, sine and the synaptic inputs
-    are off after `stop`. ramp2 holds its current to t_end, so it never
-    ends.
+    two_cpt never cuts it off). "Events": the last onset (`stop`) plus
+    EPSG_TAIL times the slowest event's decay. step, ramp, sine and the
+    synaptic inputs are off after `stop`. ramp2 holds its current to
+    t_end, so it never ends.
 
     Args:
         stim_type: The stimulus name.
@@ -77,10 +86,16 @@ def input_end(
         stop: Stimulus stop [ms].
         t_end: End of the run [ms].
         epsg_tau: The EPSG (rise, decay) time constants [ms].
+        ev_decay: The decay time constants of the events [ms], for
+            "Events"; None gives the safe answer, t_end.
 
     Returns:
         The time [ms]; t_end for a stimulus that never ends.
     """
+    if stim_type == "Events":
+        if ev_decay is None:
+            return t_end
+        return max(start, stop) + EPSG_TAIL * float(np.max(ev_decay))
     if stim_type in ("EPSG", "EPSGpair", "EPSGbilateral"):
         last = start if stim_type == "EPSG" else max(start, stop)
         return last + EPSG_TAIL * max(epsg_tau)
