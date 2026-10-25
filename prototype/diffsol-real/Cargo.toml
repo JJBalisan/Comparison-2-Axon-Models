@@ -1,0 +1,17 @@
+[package]
+name = "diffsol-real"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Standalone: not a member of rust/'s crate or any workspace.
+[workspace]
+
+[dependencies]
+diffsol = "=0.18.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# The sparse backend is slow unoptimised; tests run it too.
+[profile.dev]
+opt-level = 3
