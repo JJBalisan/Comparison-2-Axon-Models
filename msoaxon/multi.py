@@ -422,7 +422,9 @@ def axial_current(V: np.ndarray, morph: Morphology = LUMPED) -> np.ndarray:
 #   EPSG          cut off at stop                never cut off
 #   EPSG, pair    driving force at the input     driving force at the soma,
 #                 node                           even with axonal input
-#   Synaptic*     driving force at the soma      driving force at the soma
+#   Synaptic*     driving force at the input     driving force at the soma
+#                 node (fixed in PR #103; the
+#                 area is still the soma's)
 #   SynapticPair  -                              second input zeroed once
 #                                                t + diff >= t_end
 
