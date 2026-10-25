@@ -821,7 +821,7 @@ def test_native_quiet_cache_key_differs_from_fast(
 def test_native_matches_exact_with_a_synaptic_input_off_the_soma(
     quiet_native,
 ):
-    # dV[k] depends on V[0] here, an entry the Rust pattern adds
+    # the synaptic input drives its own compartment, off the soma
     kw = {"morph": D, "syn": synaptic.SynParams(t_end=15.0)}
     args = ("Synaptic", 5, 15, 0, 3, "active-full", 15, -68.0, LAT)
     t_e, x_e = multi.mso_axon(*args, mode="exact", **kw)

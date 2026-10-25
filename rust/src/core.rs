@@ -306,7 +306,7 @@ impl Stim {
                         None => table.interp(t),
                         Some(d) => table.interp(t) + table.interp(t + d),
                     };
-                    (k, g * (v[0] - vsyn) / sa[0])
+                    (k, g * (v[k] - vsyn) / sa[0])
                 } else {
                     (0, 0.0)
                 }
@@ -652,18 +652,6 @@ impl MultiRhs {
     /// The axial edges, 0-based: (parent, child), one entry per edge.
     pub fn edges(&self) -> (&[usize], &[usize]) {
         (&self.parent, &self.child)
-    }
-
-    /// The Jacobian entries (row, column) the stimulus adds to
-    /// [`tree_jac_sparsity`]'s pattern: the synaptic inputs drive
-    /// compartment k with the soma's driving force, so dV[k] depends on
-    /// V[0]. `multi._tree_jac_sparsity` (scipy's pattern) lacks it; every
-    /// other stimulus couples a compartment only to itself.
-    pub fn stim_jac_entries(&self) -> Vec<(usize, usize)> {
-        match self.stim {
-            Stim::Synaptic { k, .. } if k != 0 => vec![(k, 0)],
-            _ => Vec::new(),
-        }
     }
 
     /// Writes dx/dt for state `x` at time `t` into `out` (both 7n long).
