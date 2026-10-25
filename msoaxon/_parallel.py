@@ -49,7 +49,9 @@ def pool_context(
 
 
 def worker_init(
-    env_mode: str | None, warned: bool, stop_when_settled: bool
+    env_mode: str | None,
+    warned: tuple[bool, bool],
+    stop_when_settled: bool,
 ) -> None:
     """Gives a new pool worker this process's module state.
 
@@ -60,7 +62,8 @@ def worker_init(
 
     Args:
         env_mode: The parent's MSOAXON_MODE (None if unset).
-        warned: Whether the parent issued the DriftWarning.
+        warned: Whether the parent issued the fast and the native
+            DriftWarning (_fast.parent_state()).
         stop_when_settled: The parent's _dispatch.STOP_WHEN_SETTLED.
     """
     from msoaxon import _dispatch  # noqa: PLC0415  (imports _parallel)

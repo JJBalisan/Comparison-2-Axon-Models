@@ -649,6 +649,23 @@ impl MultiRhs {
         self.n
     }
 
+    /// The axial edges, 0-based: (parent, child), one entry per edge.
+    pub fn edges(&self) -> (&[usize], &[usize]) {
+        (&self.parent, &self.child)
+    }
+
+    /// The Jacobian entries (row, column) the stimulus adds to
+    /// [`tree_jac_sparsity`]'s pattern: the synaptic inputs drive
+    /// compartment k with the soma's driving force, so dV[k] depends on
+    /// V[0]. `multi._tree_jac_sparsity` (scipy's pattern) lacks it; every
+    /// other stimulus couples a compartment only to itself.
+    pub fn stim_jac_entries(&self) -> Vec<(usize, usize)> {
+        match self.stim {
+            Stim::Synaptic { k, .. } if k != 0 => vec![(k, 0)],
+            _ => Vec::new(),
+        }
+    }
+
     /// Writes dx/dt for state `x` at time `t` into `out` (both 7n long).
     pub fn eval(&self, t: f64, x: &[f64], out: &mut [f64]) {
         let n = self.n;
@@ -804,7 +821,7 @@ pub fn tree_jac_sparsity(n: usize, parent: &[usize], child: &[usize]) -> (Vec<us
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Numpy and Rust call the same libm on the machine the port was written
@@ -965,7 +982,7 @@ mod tests {
     /// A 45-compartment chain in the pattern of `constants.py` (soma, two
     /// AIS, 21 internode/node pairs) with an EPSG pair at the soma; the
     /// values are fixed, not the real morphology.
-    fn model() -> MultiRhs {
+    pub(crate) fn model() -> MultiRhs {
         let n = 45;
         let axon = |head: [f64; 3], internode: f64, node: f64| -> Vec<f64> {
             (0..n)
@@ -1005,9 +1022,37 @@ mod tests {
         }
     }
 
+    /// [`model`] with a current step into the soma, on for 0 < t <= 50 ms
+    /// (a negative `amp` hyperpolarises it).
+    pub(crate) fn step_model(amp: f64) -> MultiRhs {
+        MultiRhs {
+            stim: Stim::Step {
+                start: 0.0,
+                stop: 50.0,
+                amp,
+            },
+            ..model()
+        }
+    }
+
+    /// [`model`] with a synaptic conductance into compartment `k`.
+    pub(crate) fn synaptic_model(k: usize) -> MultiRhs {
+        MultiRhs {
+            stim: Stim::Synaptic {
+                start: 0.0,
+                stop: 50.0,
+                k,
+                table: table(&[0.0, 1.0, 50.0], &[0.0, 5.0, 0.0]),
+                vsyn: 0.0,
+                diff: None,
+            },
+            ..model()
+        }
+    }
+
     /// V from -75 mV in 0.7 mV steps, the six gates a fixed pattern in
     /// 0.05..0.95.
-    fn state() -> Vec<f64> {
+    pub(crate) fn state() -> Vec<f64> {
         (0..7 * 45)
             .map(|j| {
                 if j < 45 {

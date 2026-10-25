@@ -28,9 +28,10 @@ caught here, by design.
 t_end (t_last) is compared exactly: every case runs to t_end (none stops on a
 spike), and the solver lands on it exactly on every platform.
 
-Every multi case runs in both modes: "exact" (multi._rhs, which the traces
-come from) and "fast" (its Rust port; skipped without the fast extra), to the
-same tolerance.
+Every multi case runs in every mode: "exact" (multi._rhs, which the traces
+come from), "fast" (its Rust port) and "native" (the port under the Rust BDF
+integrator); the last two skip without the fast extra. All to the same
+tolerance.
 
 Regenerate only when a change in results is intended (always from "exact"):
 
@@ -291,7 +292,8 @@ NEEDS_EXT = pytest.mark.skipif(
     not _fast.available(), reason="needs the fast extra (msoaxon_fast)"
 )
 RUNS = [(name, "exact") for name in sorted(CASES)] + [
-    pytest.param(name, "fast", marks=NEEDS_EXT)
+    pytest.param(name, mode, marks=NEEDS_EXT)
+    for mode in ("fast", "native")
     for name in sorted(CASES)
     if CASES[name][0] == "multi"
 ]

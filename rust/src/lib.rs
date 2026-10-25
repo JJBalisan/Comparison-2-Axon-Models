@@ -5,13 +5,17 @@
 //! integrator). This file only converts the numpy arguments, calls the core
 //! constructor and wraps the result as the `MultiRhs` class that scipy's BDF
 //! solver calls as `f(t, x)`; msoaxon builds one per `mso_axon` call.
+//! `MultiRhs.integrator()` wraps [`integrate`]'s BDF integrator for
+//! `mode="native"`, where Rust runs the whole integration.
 
 pub mod core;
+pub mod integrate;
 
-use numpy::{PyArray1, PyReadonlyArray1};
+use numpy::{PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 impl From<core::CoreError> for PyErr {
     fn from(e: core::CoreError) -> PyErr {
@@ -140,6 +144,92 @@ impl MultiRhs {
     fn n(&self) -> usize {
         self.inner.n()
     }
+
+    /// Returns a BDF integrator over this right-hand side (`Integrator`).
+    ///
+    /// The Jacobian pattern and the diffsol problem are built here, once;
+    /// msoaxon builds one per right-hand side and reuses it for every
+    /// segment.
+    fn integrator(&self) -> PyResult<Integrator> {
+        Ok(Integrator {
+            inner: Mutex::new(integrate::Integrator::new(self.inner.clone())?),
+        })
+    }
+}
+
+/// diffsol's BDF over one `MultiRhs` (`mode="native"`).
+///
+/// diffsol keeps scratch space in `RefCell`s, so the integrator is `Send`
+/// but not `Sync`; the `Mutex` makes the class shareable as pyo3 requires.
+#[pyclass(frozen, module = "msoaxon_fast")]
+struct Integrator {
+    inner: Mutex<integrate::Integrator>,
+}
+
+/// Returns a (t, y, stopped) Python tuple's arrays: y reshaped to (n_t, n).
+type RunArrays<'py> = (Bound<'py, PyArray1<f64>>, Bound<'py, PyArray2<f64>>, bool);
+
+#[pymethods]
+impl Integrator {
+    /// Solves one segment [t0, t1] from y0; see `integrate::Integrator::run`.
+    ///
+    /// `spike` is (axon_col, factor) of `_solve.spike_event`, `settled`
+    /// (t_off, axon_col, factor * SETTLED_FRACTION) of
+    /// `_solve.settled_event`; None leaves that event out. Returns
+    /// (t, y, stopped): t from t0 (y0 included) through every accepted step
+    /// to t1 or the event, y shaped (len(t), 7n), stopped whether an event
+    /// fired.
+    #[pyo3(signature = (y0, t0, t1, rtol, atol, max_step, spike=None, settled=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn run<'py>(
+        &self,
+        py: Python<'py>,
+        y0: PyReadonlyArray1<'py, f64>,
+        t0: f64,
+        t1: f64,
+        rtol: f64,
+        atol: f64,
+        max_step: f64,
+        spike: Option<(usize, f64)>,
+        settled: Option<(f64, usize, f64)>,
+    ) -> PyResult<RunArrays<'py>> {
+        let y0 = to_vec(&y0);
+        let n = y0.len();
+        let events = integrate::Events {
+            spike: spike.map(|(axon_col, factor)| integrate::Spike { axon_col, factor }),
+            settled: settled.map(|(t_off, axon_col, threshold)| integrate::Settled {
+                t_off,
+                axon_col,
+                threshold,
+            }),
+        };
+        for col in [
+            events.spike.map(|s| s.axon_col),
+            events.settled.map(|s| s.axon_col),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if col >= n {
+                return Err(PyValueError::new_err(format!(
+                    "axon_col={col} is not in 0..{n}"
+                )));
+            }
+        }
+        let run = py.allow_threads(|| {
+            let mut it = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            it.run(&y0, t0, t1, rtol, atol, max_step, integrate::H0, &events)
+        })?;
+        let nt = run.t.len();
+        let y = PyArray1::from_vec(py, run.y).reshape([nt, n])?;
+        Ok((PyArray1::from_vec(py, run.t), y, run.stopped))
+    }
+
+    /// The number of entries in the Jacobian pattern.
+    #[getter]
+    fn nnz(&self) -> usize {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).nnz()
+    }
 }
 
 /// `Table::interp` at one point: `np.interp(x, xs, ys, 0.0, 0.0)`, the
@@ -163,6 +253,7 @@ fn interp(xs: PyReadonlyArray1<'_, f64>, ys: PyReadonlyArray1<'_, f64>, x: f64) 
 #[pymodule]
 fn msoaxon_fast(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<MultiRhs>()?;
+    m.add_class::<Integrator>()?;
     m.add_function(wrap_pyfunction!(interp, m)?)?;
     Ok(())
 }

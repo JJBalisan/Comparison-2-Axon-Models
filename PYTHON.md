@@ -117,7 +117,8 @@ numpy path and ignores it.
 |---|---|
 | `"exact"` | `multi._rhs`, the numpy reference |
 | `"fast"` | the Rust port; warns and runs `"exact"` if the extension is missing |
-| `None` (default) | `MSOAXON_MODE` if set (`exact` or `fast`), else `"fast"` when the extension is installed, else `"exact"` (silently) |
+| `"native"` | the Rust port under a Rust BDF integrator (opt-in, see below); warns and runs `"exact"` if the extension is missing |
+| `None` (default) | `MSOAXON_MODE` if set (`exact`, `fast` or `native`), else `"fast"` when the extension is installed, else `"exact"` (silently) |
 
 `MSOAXON_MODE=exact uv run scripts/...` runs a whole script on the reference,
 worker processes included (pools hand their workers the parent's setting).
@@ -169,6 +170,57 @@ every covered configuration (to 1e-12 relative, and bit for bit on
 darwin-arm64), and `tests/test_golden.py` runs every multi-compartment trace in
 both modes. CI runs the suite without the extension (the fallback) on Linux and
 macOS, and with it on both (`pytest-fast`), which also prints the self-check.
+
+### Native mode: the BDF integrator in Rust
+
+`mode="native"` (or `MSOAXON_MODE=native`) takes the rest of the time loop out
+of Python: the same Rust right-hand side, integrated by a Rust BDF solver
+([diffsol](https://github.com/martinjrobins/diffsol) 0.18.0, pure Rust, no
+SUNDIALS or SuiteSparse) instead of scipy's. It is opt-in; the default stays
+`"fast"` until native has been judged on more than the checks below.
+
+What runs where: `mso_axon` still splits the run at the stimulus breakpoints,
+keeps the pre-stimulus cache (keyed with the mode, so a native prefix never
+serves a fast run) and builds the two event closures; `_solve._segment` hands
+each segment to `_fast.Native.segment`, which calls
+`msoaxon_fast.Integrator.run` (`rust/src/integrate.rs`). Rust then does every
+step, Newton iteration, Jacobian, LU and event test of the segment and returns
+the whole trajectory at once: the segment start, every accepted step, and the
+end (`t_end` exactly) or the event. The integrator is built once per right-hand
+side and reused for every segment of the run.
+
+**Agreement.** Native's steps are diffsol's, not scipy's, so it is not bit for
+bit any other mode; at the same `RTOL = ATOL = 1e-8` it agrees with the
+reference within the solver tolerance. It is judged by the golden traces
+(`tests/test_golden.py` runs every multi case in native too, at rtol 1e-4 /
+atol 5e-3 mV and `t_last` exact, dendrite trees included) and by
+`MSOAXON_MODE=native uv run scripts/benchmark_search.py --check` (0 flipped
+spike decisions). The first native run in a process issues its own
+`msoaxon.DriftWarning` saying so.
+
+**Jacobian.** diffsol is given the pattern explicitly, not left to detect it:
+`core::tree_jac_sparsity` of the run's own morphology (the Rust twin of
+`multi._tree_jac_sparsity`) plus the one entry a stimulus adds, dV[k]/dV[0] for
+a synaptic input at compartment k (its driving force is the soma's); scipy's
+pattern lacks that entry. The Jacobian is filled by forward-difference
+products `J v` on two right-hand-side calls (step `1e-7 (1 + max |x|)`), one
+per colour of the pattern.
+
+**max_step.** diffsol has no step cap, so `max_step` is emulated: whenever the
+next step would be longer, the integrator's stop time is moved to one
+`max_step` ahead. Only the step length is bounded; the tolerances are never
+changed.
+
+**Events.** `spike_event` and `settled_event` carry a `spec` the native segment
+reads; Rust evaluates the same functions as root functions, stops on a rising
+crossing only (solve_ivp's `direction = 1`) and returns the state interpolated
+at the root, which lies inside the last accepted step (that step's end is not
+output, as in solve_ivp). The settled stop keeps the strict "every dV < 0".
+With no input it can therefore fire right at `t_off` in a run that scipy
+integrated to `t_end`: the same answer, an earlier stop.
+
+`"Events"` is not in the Rust right-hand side yet, so native falls back to
+`"exact"` with a warning, as fast does.
 
 ## Port contract
 
