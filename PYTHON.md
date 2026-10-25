@@ -483,7 +483,7 @@ Values are for the Python port.
 |---|---|---|
 | EPSP half-width at soma | 523–549 µs | 0.52–0.6 ms; PSP half-width 467 µs with the 0.3 ms EPSG (Myoga et al. 2014) |
 | Spike initiation site | AIS (compartment 3) for an EPSG pair at 1.25–3× threshold; under sustained input 0–36% of spikes start at node 1 or 2 where 50 or more spikes fired, 8% at 350 Hz and the default `gE` (`initiation.py`, #80) | AIS; 5–60% of spikes start at node 1 or 2 under sustained input (Lehnert 2014) |
-| Input resistance, active, at rest | 2.4 MΩ steady, ~4.7 MΩ peak | 5 MΩ (Lehnert's model); ~7 MΩ measured |
+| Input resistance, active, at rest | 2.4 MΩ steady, ~4.7 MΩ peak with the leak rebalanced at −68 mV (`rebalance_rest=True`, as in the dendrites table); 2.5 / 4.8 MΩ for the default membrane, which settles at −68.13 mV where the conductances differ a little (`measure.passive_step`, #68) | 5 MΩ (Lehnert's model); ~7 MΩ measured |
 | Somatic spike, from inflection (100 ms step) | 7.4 / 13.3 / 18.2 mV at 1.5× / 2× / 3× rheobase | 17 ± 2 mV mature, 5–15 mV near threshold, graded |
 | Best frequency for half-wave sine input | 400–500 Hz | spike resonance 285 Hz, EPSC-train threshold minimum 317 Hz; subthreshold resonance 242 Hz (Mikiel-Hunter et al. 2016, [doi](https://doi.org/10.1371/journal.pcbi.1005166)); a suprathreshold measure belongs against the first two (#83) |
 
@@ -540,14 +540,14 @@ Each item has an issue (label `literature-2026-10`):
 - axon geometry as parameters: internode length, diameter, node length, AIS
   length and start and myelin capacitance are folded into the constants
   (#81)
-- an initiation-site readout (#80)
 - variation in cell properties along the frequency map: Ih density, V½ and
   time constant, Na oscillation parameters (#82)
 - temperature as a parameter rather than two Q10 literals (#82)
 - a Kv7 / M-type current (#85)
 - free two-compartment coupling instead of the `node` lookup (#84)
 
-Dendrites, listed here until October 2026, are in (see below).
+Dendrites, listed here until October 2026, are in (see below), and so is
+the initiation-site readout (#80, `msoaxon.initiation`, table above).
 
 ### Somatic spike
 
