@@ -533,6 +533,10 @@ def test_pool_workers_inherit_the_mode_env(monkeypatch, no_env):
     assert state == ("exact", True)
 
 
+@pytest.mark.skipif(
+    "forkserver" not in multiprocessing.get_all_start_methods(),
+    reason="no forkserver start method (Windows); the spawn path is covered",
+)
 def test_pool_workers_inherit_the_settled_stop(monkeypatch):
     ctx = multiprocessing.get_context("forkserver")
     monkeypatch.setattr(_parallel, "pool_context", lambda: ctx)
