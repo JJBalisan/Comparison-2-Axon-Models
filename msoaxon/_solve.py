@@ -133,8 +133,15 @@ def _segment(
 ) -> tuple[np.ndarray, np.ndarray, bool]:
     """Solves one segment.
 
+    A right-hand side with a `segment` method (_fast.Native,
+    mode="native") solves it itself, in Rust; any other goes to scipy's
+    BDF.
+
     Returns (t, y, stopped), where stopped means a terminal event fired.
     """
+    segment = getattr(rhs, "segment", None)
+    if segment is not None:
+        return segment(a, b, y, rtol, atol, max_step, events)
     sol = scipy_integrate.solve_ivp(
         rhs,
         (a, b),
@@ -170,6 +177,7 @@ def spike_event(axon_col: int, factor: float) -> Event:
 
     event.terminal = True
     event.direction = 1
+    event.spec = ("spike", axon_col, factor)  # for mode="native"
     return event
 
 
@@ -216,6 +224,9 @@ def settled_event(dv: Rhs, t_off: float, axon_col: int, factor: float) -> Event:
 
     event.terminal = True
     event.direction = 1
+    # for mode="native", whose Rust root takes dV from its own right-hand
+    # side, the one `dv` slices there
+    event.spec = ("settled", t_off, axon_col, factor * SETTLED_FRACTION)
     return event
 
 

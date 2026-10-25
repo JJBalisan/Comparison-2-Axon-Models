@@ -654,6 +654,18 @@ impl MultiRhs {
         (&self.parent, &self.child)
     }
 
+    /// The Jacobian entries (row, column) the stimulus adds to
+    /// [`tree_jac_sparsity`]'s pattern: the synaptic inputs drive
+    /// compartment k with the soma's driving force, so dV[k] depends on
+    /// V[0]. `multi._tree_jac_sparsity` (scipy's pattern) lacks it; every
+    /// other stimulus couples a compartment only to itself.
+    pub fn stim_jac_entries(&self) -> Vec<(usize, usize)> {
+        match self.stim {
+            Stim::Synaptic { k, .. } if k != 0 => vec![(k, 0)],
+            _ => Vec::new(),
+        }
+    }
+
     /// Writes dx/dt for state `x` at time `t` into `out` (both 7n long).
     pub fn eval(&self, t: f64, x: &[f64], out: &mut [f64]) {
         let n = self.n;
@@ -1018,6 +1030,21 @@ pub(crate) mod tests {
                 start: 0.0,
                 stop: 50.0,
                 amp,
+            },
+            ..model()
+        }
+    }
+
+    /// [`model`] with a synaptic conductance into compartment `k`.
+    pub(crate) fn synaptic_model(k: usize) -> MultiRhs {
+        MultiRhs {
+            stim: Stim::Synaptic {
+                start: 0.0,
+                stop: 50.0,
+                k,
+                table: table(&[0.0, 1.0, 50.0], &[0.0, 5.0, 0.0]),
+                vsyn: 0.0,
+                diff: None,
             },
             ..model()
         }

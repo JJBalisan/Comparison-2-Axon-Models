@@ -842,8 +842,8 @@ def mso_axon(
                 onset, compartment, peak, kinetics and reversal, never
                 cut off); I scales every peak (1.0 uses them as given);
                 start, stop and input_node are ignored. Not in the Rust
-                right-hand side yet: mode="fast" falls back to "exact"
-                with a warning.
+                right-hand side yet: mode="fast" and "native" fall back
+                to "exact" with a warning.
         start: See stim_type [ms].
         stop: See stim_type [ms].
         I: See stim_type.
@@ -873,7 +873,9 @@ def mso_axon(
             callers that only need yes/no.
         mode: "exact" runs the numpy right-hand side (_rhs, the
             reference); "fast" runs its Rust port (the `fast` extra),
-            which issues a DriftWarning on first use. None (default):
+            which issues a DriftWarning on first use; "native" (opt-in)
+            also integrates in Rust (diffsol's BDF), agreeing with the
+            reference within the solver tolerance. None (default):
             the MSOAXON_MODE environment variable if set, else "fast"
             when the extension is installed, else "exact". See _fast.
 
@@ -931,18 +933,18 @@ def mso_axon(
         onsets=() if s.events is None else s.events["t"],
     )
     mode = _fast.resolve(mode)
-    if stim_type == "Events" and mode == "fast":
+    if stim_type == "Events" and mode in ("fast", "native"):
         warnings.warn(
             '"Events" is not in the Rust right-hand side yet; running '
             'mode="exact"',
             stacklevel=2,
         )
         mode = "exact"
-    if mode == "fast":
-        rhs = _fast.build(
-            stim_type, s, input_node, active, mem, morph, input_node2
-        )
-        quiet_rhs = _fast.build("none", s, input_node, active, mem, morph)
+    if mode in ("fast", "native"):
+        # native: the same Rust right-hand side, its segments solved in Rust
+        build = _fast.build if mode == "fast" else _fast.build_native
+        rhs = build(stim_type, s, input_node, active, mem, morph, input_node2)
+        quiet_rhs = build("none", s, input_node, active, mem, morph)
         # the settled check slices the Rust RHS: at about 3.5 us a call it
         # costs under 2% of a ramp search, so a dV-only port would not pay
         dv = lambda t, x: rhs(t, x)[:n]  # noqa: E731
