@@ -201,9 +201,14 @@ pub struct Trace {
     /// Right-hand side calls: by the solver (`f` and inside `Jv`).
     pub evals: usize,
     pub jv_calls: usize,
+    /// Of `evals`, those made while building the problem (sparsity
+    /// detection and colouring).
+    pub build_evals: usize,
     /// Calls made by the settled event's dV check.
     pub root_evals: usize,
     pub segments: usize,
+    /// Wall time of each segment, re-initialisation included [us].
+    pub segment_us: Vec<f64>,
     /// Segment ends where `state().t` was not exactly the breakpoint (the
     /// trace is snapped to the breakpoint there).
     pub inexact_segment_ends: usize,
@@ -328,6 +333,7 @@ pub fn solve(case: &Case, cfg: &Cfg) -> Result<Trace, Box<dyn std::error::Error>
             .jacobian_sparsity()
             .map_or(0, |s| s.compute_nnz()),
         build_us: start.elapsed().as_secs_f64() * 1e6,
+        build_evals: model.evals.get(),
         ..Trace::default()
     };
     let ac = case.axon_col;
@@ -342,6 +348,7 @@ pub fn solve(case: &Case, cfg: &Cfg) -> Result<Trace, Box<dyn std::error::Error>
         let (a, b) = (w[0], w[1]);
         model.use_quiet.set(quiet_first && i == 0);
         model.roots_on.set(!(quiet_first && i == 0));
+        let seg_start = Instant::now();
         // Re-initialise at (a, ycur): the `_segment` step.
         let mut state = diffsol::BdfState::new_without_initialise(&problem)?;
         {
@@ -378,6 +385,7 @@ pub fn solve(case: &Case, cfg: &Cfg) -> Result<Trace, Box<dyn std::error::Error>
                 ycur = y;
                 tr.t_last_raw = t;
                 add_stats(&mut tr.stats, solver.get_statistics());
+                tr.segment_us.push(seg_start.elapsed().as_secs_f64() * 1e6);
                 break 'segments;
             }
             let at_stop = tt >= stop - 1e-9;
@@ -402,6 +410,7 @@ pub fn solve(case: &Case, cfg: &Cfg) -> Result<Trace, Box<dyn std::error::Error>
             }
         }
         add_stats(&mut tr.stats, solver.get_statistics());
+        tr.segment_us.push(seg_start.elapsed().as_secs_f64() * 1e6);
     }
     tr.final_y = ycur;
     tr.steps = tr.t.len();
