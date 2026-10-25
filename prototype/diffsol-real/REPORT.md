@@ -71,8 +71,11 @@ counts in 13 of 15 cases (Synaptic 673 vs 682, SynapticPair 781 vs 779), and
 - Caveat 1: the pattern is detected once, at (t0, y0). Inactive gates write an
   exact 0.0, so other model types detect fewer entries. That is correct, but
   the count will not be 943.
-- Caveat 2: a stimulus coupling outside the chain pattern would be missed.
-  `Synaptic` with k≠0 puts V[0] into dV[k]; all 15 cases have k=0.
+- Caveat 2 (resolved since): a stimulus coupling outside the chain pattern
+  would be missed. At the time `Synaptic` with k≠0 put V[0] into dV[k]; that
+  was a bug in the reference (the input is meant to drive its own
+  compartment), fixed in PR #103, so no stimulus couples outside the pattern
+  now. All 15 cases have k=0 either way.
 - An explicit pattern (E2) avoids both caveats and also saves the 2.9 ms
   (630 RHS calls) that detection costs on every run.
 

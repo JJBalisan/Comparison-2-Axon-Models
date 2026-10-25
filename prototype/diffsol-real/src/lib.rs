@@ -10,6 +10,8 @@
 //! recorded. The driver is the probe's (`origin/phase0-diffsol-probe`,
 //! `prototype/diffsol-probe/src/solve.rs`), adapted.
 
+// core.rs's test fixtures are for rust/'s own tests; unused here
+#[cfg_attr(test, allow(dead_code))]
 #[path = "../../../rust/src/core.rs"]
 pub mod core;
 
