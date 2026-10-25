@@ -65,7 +65,7 @@ jobs:
   # The slow script tests are Python-version- and OS-independent, so skip them
   pytest-windows:
     runs-on: windows-2025-vs2026
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v7
