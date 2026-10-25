@@ -61,9 +61,12 @@ def smallest_firing(
         hi, the smallest value seen to fire, or inf.
 
     Raises:
+        ValueError: If `guess` or `rel_tol` is not > 0.
         FiresWithoutInputError: If fires(0.0), tested only when `guess`
             fires.
     """
+    check_positive("guess", guess)
+    check_positive("rel_tol", rel_tol)
     lo, hi = 0.0, guess
     while not fires(hi):
         lo, hi = hi, hi * 2
@@ -244,9 +247,15 @@ def smallest_crossing(
         it, or inf.
 
     Raises:
+        ValueError: If `guess` or `rel_tol` is not > 0, or `descent` is
+            not > 1.
         FiresWithoutInputError: If respond(0.0) spikes, tested only when
             `guess` spikes.
     """
+    check_positive("guess", guess)
+    check_positive("rel_tol", rel_tol)
+    if not descent > 1:
+        raise ValueError(f"descent must be > 1, got {descent!r}")
     pts, x = [], guess
     lo = hi = None
     while lo is None or hi is None:
@@ -276,6 +285,29 @@ def smallest_crossing(
         respond, lo, hi, lambda _, y: rel_tol * y, level, pts, log=True
     )
     return hi
+
+
+# --- arguments that would make a search run for ever -------------------------
+
+
+def check_positive(name: str, value: float) -> None:
+    """Rejects a search argument that is not > 0, before any simulation.
+
+    A zero or negative guess never grows past the ceiling, a zero or
+    negative tolerance is never reached, and a zero or negative zoom is
+    never undercut by the halving step. Each of those loops for ever (or
+    for ~1000 runs), so they are refused up front. Written as `not
+    value > 0` so that nan is refused too.
+
+    Args:
+        name: The argument's name, for the message.
+        value: Its value.
+
+    Raises:
+        ValueError: If value is not > 0.
+    """
+    if not value > 0:
+        raise ValueError(f"{name} must be > 0, got {value!r}")
 
 
 # --- a cell that fires with no input ------------------------------------------

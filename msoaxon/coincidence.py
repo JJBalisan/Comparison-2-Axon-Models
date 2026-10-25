@@ -184,8 +184,12 @@ def threshold(
         `ceiling` spikes.
 
     Raises:
+        ValueError: If rel_tol or guess is not > 0 (checked before any
+            run, a Relative criterion's included).
         _bisect.FiresWithoutInputError: If the cell fires with no input.
     """
+    _bisect.check_positive("rel_tol", rel_tol)
+    _bisect.check_positive("guess", guess)
     site, model_kw = (stim, input_node, input_node2), model_kw or {}
     factor = resolve_criterion(
         criterion,
@@ -278,7 +282,11 @@ def threshold_curve(
 
     Returns:
         An array of thresholds, one per delay.
+
+    Raises:
+        ValueError: If rel_tol is not > 0.
     """
+    _bisect.check_positive("rel_tol", rel_tol)
     site = {"stim": stim, "input_node": input_node, "input_node2": input_node2}
     site["criterion"] = resolve_criterion(
         criterion, model, node, v0, epsg_tau, model_kw or {}, **site
@@ -397,7 +405,14 @@ def window(
         max_delay or if th0 is not finite (nothing fires up to the
         ceiling, or a given threshold0 is inf or nan), and the
         coincident threshold.
+
+    Raises:
+        ValueError: If delay_tol is not > 0, or rel_tol is not > 0 when
+            th0 is searched for (checked before any run).
     """
+    _bisect.check_positive("delay_tol", delay_tol)
+    if threshold0 is None:
+        _bisect.check_positive("rel_tol", rel_tol)
     site, model_kw = (stim, input_node, input_node2), model_kw or {}
     factor = resolve_criterion(
         criterion,
