@@ -137,3 +137,16 @@ def test_making_threshold_graphs_script(tmp_path):
     assert float(multi[1]) == pytest.approx(11054.08, rel=1e-3)
     assert float(two[1]) == pytest.approx(11541.14, rel=1e-3)
     assert (tmp_path / "sine_thresholds_cpt3.png").stat().st_size > 0
+
+
+def test_phase0_harness_script(tmp_path):
+    out_json = tmp_path / "phase0.json"
+    out = run_script("phase0_harness.py", "--mode", "exact", "--json", out_json)
+    assert "| exact |" in out
+    res = json.loads(out_json.read_text())["modes"]["exact"]
+    # the exact path produces the golden traces: well inside the tolerance
+    assert res["max_margin"] < 1
+    assert res["t_last_all_equal"]
+    assert res["threshold_s"] > 0 < res["window_s"]
+    assert res["steps_epsgpair_20ms"] > 100
+    assert res["steps_step_110ms"] > 100

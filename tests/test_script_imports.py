@@ -26,6 +26,7 @@ PROBE = (
         "coincidence_window.py",
         "making_threshold_graphs.py",
         "somatic_spike.py",
+        "phase0_harness.py",
     ],
 )
 def test_analysis_scripts_import_without_matplotlib(script):
