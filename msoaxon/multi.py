@@ -103,7 +103,10 @@ class Morphology:
     """A multi-compartment morphology (LUMPED and with_dendrites()).
 
     eq=False keeps identity equality and hashing, so the ndarray fields
-    never reach a generated __eq__.
+    never reach a generated __eq__. The arrays are read-only once built
+    (_freeze): a Morphology is shared by every run that uses it and the
+    quiet-prefix cache and spike heights are keyed by `key`, so a
+    mutated bundle would serve stale results.
 
     Attributes:
         key: Hashable summary of every setting, part of the pre-stimulus
@@ -149,6 +152,11 @@ class Morphology:
     chain: bool
     jac: sparse.csc_matrix
     labels: list[str]
+
+    def __post_init__(self) -> None:
+        """Freezes the arrays: a bundle is shared and keyed by its settings."""
+        _freeze(self)
+
     lateral: np.ndarray | None = None
     medial: np.ndarray | None = None
 
@@ -181,6 +189,23 @@ class Membrane:
     na_vhalf: np.ndarray
     vlk: np.ndarray
     y0_gates: tuple[np.ndarray, ...] | None
+
+    def __post_init__(self) -> None:
+        """Freezes the arrays (see Morphology)."""
+        _freeze(self)
+
+
+def _freeze(bundle: object) -> None:
+    """Sets every ndarray field of a dataclass bundle read-only.
+
+    Tuples of arrays (Membrane.y0_gates) are frozen element by element.
+    """
+    for field in dataclasses.fields(bundle):
+        value = getattr(bundle, field.name)
+        arrays = value if isinstance(value, tuple) else (value,)
+        for a in arrays:
+            if isinstance(a, np.ndarray):
+                a.flags.writeable = False
 
 
 # The unbranched 45-compartment chain of msoAxon.m (soma, 2 AIS, 21

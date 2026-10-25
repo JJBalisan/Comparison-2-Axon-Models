@@ -6,9 +6,10 @@ the reference: mso_axon(mode="exact") runs it, mode="fast" runs the port.
 
 Mode, per mso_axon call: an explicit mode= wins, then the MSOAXON_MODE
 environment variable, then the default, which is "fast" when the extension
-imports, else "exact" (silently). Every configuration is ported. Asking
-for "fast" (by argument or environment) when it can't run warns and runs
-"exact".
+imports, else "exact" (silently when the extra is not installed; with a
+warning when it is installed but fails to load). Every configuration is
+ported. Asking for "fast" (by argument or environment) when it can't run
+warns and runs "exact".
 
 The first fast run in a process checks the port against multi._rhs on a few
 fixed states and reports the result in a DriftWarning: bit-identical on the
@@ -29,10 +30,40 @@ from msoaxon import _common, constants, synaptic
 if TYPE_CHECKING:  # multi imports this module
     from msoaxon import multi
 
-try:
-    import msoaxon_fast as _ext
-except ImportError:  # the fast extra isn't installed: numpy only
-    _ext = None
+
+def _import_ext(
+    import_module: Callable[[str], object] = importlib.import_module,
+) -> object | None:
+    """Imports msoaxon_fast, or returns None.
+
+    Not installed (ModuleNotFoundError for the package itself) is the
+    numpy-only configuration and stays silent. Anything else, an
+    extension that is present but will not load (a wheel built for
+    another Python or architecture, a missing symbol), is a broken
+    install: it warns with the loader's message, because falling back
+    silently would hide a 2.7x slowdown and last-bit differences behind
+    results that look fine.
+
+    Args:
+        import_module: The importer (a parameter for the tests).
+
+    Returns:
+        The module, or None.
+    """
+    try:
+        return import_module("msoaxon_fast")
+    except ImportError as e:
+        if isinstance(e, ModuleNotFoundError) and e.name == "msoaxon_fast":
+            return None
+        warnings.warn(
+            "msoaxon-fast is installed but failed to import "
+            f'({e}); running mode="exact"',
+            stacklevel=2,
+        )
+        return None
+
+
+_ext = _import_ext()
 
 MODES = ("fast", "exact")
 MODE_ENV = "MSOAXON_MODE"

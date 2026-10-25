@@ -103,6 +103,16 @@ def run_model(
 STOP_WHEN_SETTLED = True
 
 
+def settled_stop() -> bool:
+    """Returns STOP_WHEN_SETTLED as this process sees it now.
+
+    For pool workers, which _parallel.process_pool hands the parent's
+    value at start (a forkserver worker would otherwise keep the import
+    default), and for tests of that hand-over.
+    """
+    return STOP_WHEN_SETTLED
+
+
 def axon_column(model: str, node: int) -> int:
     """Returns the state column of the compared compartment.
 
