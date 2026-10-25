@@ -12,7 +12,8 @@ permissions:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v7
@@ -21,11 +22,12 @@ jobs:
       - run: uvx ruff@0.16.10 check .
 
   pytest:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v7
@@ -46,7 +48,24 @@ jobs:
   # the goldens hold on any hardware: prove it on arm64 too. One job only:
   # macOS minutes bill at 10x on private repos
   pytest-macos:
-    runs-on: macos-latest
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run pytest -q -m "not slow"
+        env:
+          MPLBACKEND: Agg
+
+  # the Windows wheel ships, so run the suite where the pool workers spawn.
+  # Pure Python (no Rust build): the fast tests skip without the extension.
+  # The slow script tests are Python-version- and OS-independent, so skip them
+  pytest-windows:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v7
@@ -62,10 +81,11 @@ jobs:
   # never install it, so they keep testing the pure-Python fallback.
   pytest-fast:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-26]
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
