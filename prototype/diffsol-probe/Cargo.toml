@@ -1,0 +1,12 @@
+[package]
+name = "diffsol-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+diffsol = "=0.18.0"
+
+# The dense reference backends are far too slow unoptimised.
+[profile.dev]
+opt-level = 3

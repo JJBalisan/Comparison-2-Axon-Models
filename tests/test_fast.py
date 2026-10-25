@@ -1,5 +1,8 @@
 """The Rust right-hand side (mode="fast") against multi._rhs, and the dispatch.
 
+The native mode (the Rust integrator over the same right-hand side) is
+tested at the end: its plumbing, its segment contract and its events.
+
 Equivalence: the Rust port must match multi._rhs to rtol 1e-12 on every
 configuration it covers, and bit for bit on darwin-arm64, where it was
 written and where numpy and Rust call the same libm. Those tests need the
@@ -530,7 +533,7 @@ def test_pool_workers_inherit_the_mode_env(monkeypatch, no_env):
     monkeypatch.setitem(_fast._STATE, "warned", True)
     with _parallel.process_pool(1) as pool:
         state = pool.submit(_fast.parent_state).result()
-    assert state == ("exact", True)
+    assert state == ("exact", (True, False))
 
 
 @pytest.mark.skipif(
@@ -577,6 +580,17 @@ def test_inherit_unsets_a_stale_env(monkeypatch):
     assert _fast.requested() is None and not _fast._STATE["warned"]
     _fast.inherit("fast", True)
     assert _fast.requested() == "fast" and _fast._STATE["warned"]
+
+
+def test_inherit_takes_both_warned_flags(monkeypatch):
+    monkeypatch.setitem(_fast._STATE, "warned", False)
+    monkeypatch.setitem(_fast._STATE, "warned_native", False)
+    monkeypatch.setenv(_fast.MODE_ENV, "exact")
+    _fast.inherit("native", (False, True))
+    assert _fast.requested() == "native"
+    assert _fast._STATE == {"warned": False, "warned_native": True}
+    _fast.inherit("native", True)  # a bool is the fast flag alone
+    assert _fast._STATE == {"warned": True, "warned_native": True}
 
 
 def test_epsg_constants_follow_synaptic():
@@ -629,3 +643,211 @@ def test_spike_height_cache_keys_the_resolved_mode(
     monkeypatch.delenv(_fast.MODE_ENV)
     coincidence.spike_height("multi", node=2, model_kw={"mode": "fast"})
     assert len(fake_runs) == 2  # the first, unset-mode entry
+
+
+# --- the native mode ----------------------------------------------------------
+
+EPSG8 = ("EPSGpair", 5, 5.1, 30, 3, "active-full", 8, -68.0, 1)
+SPIKING = ("EPSGpair", 5, 5.1, 100, 3, "active-full", 20, -68.0, 1)
+
+
+@pytest.fixture
+def quiet_native(monkeypatch):
+    """Native runs without the first-use warning."""
+    monkeypatch.setitem(_fast._STATE, "warned_native", True)
+
+
+def test_modes_add_native_between_fast_and_exact():
+    assert _fast.MODES == ("fast", "native", "exact")
+
+
+def test_native_is_opt_in(fake_ext, monkeypatch):
+    assert _fast.effective(None) == "fast"
+    assert _fast.effective("native") == "native"
+    assert _fast.effective("exact") == "exact"
+    monkeypatch.setenv(_fast.MODE_ENV, "native")
+    assert _fast.effective(None) == "native"
+    assert _fast.resolve(None) == "native"
+    assert _fast.effective("fast") == "fast"  # explicit wins
+
+
+def test_asking_for_native_without_the_extension_warns(monkeypatch, no_env):
+    monkeypatch.setattr(_fast, "_ext", None)
+    assert _fast.effective("native") == "exact"
+    with pytest.warns(UserWarning, match='mode="native" asked for') as rec:
+        t, _ = multi.mso_axon(*EPSG8, mode="native")
+    assert rec[0].filename == __file__
+    assert t[-1] == 8
+    monkeypatch.setenv(_fast.MODE_ENV, "native")
+    with pytest.warns(UserWarning, match="not installed"):
+        assert _fast.resolve(None) == "exact"
+
+
+def test_native_falls_back_for_events(monkeypatch, fake_ext):
+    syn = synaptic.SynParams(
+        t_end=8, events=(synaptic.Event(t=5.0, node=1, g=30.0),)
+    )
+    with pytest.warns(UserWarning, match='"Events" is not in the Rust'):
+        multi.mso_axon(
+            "Events",
+            0,
+            0,
+            1.0,
+            3,
+            "active-full",
+            8,
+            -68.0,
+            1,
+            syn=syn,
+            mode="native",
+        )
+    assert fake_ext == []
+
+
+def test_segment_without_a_segment_method_is_scipy():
+    calls = []
+
+    def rhs(t, x):
+        calls.append(t)
+        return -x
+
+    t, y, stopped = _solve._segment(
+        rhs, 0.0, 1.0, np.ones(2), 1e-8, 1e-8, 0.1, None
+    )
+    assert calls and not stopped and t[-1] == 1.0
+    assert y.shape == (2, len(t))
+
+
+def test_segment_hands_off_to_a_segment_method():
+    class Fake:
+        def segment(self, *args):
+            self.args = args
+            return "t", "y", True
+
+    fake = Fake()
+    out = _solve._segment(fake, 0.0, 1.0, "y0", 1e-8, 1e-9, 0.1, "jac", "ev")
+    assert out == ("t", "y", True)
+    assert fake.args == (0.0, 1.0, "y0", 1e-8, 1e-9, 0.1, "ev")
+
+
+def test_events_carry_their_spec():
+    assert _solve.spike_event(2, 20.0).spec == ("spike", 2, 20.0)
+    dv = lambda t, x: x  # noqa: E731
+    spec = _solve.settled_event(dv, 7.5, 2, 20.0).spec
+    assert spec == ("settled", 7.5, 2, 20.0 * _solve.SETTLED_FRACTION)
+
+
+def _native_rhs(stim="EPSGpair", amp=30.0, t_end=8.0):
+    syn = synaptic.SynParams(t_end=t_end)
+    s = _common.stimulus(stim, 5.0, 5.1, amp, t_end, syn)
+    mem = multi.membrane(-68.0)
+    active = (True,) * 6
+    args = (stim, s, 1, active, mem, multi.LUMPED)
+    return _fast._build(*args), _fast.Native(_fast._build(*args)), mem
+
+
+@needs_ext
+def test_native_calls_the_rust_rhs():
+    fast, native, mem = _native_rhs()
+    x = multi.initial_state(multi.LUMPED, mem, -60.0)
+    np.testing.assert_array_equal(native(5.05, x), fast(5.05, x))
+
+
+@needs_ext
+def test_native_segment_contract():
+    _, native, mem = _native_rhs()
+    y0 = multi.initial_state(multi.LUMPED, mem, -68.0)
+    t, y, stopped = native.segment(0.25, 5.0, y0, 1e-8, 1e-8, 0.8)
+    assert not stopped
+    assert t[0] == 0.25 and t[-1] == 5.0  # exactly
+    assert np.all(np.diff(t) > 0) and np.all(np.diff(t) <= 0.8)
+    assert y.shape == (7 * multi.LUMPED.n, len(t))  # solve_ivp's (n, n_t)
+    np.testing.assert_array_equal(y[:, 0], y0)
+    # the same integrator serves the next segment, from where this ended
+    t2, y2, _ = native.segment(5.0, 8.0, y[:, -1], 1e-8, 1e-8, 0.8)
+    assert t2[0] == 5.0 and t2[-1] == 8.0
+    np.testing.assert_array_equal(y2[:, 0], y[:, -1])
+
+
+@needs_ext
+def test_native_rejects_an_event_it_cannot_run():
+    _, native, mem = _native_rhs()
+    y0 = multi.initial_state(multi.LUMPED, mem, -68.0)
+    with pytest.raises(ValueError, match="spike_event"):
+        native.segment(0.0, 1.0, y0, 1e-8, 1e-8, 0.8, [lambda t, x: 1.0])
+
+
+@needs_ext
+def test_native_spike_stop_agrees_with_scipys_event(quiet_native):
+    kw = {"stop_on_spike": 20.0}
+    t_f, x_f = multi.mso_axon(*SPIKING, mode="fast", **kw)
+    t_n, x_n = multi.mso_axon(*SPIKING, mode="native", **kw)
+    assert t_f[-1] < 20 and t_n[-1] < 20
+    assert abs(t_n[-1] - t_f[-1]) < 1e-6
+    np.testing.assert_allclose(x_n[-1], x_f[-1], rtol=0, atol=1e-4)
+    assert abs(x_n[-1, 2] - x_n[-1, 0] - 20.0) < 1e-6
+
+
+@needs_ext
+def test_native_settled_stop_ends_a_subthreshold_run(quiet_native):
+    kw = {"stop_on_spike": 20.0, "stop_when_settled": True}
+    t, x = multi.mso_axon(*EPSG8[:6], 40, *EPSG8[7:], mode="native", **kw)
+    t_off = 5.1 + _solve.EPSG_TAIL * max(synaptic.EPSG_TAU)
+    assert t_off <= t[-1] < 40
+    assert x[-1, 2] - x[-1, 0] < 20.0 * _solve.SETTLED_FRACTION
+
+
+@needs_ext
+def test_native_max_step_bounds_every_step(quiet_native):
+    t, _ = multi.mso_axon(
+        *EPSG8[:6], 2, *EPSG8[7:], max_step=0.005, mode="native"
+    )
+    assert t[-1] == 2
+    assert np.max(np.diff(t)) <= 0.005 + 1e-12
+
+
+@needs_ext
+def test_native_quiet_cache_key_differs_from_fast(
+    fresh_quiet_cache, quiet_native, monkeypatch
+):
+    monkeypatch.setitem(_fast._STATE, "warned", True)
+    for mode in ("fast", "native"):
+        multi.mso_axon(*EPSG8, mode=mode)
+    modes = sorted(k[0][-1] for k in _solve._QUIET_CACHE)
+    assert modes == ["fast", "native"]
+
+
+@needs_ext
+def test_native_matches_exact_with_a_synaptic_input_off_the_soma(
+    quiet_native,
+):
+    # the synaptic input drives its own compartment, off the soma
+    kw = {"morph": D, "syn": synaptic.SynParams(t_end=15.0)}
+    args = ("Synaptic", 5, 15, 0, 3, "active-full", 15, -68.0, LAT)
+    t_e, x_e = multi.mso_axon(*args, mode="exact", **kw)
+    t_n, x_n = multi.mso_axon(*args, mode="native", **kw)
+    assert t_n[-1] == t_e[-1] == 15
+    times = np.linspace(0, 15, 151)
+    for col in (0, 2, LAT - 1):
+        np.testing.assert_allclose(
+            np.interp(times, t_n, x_n[:, col]),
+            np.interp(times, t_e, x_e[:, col]),
+            rtol=1e-4,
+            atol=5e-3,
+        )
+
+
+@needs_ext
+def test_native_drift_warning_fires_once_and_says_tolerance(monkeypatch):
+    monkeypatch.setitem(_fast._STATE, "warned_native", False)
+    monkeypatch.setitem(_fast._STATE, "warned", True)
+    monkeypatch.delenv(_fast.MODE_ENV, raising=False)
+    with pytest.warns(msoaxon.DriftWarning) as record:
+        for _ in range(2):
+            msoaxon.mso_axon(*EPSG8, mode="native")
+    drift = [w for w in record if issubclass(w.category, _fast.DriftWarning)]
+    assert len(drift) == 1
+    text = str(drift[0].message)
+    assert 'mode="native"' in text and "within the solver" in text
+    assert "not bit for bit" in text and "filterwarnings" in text
+    assert drift[0].filename == __file__

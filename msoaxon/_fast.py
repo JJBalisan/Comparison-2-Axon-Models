@@ -2,19 +2,24 @@
 
 `msoaxon_fast` (rust/, the `fast` extra) ports multi._rhs to Rust,
 expression for expression in numpy's floating-point order. multi._rhs stays
-the reference: mso_axon(mode="exact") runs it, mode="fast" runs the port.
+the reference: mso_axon(mode="exact") runs it, mode="fast" runs the port
+under scipy's BDF, and mode="native" (opt-in) runs the port under a Rust BDF
+integrator (diffsol), so no Python is left in the time loop (Native).
 
 Mode, per mso_axon call: an explicit mode= wins, then the MSOAXON_MODE
 environment variable, then the default, which is "fast" when the extension
 imports, else "exact" (silently when the extra is not installed; with a
 warning when it is installed but fails to load). Every configuration is
-ported. Asking for "fast" (by argument or environment) when it can't run
-warns and runs "exact".
+ported. Asking for "fast" or "native" (by argument or environment) when it
+can't run warns and runs "exact". "native" is never the default.
 
 The first fast run in a process checks the port against multi._rhs on a few
 fixed states and reports the result in a DriftWarning: bit-identical on the
 machine the port was checked on (darwin-arm64), it may differ in the last
 bits on other hardware, where numpy and Rust can use different exp/pow.
+The first native run issues its own DriftWarning: its steps are diffsol's,
+not scipy's, so it agrees with the reference within the solver tolerance,
+not bit for bit.
 """
 
 import importlib
@@ -65,21 +70,22 @@ def _import_ext(
 
 _ext = _import_ext()
 
-MODES = ("fast", "exact")
+MODES = ("fast", "native", "exact")
 MODE_ENV = "MSOAXON_MODE"
 
-# per process: whether the DriftWarning has been issued (pool workers inherit
-# the parent's flag, see inherit())
-_STATE = {"warned": False}
+# per process: whether the fast and the native DriftWarning have been issued
+# (pool workers inherit the parent's flags, see inherit())
+_STATE = {"warned": False, "warned_native": False}
 
 Rhs = Callable[[float, np.ndarray], np.ndarray]
 
 
 class DriftWarning(UserWarning):
-    """The Rust right-hand side is in use (mode="fast").
+    """The Rust right-hand side is in use (mode="fast" or "native").
 
-    Its results can differ from the numpy reference (mode="exact") in the
-    last bits on hardware where the two use different maths libraries.
+    Fast results can differ from the numpy reference (mode="exact") in the
+    last bits on hardware where the two use different maths libraries;
+    native results, from another integrator, within the solver tolerance.
     Silence it with warnings.filterwarnings("ignore",
     category=msoaxon.DriftWarning).
     """
@@ -97,7 +103,7 @@ def requested(mode: str | None = None) -> str | None:
         mode: The mode passed to mso_axon, or None.
 
     Returns:
-        "fast", "exact" or None (no preference).
+        "fast", "native", "exact" or None (no preference).
 
     Raises:
         ValueError: For any other value.
@@ -119,30 +125,33 @@ def effective(mode: str | None) -> str:
         mode: The mode passed to mso_axon, or None.
 
     Returns:
-        "fast" or "exact".
+        "native" when asked for and the extension imports; "fast" when
+        nothing or "fast" is asked for and it imports; else "exact".
     """
     want = requested(mode)
-    return "fast" if want != "exact" and _ext is not None else "exact"
+    if want == "exact" or _ext is None:
+        return "exact"
+    return "native" if want == "native" else "fast"
 
 
 def resolve(mode: str | None) -> str:
-    """Returns the mode one run uses, warning if "fast" can't run.
+    """Returns the mode one run uses, warning if "fast"/"native" can't run.
 
     Args:
         mode: The mode passed to mso_axon, or None.
 
     Returns:
-        "fast" or "exact".
+        "fast", "native" or "exact".
     """
-    if effective(mode) == "fast":
-        return "fast"
-    if requested(mode) == "fast":
+    got = effective(mode)
+    want = requested(mode)
+    if got == "exact" and want in ("fast", "native"):
         warnings.warn(
-            'mode="fast" asked for, but the msoaxon-fast extension is not '
-            'installed (uv sync --extra fast); running mode="exact"',
+            f'mode="{want}" asked for, but the msoaxon-fast extension is '
+            'not installed (uv sync --extra fast); running mode="exact"',
             stacklevel=3,
         )
-    return "exact"
+    return got
 
 
 def _epsg(tau: tuple[float, float]) -> tuple[float, float, float]:
@@ -288,6 +297,109 @@ def build(
     return _build(stim_type, s, input_node, active, mem, morph, input_node2)
 
 
+def build_native(
+    stim_type: str,
+    s: _common.Stimulus,
+    input_node: int,
+    active: tuple[bool, ...],
+    mem: 'multi.Membrane',
+    morph: 'multi.Morphology',
+    input_node2: int | None = None,
+) -> 'Native':
+    """Builds the Rust right-hand side and integrator for one run.
+
+    As build(), for mode="native"; the first call in a process issues the
+    native DriftWarning.
+
+    Returns:
+        A Native: callable as f(t, x), and solving whole segments in Rust.
+    """
+    if not _STATE["warned_native"]:
+        _STATE["warned_native"] = True
+        _warn_native()
+    return Native(
+        _build(stim_type, s, input_node, active, mem, morph, input_node2)
+    )
+
+
+class Native:
+    """A Rust right-hand side whose segments its Rust integrator solves.
+
+    _solve._segment hands a segment to segment() whenever the right-hand
+    side has one, instead of calling scipy; called as f(t, x) it is the
+    plain Rust right-hand side (the settled stop's dv, direct callers).
+    The integrator (diffsol's BDF with the run's Jacobian pattern) is
+    built on the first segment and reused for every later one.
+    """
+
+    def __init__(self, rhs: Rhs) -> None:
+        """Wraps `rhs`, an msoaxon_fast.MultiRhs."""
+        self._rhs = rhs
+        self._integrator = None
+
+    def __call__(self, t: float, x: np.ndarray) -> np.ndarray:
+        """Returns dx/dt at (t, x), the Rust right-hand side."""
+        return self._rhs(t, x)
+
+    def segment(
+        self,
+        a: float,
+        b: float,
+        y: np.ndarray,
+        rtol: float,
+        atol: float,
+        max_step: float,
+        events: object = None,
+    ) -> tuple[np.ndarray, np.ndarray, bool]:
+        """Solves [a, b] from y in Rust; _solve._segment's contract.
+
+        Args:
+            a: Segment start [ms].
+            b: Segment end [ms].
+            y: The state at a.
+            rtol: Relative tolerance.
+            atol: Absolute tolerance.
+            max_step: Largest step [ms].
+            events: None, or one or a list of _solve.spike_event /
+                settled_event closures (read through their `spec`).
+
+        Returns:
+            (t, y, stopped): t from a (y included) to b or the event, y
+            shaped (n_states, len(t)) like solve_ivp's, stopped whether
+            an event fired.
+
+        Raises:
+            ValueError: For an event without a `spec`.
+        """
+        if self._integrator is None:
+            self._integrator = self._rhs.integrator()
+        spike = settled = None
+        if events is not None and not isinstance(events, list | tuple):
+            events = [events]
+        for event in events or ():
+            spec = getattr(event, "spec", None)
+            if spec is None:
+                raise ValueError(
+                    'mode="native" runs only _solve.spike_event and '
+                    f"settled_event, got {event!r}"
+                )
+            if spec[0] == "spike":
+                spike = (int(spec[1]), float(spec[2]))
+            else:
+                settled = (float(spec[1]), int(spec[2]), float(spec[3]))
+        t, ys, stopped = self._integrator.run(
+            np.ascontiguousarray(y, dtype=np.float64),
+            float(a),
+            float(b),
+            float(rtol),
+            float(atol),
+            float(max_step),
+            spike,
+            settled,
+        )
+        return t, ys.T, stopped
+
+
 def _build(
     stim_type: str,
     s: _common.Stimulus,
@@ -416,12 +528,34 @@ def _warn_drift() -> None:
     )
 
 
-def parent_state() -> tuple[str | None, bool]:
-    """Returns what pool workers inherit: MSOAXON_MODE and the warned flag."""
-    return os.environ.get(MODE_ENV), _STATE["warned"]
+def _warn_native() -> None:
+    """Issues the native DriftWarning."""
+    warnings.warn(
+        'msoaxon is running its Rust BDF integrator (mode="native"): '
+        "diffsol's BDF over the Rust right-hand side, in place of scipy's. "
+        "Results agree with the numpy reference within the solver "
+        "tolerance, not bit for bit: the steps, and so the last digits and "
+        'event times, are its own. Pass mode="fast" or mode="exact" (or '
+        f"set {MODE_ENV}) for scipy's BDF; silence this with "
+        'warnings.filterwarnings("ignore", category=msoaxon.DriftWarning).',
+        DriftWarning,
+        stacklevel=4,
+    )
 
 
-def inherit(env_mode: str | None, warned: bool) -> None:
+def parent_state() -> tuple[str | None, tuple[bool, bool]]:
+    """Returns what pool workers inherit: MSOAXON_MODE and the warned flags.
+
+    Returns:
+        (MSOAXON_MODE or None, (fast warned, native warned)).
+    """
+    return os.environ.get(MODE_ENV), (
+        _STATE["warned"],
+        _STATE["warned_native"],
+    )
+
+
+def inherit(env_mode: str | None, warned: bool | tuple[bool, bool]) -> None:
     """Pool-worker initializer: adopts the parent's parent_state().
 
     A forkserver worker forks from a server started with the environment
@@ -431,10 +565,14 @@ def inherit(env_mode: str | None, warned: bool) -> None:
 
     Args:
         env_mode: The parent's MSOAXON_MODE (None if unset).
-        warned: Whether the parent issued the DriftWarning.
+        warned: Whether the parent issued the fast and the native
+            DriftWarning, as parent_state() pairs them; a bool is the
+            fast one alone.
     """
     if env_mode is None:
         os.environ.pop(MODE_ENV, None)
     else:
         os.environ[MODE_ENV] = env_mode
-    _STATE["warned"] = _STATE["warned"] or warned
+    fast, native = warned if isinstance(warned, tuple) else (warned, False)
+    _STATE["warned"] = _STATE["warned"] or fast
+    _STATE["warned_native"] = _STATE["warned_native"] or native
