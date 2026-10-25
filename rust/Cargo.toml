@@ -8,7 +8,7 @@ publish = false
 
 [lib]
 name = "msoaxon_fast"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pyo3 = { version = "0.25", features = ["abi3-py311"] }
