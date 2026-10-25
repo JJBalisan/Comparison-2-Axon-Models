@@ -6,6 +6,57 @@ and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least. The `msoaxon-fast` crate in `rust/` carries the
 same version as the package, bumped in the same release PR.
 
+## 1.5.0 (26 Oct 2026)
+
+The first release with the Rust integrator (#28, Phase 0 and lane D): an
+opt-in `mode="native"` that runs the whole 45-compartment integration in Rust,
+a fix to the synaptic inputs' driving force that changes results for off-soma
+synaptic runs only, and the Phase 0 tooling. The golden traces, the 28 pinned
+thresholds, the somatic table and the benchmark's 300 runs are unchanged in
+every mode, and the default mode stays `"fast"`.
+
+### Added
+
+- `mode="native"` (or `MSOAXON_MODE=native`): the Rust right-hand side under a
+  Rust BDF integrator (diffsol 0.18.0, pure Rust) takes the whole time loop
+  out of Python; `mso_axon` still splits the run at the stimulus breakpoints
+  and keeps the pre-stimulus cache. It agrees with the reference within the
+  solver tolerance on every golden trace (`tests/test_golden.py` runs each
+  multi case in native too, at most 31% of the tolerance consumed, `t_last`
+  exact), `benchmark_search --check` flips none of its 300 spike decisions,
+  and thresholds and windows run 7.2x / 7.9x faster than fast mode. Opt-in:
+  the default stays `"fast"` until #106; `"Events"` falls back to `"exact"`
+  in native as in fast (#107). PYTHON.md gains "Native mode: the BDF
+  integrator in Rust" (#102).
+- `scripts/phase0_harness.py`: golden-margin, search-timing and step-count
+  measurements per mode, the baseline the integrator is judged by (#101).
+- `prototype/diffsol-probe/` and `prototype/diffsol-real/`: the Phase 0 probe
+  (a toy system with the model's sparsity and its REPORT.md) and the E1
+  experiment crate (diffsol over the real right-hand side). Reference code,
+  not shipped behaviour (#100, #104).
+
+### Changed
+
+- The Rust right-hand side lives in a pyo3-free `rust/src/core.rs` with a
+  thin binding in `lib.rs`, and the crate also builds as an rlib. No
+  behaviour change (#99).
+- The `msoaxon-fast` crate depends on diffsol, pinned at `=0.18.0` until
+  #110: the extension grows from 0.70 to 1.85 MB (about 1.15 MB more per
+  wheel), a clean build takes about ten times longer (about 100 s on an M1
+  Max), and `rust/Cargo.lock` holds 162 crates, all pure Rust with
+  permissive licences.
+
+### Fixed
+
+- `Synaptic` and `SynapticPair` inputs at `input_node != 1` drove their
+  compartment with the soma's driving force, `V[0] - VsynE`, in the
+  reference and, bit for bit, in the Rust port. Both now use the input
+  compartment's voltage, in the same evaluation order, so fast stays
+  bit-identical to exact. Every golden synaptic case has `input_node=1`, so
+  the golden traces are unchanged; results change only for off-soma synaptic
+  runs. The native Jacobian pattern drops the entry the bug had required
+  (#103).
+
 ## 1.4.0 (25 Oct 2026)
 
 The last batch before the Rust port (#28): a general synaptic input, a
