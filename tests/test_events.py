@@ -242,27 +242,25 @@ def test_input_end_uses_the_slowest_decay():
 
 
 @pytest.mark.parametrize("model", ["multi", "two"])
-def test_runs_share_the_quiet_prefix_and_the_settled_stop_works(model):
+def test_runs_share_the_quiet_prefix_and_the_settled_stop_works(
+    fresh_quiet_cache, model
+):
     run = multi.mso_axon if model == "multi" else two.two_cpt
+    kw = {"mode": "exact"} if model == "multi" else {}
     # a subthreshold pair: the settled stop ends the run well before t_end
     syn = SynParams(
-        t_end=T_END, events=(Event(6.0, 1, 10.0), Event(6.2, 1, 10))
+        t_end=T_END, events=(Event(6.0, 1, 10.0), Event(6.2, 1, 10.0))
     )
-    kw = {"stop_on_spike": 10.0, "stop_when_settled": True}
-    if model == "multi":
-        kw["mode"] = "exact"  # no fallback warning in this test
-    t, x = run(
-        "Events", 0.0, 0.0, 1.0, 3, "active-full", T_END, -68.0, 1, syn, **kw
-    )
+    args = ("Events", 0.0, 0.0, 1.0, 3, "active-full", T_END, -68.0, 1, syn)
+    t, x = run(*args, stop_on_spike=10.0, stop_when_settled=True, **kw)
     assert 6.2 < t[-1] < T_END
     col = 2 if model == "multi" else 1
     assert x[-1, col] - x[-1, 0] < 10.0 * _solve.SETTLED_FRACTION
-    # the quiet prefix: the first breakpoint is the first onset
-    key_count_before = len(_solve._QUIET_CACHE)
-    kw.pop("stop_on_spike")
-    kw.pop("stop_when_settled")
-    run("Events", 0.0, 0.0, 1.0, 3, "active-full", T_END, -68.0, 1, syn, **kw)
-    assert len(_solve._QUIET_CACHE) == key_count_before
+    # the stimulus-free prefix up to the first onset is cached once and
+    # shared by the next run with the same settings
+    assert len(_solve._QUIET_CACHE) == 1
+    run(*args, **kw)
+    assert len(_solve._QUIET_CACHE) == 1
 
 
 def test_fast_mode_falls_back_to_exact_with_a_warning():
