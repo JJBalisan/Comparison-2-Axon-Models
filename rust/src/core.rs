@@ -649,6 +649,11 @@ impl MultiRhs {
         self.n
     }
 
+    /// The axial edges, 0-based: (parent, child), one entry per edge.
+    pub fn edges(&self) -> (&[usize], &[usize]) {
+        (&self.parent, &self.child)
+    }
+
     /// Writes dx/dt for state `x` at time `t` into `out` (both 7n long).
     pub fn eval(&self, t: f64, x: &[f64], out: &mut [f64]) {
         let n = self.n;
@@ -804,7 +809,7 @@ pub fn tree_jac_sparsity(n: usize, parent: &[usize], child: &[usize]) -> (Vec<us
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Numpy and Rust call the same libm on the machine the port was written
@@ -965,7 +970,7 @@ mod tests {
     /// A 45-compartment chain in the pattern of `constants.py` (soma, two
     /// AIS, 21 internode/node pairs) with an EPSG pair at the soma; the
     /// values are fixed, not the real morphology.
-    fn model() -> MultiRhs {
+    pub(crate) fn model() -> MultiRhs {
         let n = 45;
         let axon = |head: [f64; 3], internode: f64, node: f64| -> Vec<f64> {
             (0..n)
@@ -1005,9 +1010,22 @@ mod tests {
         }
     }
 
+    /// [`model`] with a current step into the soma, on for 0 < t <= 50 ms
+    /// (a negative `amp` hyperpolarises it).
+    pub(crate) fn step_model(amp: f64) -> MultiRhs {
+        MultiRhs {
+            stim: Stim::Step {
+                start: 0.0,
+                stop: 50.0,
+                amp,
+            },
+            ..model()
+        }
+    }
+
     /// V from -75 mV in 0.7 mV steps, the six gates a fixed pattern in
     /// 0.05..0.95.
-    fn state() -> Vec<f64> {
+    pub(crate) fn state() -> Vec<f64> {
         (0..7 * 45)
             .map(|j| {
                 if j < 45 {
