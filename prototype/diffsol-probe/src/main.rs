@@ -3,8 +3,11 @@
 
 use std::time::{Duration, Instant};
 
-use diffsol_probe::model::{Model, N};
-use diffsol_probe::solve::{dense, faer_dense, sparse, Cfg, Trace};
+use diffsol_probe::lu::time_lu;
+use diffsol_probe::model::{Jv, Model, N};
+use diffsol_probe::solve::{
+    dense, detected_pattern, faer_dense, jacobian_at, sparse, sparse_explicit, Cfg, Trace,
+};
 
 const RUNS: usize = 9;
 
@@ -146,7 +149,8 @@ fn item4(m: &Model) {
         ("dense FaerMat+FaerLU, FD Jv", faer_dense::solve, true),
     ];
     for (name, f, fd) in probes {
-        let cfg = Cfg { fd, ..staged() };
+        let jv = if fd { Jv::Fd } else { Jv::Analytic };
+        let cfg = Cfg { jv, ..staged() };
         let (w, tr) = timed(f, m, &cfg);
         println!(
             "{name}: {} steps, {} setups, {:.0} us, {:.2} us/step",
@@ -238,6 +242,190 @@ fn item5(m: &Model) {
     let _: Option<Duration> = None;
 }
 
+fn max_abs_diff(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b).fold(0.0, |m, (x, y)| m.max((x - y).abs()))
+}
+
+/// One line per run: steps, set-ups, nnz, build and median solve time.
+fn report(name: &str, f: Solve, m: &Model, y0: &[f64], cfg: &Cfg) -> Option<Trace> {
+    let mut walls = Vec::new();
+    let mut builds = Vec::new();
+    let mut last = None;
+    for _ in 0..RUNS {
+        match f(m, y0, cfg) {
+            Ok(tr) => {
+                walls.push(tr.wall.as_secs_f64());
+                builds.push(tr.build.as_secs_f64());
+                last = Some(tr);
+            }
+            Err(e) => {
+                println!("{name}: FAILED: {e}");
+                return None;
+            }
+        }
+    }
+    let tr = last.unwrap();
+    let w = median(walls) * 1e6;
+    println!(
+        "{name}: nnz {:?}, {} steps, {} setups, build {:.0} us, solve {:.0} us, \
+         {:.2} us/step",
+        tr.jac_nnz,
+        tr.steps,
+        tr.lu_setups,
+        median(builds) * 1e6,
+        w,
+        w / tr.steps as f64
+    );
+    Some(tr)
+}
+
+fn item4a(m: &Model) {
+    println!("== item 4a: explicit pattern (build_from_eqn) vs auto-detected");
+    let y0 = m.rest();
+    for jv in [Jv::Analytic, Jv::Fd] {
+        let cfg = Cfg {
+            jv,
+            record: true,
+            ..staged()
+        };
+        let a = report(&format!("auto     {jv:?}"), sparse::solve, m, &y0, &cfg).unwrap();
+        let e = report(
+            &format!("explicit {jv:?}"),
+            sparse_explicit::solve,
+            m,
+            &y0,
+            &cfg,
+        )
+        .unwrap();
+        let same_t = a.t == e.t;
+        let same_y = a.y == e.y;
+        println!(
+            "  same step times bitwise {same_t}, same states bitwise {same_y}, \
+             max |final diff| {:.1e}",
+            max_abs_diff(&a.final_y, &e.final_y)
+        );
+    }
+}
+
+fn item4b(m: &Model) {
+    println!("== item 4b: what NaN-probe detection sees (explicit pattern 943)");
+    let (rows, _) = m.pattern();
+    println!("explicit pattern length {}", rows.len());
+    for (yname, y0) in [
+        ("rest", m.rest()),
+        ("edge (V = E_K, gates 0/1)", m.edge_state()),
+    ] {
+        for jv in [
+            Jv::Analytic,
+            Jv::Fd,
+            Jv::SkipZero,
+            Jv::Guarded,
+            Jv::CoefSkip,
+        ] {
+            let nz = detected_pattern(m, &y0, jv);
+            println!("  y0 {yname}, Jv {jv:?}: detected nnz {}", nz.len());
+        }
+    }
+    println!("-- consequence, staged run t = 0..12 from rest");
+    let y0 = m.rest();
+    let tight = Cfg {
+        rtol: 1e-10,
+        atol: 1e-12,
+        ..staged()
+    };
+    let truth = sparse_explicit::solve(m, &y0, &tight).unwrap().final_y;
+    for (name, f, jv) in [
+        ("auto     Analytic", sparse::solve as Solve, Jv::Analytic),
+        ("auto     Guarded ", sparse::solve as Solve, Jv::Guarded),
+        (
+            "explicit Guarded ",
+            sparse_explicit::solve as Solve,
+            Jv::Guarded,
+        ),
+    ] {
+        let cfg = Cfg { jv, ..staged() };
+        if let Some(tr) = report(name, f, m, &y0, &cfg) {
+            println!(
+                "  max |final - rtol1e-10 reference| {:.2e} mV",
+                max_abs_diff(&tr.final_y, &truth)
+            );
+        }
+    }
+    println!("-- consequence, staged run t = 0..12 from the edge state");
+    let y0 = m.edge_state();
+    let truth = sparse_explicit::solve(m, &y0, &tight).unwrap().final_y;
+    for (name, f, jv) in [
+        ("auto     Analytic", sparse::solve as Solve, Jv::Analytic),
+        ("auto     CoefSkip", sparse::solve as Solve, Jv::CoefSkip),
+        (
+            "explicit CoefSkip",
+            sparse_explicit::solve as Solve,
+            Jv::CoefSkip,
+        ),
+    ] {
+        let cfg = Cfg { jv, ..staged() };
+        if let Some(tr) = report(name, f, m, &y0, &cfg) {
+            println!(
+                "  max |final - rtol1e-10 reference| {:.2e} mV",
+                max_abs_diff(&tr.final_y, &truth)
+            );
+        }
+    }
+}
+
+fn item4c() {
+    println!("== item 4c: dendrite tree (25 trunk + 2 x 10 branches off 5)");
+    let chain = Model::default();
+    let tree = Model::tree();
+    for (name, m) in [("chain", &chain), ("tree ", &tree)] {
+        let y0 = m.rest();
+        let (rows, cols) = m.pattern();
+        let mut want: Vec<(usize, usize)> = rows.iter().copied().zip(cols).collect();
+        want.sort_unstable();
+        let got = detected_pattern(m, &y0, Jv::Fd);
+        println!(
+            "{name}: explicit pattern {} entries, auto-detected (FD Jv) {}, identical {}",
+            want.len(),
+            got.len(),
+            want == got
+        );
+        for jv in [Jv::Analytic, Jv::Fd] {
+            let cfg = Cfg { jv, ..staged() };
+            let a = report(
+                &format!("  {name} auto     {jv:?}"),
+                sparse::solve,
+                m,
+                &y0,
+                &cfg,
+            );
+            let e = report(
+                &format!("  {name} explicit {jv:?}"),
+                sparse_explicit::solve,
+                m,
+                &y0,
+                &cfg,
+            );
+            if let (Some(a), Some(e)) = (a, e) {
+                println!(
+                    "    auto vs explicit: steps {} / {}, max |final diff| {:.1e}",
+                    a.steps,
+                    e.steps,
+                    max_abs_diff(&a.final_y, &e.final_y)
+                );
+            }
+        }
+        let jac = jacobian_at(m, &y0, Jv::Analytic);
+        for c in [1e-3, 1e-1] {
+            let lu = time_lu(&jac, c, 201);
+            println!(
+                "  {name} FaerSparseLU on J - I/{c}: symbolic {:.1} us, numeric {:.1} us, \
+                 solve {:.1} us",
+                lu.symbolic_us, lu.numeric_us, lu.solve_us
+            );
+        }
+    }
+}
+
 fn main() {
     let m = Model::default();
     let which = std::env::args().nth(1).unwrap_or_default();
@@ -256,5 +444,14 @@ fn main() {
     }
     if all || which == "5" {
         item5(&m);
+    }
+    if all || which == "4a" {
+        item4a(&m);
+    }
+    if all || which == "4b" {
+        item4b(&m);
+    }
+    if all || which == "4c" {
+        item4c();
     }
 }

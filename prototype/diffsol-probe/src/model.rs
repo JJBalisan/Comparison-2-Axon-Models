@@ -4,9 +4,32 @@
 //! gate blocks `g_k[0..45]`.  The voltage Jacobian block is tridiagonal
 //! (a sealed cable) and each gate block is diagonal, with each gate driven
 //! only by the voltage of its own compartment, exactly like
-//! `multi._chain_jac_sparsity`.
+//! `multi._chain_jac_sparsity`.  [`Model::tree`] swaps the chain for a
+//! branched morphology given as a parent/child edge list (the pattern of
+//! `multi._tree_jac_sparsity`).
 
 use std::cell::Cell;
+
+use crate::pattern::tree_jac_sparsity;
+
+/// Which Jacobian-vector product the solver is handed.
+///
+/// All of them return the same `J v` for finite `v`; they differ only in
+/// what they do with the NaN-tainted probe vectors diffsol uses to detect
+/// the sparsity pattern.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Jv {
+    /// Branch-free analytic product ([`Model::jv`]).
+    Analytic,
+    /// Forward difference of the RHS ([`Model::jv_fd`]).
+    Fd,
+    /// Analytic, skipping inputs with `v == 0.0` ([`Model::jv_skip_zero`]).
+    SkipZero,
+    /// Analytic, gate inputs used only if `|v| > 0` ([`Model::jv_guarded`]).
+    Guarded,
+    /// Analytic, skipping zero coefficients ([`Model::jv_coef_skip`]).
+    CoefSkip,
+}
 
 /// Number of compartments.
 pub const NC: usize = 45;
@@ -43,6 +66,12 @@ pub struct Model {
     pub thr0: f64,
     /// Voltage threshold of root 1 (distal compartment).
     pub thr1: f64,
+    /// Axial edges `(parent[e], child[e])`; the chain is `e -> e + 1`.
+    pub parent: Vec<usize>,
+    pub child: Vec<usize>,
+    /// Neighbour lists built from the edges; `None` keeps the chain's
+    /// original arithmetic (bit-identical to the probe before trees).
+    nbrs: Option<Vec<Vec<usize>>>,
 }
 
 impl Default for Model {
@@ -62,6 +91,9 @@ impl Default for Model {
             pulse: (2.0, 2.3),
             thr0: -20.0,
             thr1: 0.0,
+            parent: (0..NC - 1).collect(),
+            child: (1..NC).collect(),
+            nbrs: None,
         }
     }
 }
@@ -84,6 +116,60 @@ impl Model {
         }
     }
 
+    /// The model on a tree given by its edge list (`NC` compartments).
+    pub fn with_edges(parent: Vec<usize>, child: Vec<usize>) -> Self {
+        let mut nbrs = vec![Vec::new(); NC];
+        for (&p, &c) in parent.iter().zip(&child) {
+            nbrs[p].push(c);
+            nbrs[c].push(p);
+        }
+        Self {
+            parent,
+            child,
+            nbrs: Some(nbrs),
+            ..Self::default()
+        }
+    }
+
+    /// A 45-compartment tree: a 25-compartment trunk `0..25` with two
+    /// 10-compartment branches `25..35` and `35..45`, both off compartment 5.
+    pub fn tree() -> Self {
+        let (mut parent, mut child) = (Vec::new(), Vec::new());
+        let mut edge = |p: usize, c: usize| {
+            parent.push(p);
+            child.push(c);
+        };
+        for i in 0..24 {
+            edge(i, i + 1);
+        }
+        for start in [25, 35] {
+            edge(5, start);
+            for i in start..start + 9 {
+                edge(i, i + 1);
+            }
+        }
+        Self::with_edges(parent, child)
+    }
+
+    /// The explicit Jacobian pattern: `core.rs::tree_jac_sparsity` on the
+    /// model's edges (`chain_jac_sparsity` for the default chain).
+    pub fn pattern(&self) -> (Vec<usize>, Vec<usize>) {
+        tree_jac_sparsity(NC, &self.parent, &self.child)
+    }
+
+    /// The axial term of compartment `i` before the factor `d`.
+    #[inline]
+    fn axial(&self, x: &[f64], i: usize) -> f64 {
+        match &self.nbrs {
+            None => {
+                let vm = if i > 0 { x[i - 1] } else { x[i] };
+                let vp = if i + 1 < NC { x[i + 1] } else { x[i] };
+                vm - 2.0 * x[i] + vp
+            }
+            Some(nb) => nb[i].iter().fold(0.0, |a, &j| a + (x[j] - x[i])),
+        }
+    }
+
     /// Resting state: V at the leak reversal, gates at steady state.
     pub fn rest(&self) -> Vec<f64> {
         let mut y = vec![0.0; N];
@@ -99,9 +185,7 @@ impl Model {
     /// Right-hand side `y = f(x)`.
     pub fn rhs(&self, x: &[f64], _t: f64, y: &mut [f64]) {
         for i in 0..NC {
-            let vm = if i > 0 { x[i - 1] } else { x[i] };
-            let vp = if i + 1 < NC { x[i + 1] } else { x[i] };
-            let mut dv = self.d * (vm - 2.0 * x[i] + vp);
+            let mut dv = self.d * self.axial(x, i);
             dv += self.gl * (self.el - x[i]);
             for k in 0..NG {
                 let g = x[NC * (1 + k) + i];
@@ -123,9 +207,7 @@ impl Model {
     /// Analytic Jacobian-vector product `y = J(x) v`.
     pub fn jv(&self, x: &[f64], _t: f64, v: &[f64], y: &mut [f64]) {
         for i in 0..NC {
-            let vm = if i > 0 { v[i - 1] } else { v[i] };
-            let vp = if i + 1 < NC { v[i + 1] } else { v[i] };
-            let mut acc = self.d * (vm - 2.0 * v[i] + vp) - self.gl * v[i];
+            let mut acc = self.d * self.axial(v, i) - self.gl * v[i];
             for k in 0..NG {
                 let g = x[NC * (1 + k) + i];
                 acc -= self.gbar[k] * g * v[i];
@@ -139,6 +221,110 @@ impl Model {
                 y[j] = (dginf(self, k, x[i]) * v[i] - v[j]) / self.tau[k];
             }
         }
+    }
+
+    /// `J v` with the input-sparsity shortcut `if v == 0.0 { skip }` on
+    /// every gate term.  NaN == 0.0 is false, so NaN probes are NOT
+    /// skipped: this shortcut is harmless for detection.
+    pub fn jv_skip_zero(&self, x: &[f64], _t: f64, v: &[f64], y: &mut [f64]) {
+        for i in 0..NC {
+            let mut acc = self.d * self.axial(v, i) - self.gl * v[i];
+            for k in 0..NG {
+                acc -= self.gbar[k] * x[NC * (1 + k) + i] * v[i];
+                let vg = v[NC * (1 + k) + i];
+                if vg == 0.0 {
+                    continue;
+                }
+                acc += self.gbar[k] * (self.ek[k] - x[i]) * vg;
+            }
+            y[i] = acc;
+        }
+        for k in 0..NG {
+            for i in 0..NC {
+                let j = NC * (1 + k) + i;
+                let mut acc = -v[j];
+                if v[i] != 0.0 {
+                    acc += dginf(self, k, x[i]) * v[i];
+                }
+                y[j] = acc / self.tau[k];
+            }
+        }
+    }
+
+    /// The same shortcut written the other way round: a gate input is used
+    /// only `if v.abs() > 0.0`.  Exact for every finite `v`, but NaN > 0 is
+    /// false, so the probe silently drops all 6 * NC dV/dgate entries.
+    pub fn jv_guarded(&self, x: &[f64], _t: f64, v: &[f64], y: &mut [f64]) {
+        for i in 0..NC {
+            let mut acc = self.d * self.axial(v, i) - self.gl * v[i];
+            for k in 0..NG {
+                acc -= self.gbar[k] * x[NC * (1 + k) + i] * v[i];
+                let vg = v[NC * (1 + k) + i];
+                if vg.abs() > 0.0 {
+                    acc += self.gbar[k] * (self.ek[k] - x[i]) * vg;
+                }
+            }
+            y[i] = acc;
+        }
+        for k in 0..NG {
+            for i in 0..NC {
+                let j = NC * (1 + k) + i;
+                y[j] = (dginf(self, k, x[i]) * v[i] - v[j]) / self.tau[k];
+            }
+        }
+    }
+
+    /// `J v` skipping terms whose coefficient is exactly zero at `x`: what
+    /// the probe sees then depends on the state it is evaluated at (y0).
+    /// At V = E_k the dV/dg_k coefficient `gbar_k (E_k - V)` vanishes.
+    pub fn jv_coef_skip(&self, x: &[f64], _t: f64, v: &[f64], y: &mut [f64]) {
+        for i in 0..NC {
+            let mut acc = self.d * self.axial(v, i) - self.gl * v[i];
+            for k in 0..NG {
+                acc -= self.gbar[k] * x[NC * (1 + k) + i] * v[i];
+                let c = self.gbar[k] * (self.ek[k] - x[i]);
+                if c != 0.0 {
+                    acc += c * v[NC * (1 + k) + i];
+                }
+            }
+            y[i] = acc;
+        }
+        for k in 0..NG {
+            for i in 0..NC {
+                let j = NC * (1 + k) + i;
+                let c = dginf(self, k, x[i]);
+                let mut acc = -v[j];
+                if c != 0.0 {
+                    acc += c * v[i];
+                }
+                y[j] = acc / self.tau[k];
+            }
+        }
+    }
+
+    /// Dispatch on [`Jv`].
+    pub fn jv_by(&self, kind: Jv, x: &[f64], t: f64, v: &[f64], y: &mut [f64]) {
+        match kind {
+            Jv::Analytic => self.jv(x, t, v, y),
+            Jv::Fd => self.jv_fd(x, t, v, y),
+            Jv::SkipZero => self.jv_skip_zero(x, t, v, y),
+            Jv::Guarded => self.jv_guarded(x, t, v, y),
+            Jv::CoefSkip => self.jv_coef_skip(x, t, v, y),
+        }
+    }
+
+    /// A start state on the edge of the domain: every V at E_K = -80 mV
+    /// (the reversal of gates 1 and 2) and gates alternately exactly 0 and
+    /// exactly 1.
+    pub fn edge_state(&self) -> Vec<f64> {
+        let mut y = vec![0.0; N];
+        for i in 0..NC {
+            y[i] = self.ek[1];
+            for k in 0..NG {
+                y[NC * (1 + k) + i] = ((i + k) % 2) as f64;
+            }
+        }
+        y
     }
 
     /// Forward-difference Jacobian-vector product built from `rhs` only.
