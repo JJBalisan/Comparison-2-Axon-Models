@@ -396,6 +396,17 @@ Findings:
 - Goldwyn's faster membrane narrows it by about 17%.
 - An earlier estimate here (half-way point of the threshold curve, ~340 µs)
   measured a different quantity.
+- Inhibition is not modelled (#77). The targets once it is: Myoga et al. 2014
+  found an AP half-width of 208 µs with inhibition 0.2 ms before the pair,
+  and the optimum moved by −73 µs with inhibition leading by 0.1 ms and by
+  +41 µs with it lagging by 0.6 ms. Roberts et al. 2013
+  ([doi](https://doi.org/10.1016/j.neuron.2013.04.022), dynamic clamp),
+  Franken et al. 2015 ([doi](https://doi.org/10.1038/nn.3948), in vivo
+  strychnine) and Casarez et al. 2026
+  ([doi](https://doi.org/10.7554/eLife.111364), reviewed preprint) instead
+  find that inhibition narrows the ITD function without shifting it. Myoga's
+  model had no Kv1 history effect; both models here have KLT, so they can test
+  which outcome follows.
 
 #### Spike criterion
 
@@ -470,11 +481,11 @@ Values are for the Python port.
 
 | | Model | Literature |
 |---|---|---|
-| EPSP half-width at soma | 523–549 µs | 0.52–0.6 ms |
-| Spike initiation site | AIS | AIS (Lehnert 2014) |
-| Input resistance, active, at rest | 2.5 MΩ steady, ~4.8 MΩ peak | 5 MΩ (Lehnert's model); ~7 MΩ measured |
+| EPSP half-width at soma | 523–549 µs | 0.52–0.6 ms; PSP half-width 467 µs with the 0.3 ms EPSG (Myoga et al. 2014) |
+| Spike initiation site | AIS by construction: nothing measures which compartment crosses first (#80) | AIS; 5–60% of spikes start at node 1 or 2 under sustained input (Lehnert 2014) |
+| Input resistance, active, at rest | 2.4 MΩ steady, ~4.7 MΩ peak | 5 MΩ (Lehnert's model); ~7 MΩ measured |
 | Somatic spike, from inflection (100 ms step) | 7.4 / 13.3 / 18.2 mV at 1.5× / 2× / 3× rheobase | 17 ± 2 mV mature, 5–15 mV near threshold, graded |
-| Best frequency for half-wave sine input | 400–500 Hz | subthreshold resonance 242–300 Hz |
+| Best frequency for half-wave sine input | 400–500 Hz | spike resonance 285 Hz, EPSC-train threshold minimum 317 Hz; subthreshold resonance 242 Hz (Mikiel-Hunter et al. 2016, [doi](https://doi.org/10.1371/journal.pcbi.1005166)); a suprathreshold measure belongs against the first two (#83) |
 
 An earlier version of this table listed a ~40 mV somatic spike as the clearest
 mismatch. That figure was measured from rest during an EPSG pair at 2×
@@ -483,10 +494,24 @@ experiments (next section), the spike matches mature cells.
 
 ### Missing relative to current models
 
-- dendrites
-- glycinergic inhibition
-- binaural or history-dependent input
-- variation in cell properties along the frequency map
+Each item has an issue (label `literature-2026-10`):
+
+- glycinergic inhibition: no inhibitory conductance or reversal anywhere
+  (#77)
+- stochastic, history-bearing input: fibre counts, Poisson arrivals, pre-pulse
+  trains; `probability_trials` jitters a pair and `Synaptic` is one filtered
+  noise table (#78)
+- axon geometry as parameters: internode length, diameter, node length, AIS
+  length and start and myelin capacitance are folded into the constants
+  (#81)
+- an initiation-site readout (#80)
+- variation in cell properties along the frequency map: Ih density, V½ and
+  time constant, Na oscillation parameters (#82)
+- temperature as a parameter rather than two Q10 literals (#82)
+- a Kv7 / M-type current (#85)
+- free two-compartment coupling instead of the `node` lookup (#84)
+
+Dendrites, listed here until October 2026, are in (see below).
 
 ### Somatic spike
 
@@ -548,8 +573,21 @@ than the spike.
 
 `mso_axon(..., mem=membrane(v0, ...))` exposes the knobs used for the block:
 - `soma_klt_scale` and `ais_klt_scale`
-- `soma_na_vhalf`: Scott et al. 2010 measured −77 mV for somatic Na
-  inactivation; the model uses −62.5.
+- `soma_na_vhalf`: Scott et al. 2010
+  ([doi](https://doi.org/10.1523/JNEUROSCI.2385-09.2010)) measured −77 mV
+  for somatic Na inactivation, with about 92% of channels inactivated at
+  rest (−58 mV); the model uses −62.5. With the model's own slope (7.77 mV),
+  `constants.hinf` gives:
+
+  | Rest | V½ −62.5 (default) | V½ −77 (Scott 2010) |
+  |---|---|---|
+  | −68 mV (this model) | 33% inactivated | 76% |
+  | −58 mV (Goldwyn 2019, Scott 2010) | 64% | 92% |
+
+  So the two numbers reproduce the measurement only together, and the default
+  rests with about 8× the available somatic Na that was measured. Whether that
+  is a deliberate choice in Lehnert et al. 2014 is open. The knob is for this
+  model only: `two_cpt` takes no membrane (#79).
 - `rebalance_rest`: sets each leak reversal so rest stays at `v0`. Without it,
   removing KLT makes the cell fire with no input.
 
@@ -611,6 +649,15 @@ Neither variant matches everything:
 
 Both reproduce the qualitative dendritic results: attenuation along the cable,
 EPSP sharpening by dendritic KLT, and the bilateral advantage.
+
+Not yet compared: Winters et al. 2017
+([doi](https://doi.org/10.1523/JNEUROSCI.3110-16.2017)) found dendritic
+spontaneous EPSPs growing with distance from the soma (length constant 53.6
+µm) yet arriving there at a uniform ~0.2 mV, and Callan et al. 2020
+([doi](https://doi.org/10.1523/JNEUROSCI.1055-20.2020)) found single fibres
+contacting a dendrite at a median of four sites. Both are calibration targets
+for synaptic strength against distance once inputs can be placed as fibres
+(#78).
 
 ### Dendritic axial resistivity 200 Ω·cm
 
