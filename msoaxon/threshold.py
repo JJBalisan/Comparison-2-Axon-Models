@@ -4,7 +4,7 @@ from collections.abc import Callable
 from concurrent import futures
 from typing import Any
 
-from msoaxon import _common, _dispatch, _parallel, spiking, synaptic
+from msoaxon import _bisect, _common, _dispatch, _parallel, spiking, synaptic
 
 START = _common.START
 T_END = _common.T_END
@@ -92,7 +92,11 @@ def _search(
     """Runs the halving search exactly as BinarySearch.m does it.
 
     Returns the last tested value.
+
+    Raises:
+        ValueError: If zoom is not > 0.
     """
+    _bisect.check_positive("zoom", zoom)
     location, previous, distance, first = max_I, 0.0, max_I, 0.0
     while distance > zoom and location <= max_I:
         stop, syn, I_override = sweep_setting(stim_type, i, epsg_pair_dt)
@@ -192,7 +196,11 @@ def binary_search(
 
     Returns:
         (thresholds_multi, thresholds_two), one value per sweep point.
+
+    Raises:
+        ValueError: If zoom is not > 0 (checked before any run).
     """
+    _bisect.check_positive("zoom", zoom)
     # multi-compartment points first: they take ~10x longer, so starting them
     # early keeps the pool busy while the cheap two-compartment points fill the
     # gaps

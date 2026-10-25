@@ -204,8 +204,11 @@ def rheobase(
 
     Raises:
         _bisect.FiresWithoutInputError: If the cell fires with no input.
-        ValueError: If mem is given both as `mem` and in model_kw.
+        ValueError: If rel_tol or guess is not > 0, or if mem is given
+            both as `mem` and in model_kw.
     """
+    _bisect.check_positive("rel_tol", rel_tol)
+    _bisect.check_positive("guess", guess)
     kw = _merge_kw(mem, model_kw)
     factor = _factor(criterion, model, node, v0, kw)
     try:
