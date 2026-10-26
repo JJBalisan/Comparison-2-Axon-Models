@@ -201,9 +201,11 @@ spike decisions). The first native run in a process issues its own
 **Jacobian.** diffsol is given the pattern explicitly, not left to detect it:
 `core::tree_jac_sparsity` of the run's own morphology (the Rust twin of
 `multi._tree_jac_sparsity`; every stimulus couples a compartment only to
-itself). The Jacobian is filled by forward-difference
-products `J v` on two right-hand-side calls (step `1e-7 (1 + max |x|)`), one
-per colour of the pattern.
+itself). The Jacobian is filled analytically (`MultiRhs::jacobian`, the exact
+partial derivatives of the right-hand side on that pattern, cross-checked in
+cargo against central and forward differences); diffsol's matrix-free `J v`
+products stay forward differences on two right-hand-side calls (step
+`1e-7 (1 + max |x|)`).
 
 **Newton solve.** The Newton matrix I - cJ has a fixed shape (each gate
 couples only to itself and its own compartment's voltage; the voltage block is
