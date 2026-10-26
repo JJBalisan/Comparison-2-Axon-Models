@@ -262,3 +262,38 @@ def test_inhibition_window_script(tmp_path):
     assert case["+0.2"]["th0"] > case["none"]["th0"]
     assert (case["+0.2"]["lo"] + case["+0.2"]["hi"]) / 2 < -0.02
     assert res["noisy_check"]["peak"] > 0
+
+
+def test_coupling_plane_script(tmp_path):
+    out = run_script("coupling_plane.py", "--quick", "--out-dir", tmp_path)
+    res = json.loads((tmp_path / "coupling_plane.json").read_text())
+    assert "closest to the 45-compartment model" in out
+    assert (tmp_path / "coupling_plane.png").stat().st_size > 0
+    by = {(p["couple12"], p["couple21"]): p for p in res["points"]}
+    # the quick grid (3 x 3, forward >= backward) and the four landmarks
+    assert len(by) == 10
+    assert {p["status"] for p in by.values()} <= {
+        "fires",
+        "silent",
+        "spontaneous",
+        "wide",
+    }
+
+    # the lookup's cell is the published one (TwoCpt.m: 47.72 nS, 199 us),
+    # and of all the points it is the one closest to the 45-compartment model
+    default = res["default"]
+    assert default["status"] == "fires"
+    assert math.isclose(default["threshold"], 48.0, rel_tol=0.02)
+    assert math.isclose(default["window_us"], 199.0, rel_tol=0.03)
+    assert res["located"]["couple12"] == default["couple12"]
+    assert res["located"]["distance"] < 0.05
+
+    # Goldwyn 2019: weaker forward coupling, a narrower window and a higher
+    # threshold; and with node 3's Na, some of the plane does not fire
+    fwd = by[0.8, 0.2]
+    assert fwd["status"] == "fires"
+    assert fwd["window_us"] < default["window_us"]
+    assert fwd["threshold"] > default["threshold"]
+    statuses = [p["status"] for p in by.values()]
+    assert statuses.count("fires") >= 3 and "silent" in statuses
+    assert res["extremes"]["window_min"]["window_us"] <= fwd["window_us"]
