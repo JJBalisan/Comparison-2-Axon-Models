@@ -10,7 +10,8 @@ ratio couple12 / couple21 of at most ten. This sweeps that region on a regular
 grid and, at each point, finds the EPSG-pair threshold (coincident inputs) and
 the 3% coincidence window (coincidence.threshold and coincidence.window, as in
 scripts/coincidence_window.py), and says whether the cell fires at all. A
-point counts as spiking only if its spike height (coincidence.spike_height) is
+point counts as spiking only if its spike height (as coincidence.spike_height
+measures it, at the threshold found with this script's ceiling) is
 at least MIN_SPIKE_MV: the 10 mV criterion alone is also cleared by a graded
 depolarisation in a cell that never spikes (status "graded"). The area ratio,
 the channel fractions and the axonal Na conductance stay at node 3's values,
@@ -30,13 +31,13 @@ import pathlib
 from typing import Any
 
 import msoaxon
-from msoaxon import _bisect, coincidence, constants
+from msoaxon import _bisect, _dispatch, _fast, coincidence, constants, synaptic
 
 MARGIN = 0.03  # inputs this far above the coincident threshold (Myoga: ~3%)
 # the 45-compartment model, 10 mV criterion, model EPSG (PYTHON.md, "Comparison
-# with the literature": 201.1 us and 48.01 nS, the "about 200 us, 48 nS")
+# with the literature": 201.1 us and 48.01 nS; the "200 us, about 48 nS")
 MULTI_WINDOW_US = 201.1
-MULTI_THRESHOLD_NS = 48.0
+MULTI_THRESHOLD_NS = 48.01
 MAX_RATIO = 10.0  # Goldwyn 2019 Methods: couple12 / couple21 does not exceed it
 AXIS_LO, AXIS_HI = 0.1, 0.9
 DEFAULT_STEP, QUICK_STEP = 0.1, 0.4
@@ -192,6 +193,40 @@ def locate(
     return best, best_d
 
 
+def _spike_height(model_kw: dict[str, Any], threshold: float) -> float:
+    """Measures the spike height of a configuration at its threshold.
+
+    As coincidence.spike_height does (the peak axon - soma of one coincident
+    EPSG pair at HEIGHT_AT times the threshold), but from the threshold the
+    caller already found, so that both use one amplitude ceiling.
+
+    Args:
+        model_kw: The two-compartment model's keywords.
+        threshold: The coincident threshold [nS], finite.
+
+    Returns:
+        The peak axon - soma [mV].
+    """
+    syn = synaptic.SynParams(
+        t_end=coincidence.T_END, epsg_tau=synaptic.EPSG_TAU
+    )
+    _, x = _dispatch.run_model(
+        "two",
+        "EPSGpair",
+        coincidence.START,
+        coincidence.START,
+        coincidence.HEIGHT_AT * threshold,
+        NODE,
+        coincidence.T_END,
+        -68.0,
+        1,
+        syn,
+        **model_kw,
+    )
+    axon = _dispatch.axon_column("two", NODE)
+    return float((x[:, axon] - x[:, 0]).max())
+
+
 def measure_point(task: tuple[Any, ...]) -> dict[str, Any]:
     """Measures the threshold and the window of one coupling configuration.
 
@@ -226,7 +261,7 @@ def measure_point(task: tuple[Any, ...]) -> dict[str, Any]:
         return {**out, "status": "spontaneous"}
     if not math.isfinite(th):
         return {**out, "status": "silent", "threshold": th}
-    height = coincidence.spike_height("two", model_kw=kw)
+    height = _spike_height(kw, th)
     out |= {"threshold": th, "spike_height": height}
     if height < MIN_SPIKE_MV:
         return {**out, "status": "graded"}
@@ -253,7 +288,20 @@ def sweep(
     delay_tol: float,
     pool: Any,
 ) -> list[dict[str, Any]]:
-    """Measures every point in parallel, returning the results in order."""
+    """Measures every point in parallel, returning the results in order.
+
+    Args:
+        points: The (couple12, couple21) points.
+        mode: The model mode for the searches (ignored by the two-compartment
+            model), or None.
+        ceiling: The largest EPSG amplitude tried [nS].
+        rel_tol: The relative tolerance of the thresholds.
+        delay_tol: The tolerance of the window's edge [ms].
+        pool: A process pool.
+
+    Returns:
+        measure_point()'s dict for each point.
+    """
     tasks = [
         (c12, c21, mode, ceiling, rel_tol, delay_tol) for c12, c21 in points
     ]
@@ -272,6 +320,7 @@ def _clean(x: Any) -> Any:
 
 
 def _fmt(x: float | None, spec: str) -> str:
+    """Formats x with spec, or "-" for None, nan and inf."""
     return "-" if x is None or not math.isfinite(x) else format(x, spec)
 
 
@@ -322,7 +371,7 @@ def extremes(points: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 def plot(
     points: list[dict[str, Any]],
     step: float,
-    located: dict[str, Any],
+    located: dict[str, Any] | None,
     path: pathlib.Path,
 ) -> None:
     """Draws the window and the threshold over the plane.
@@ -331,6 +380,13 @@ def plot(
     a graded response only (a circle) or no spike or window (a cross); the
     lookup's point, Goldwyn's stars and the located point are
     marked, and the grey dots are the 44 axon nodes' own constants.
+
+    Args:
+        points: Measured points (see measure_point()).
+        step: The grid spacing, which sizes the squares.
+        located: The point closest to the 45-compartment model, or None to
+            leave it unmarked.
+        path: Where to save the PNG.
     """
     # imported here rather than at the top, like the pool scripts, so importing
     # this module stays cheap
@@ -403,16 +459,17 @@ def plot(
                 label=name,
                 zorder=5,
             )
-        ax.scatter(
-            [located["couple12"]],
-            [located["couple21"]],
-            facecolors="none",
-            edgecolors="tab:orange",
-            s=380,
-            linewidths=2.2,
-            zorder=6,
-            label="closest to the 45-compartment model",
-        )
+        if located is not None:
+            ax.scatter(
+                [located["couple12"]],
+                [located["couple21"]],
+                facecolors="none",
+                edgecolors="tab:orange",
+                s=380,
+                linewidths=2.2,
+                zorder=6,
+                label="closest to the 45-compartment model",
+            )
         ax.plot([0, 1], [0, 1], "k:", lw=0.8)  # forward = backward
         ax.set_xlim(0, 1.02)
         ax.set_ylim(0, 1.02)
@@ -453,8 +510,9 @@ def main() -> None:
     ap.add_argument(
         "--mode",
         choices=("exact", "fast", "native"),
-        help="model mode (default: fast); the two-compartment model has "
-        "only its numpy path, so the mode changes nothing here",
+        help="model mode, as in the other scripts (default: MSOAXON_MODE, "
+        "else the library's). The two-compartment model has only its numpy "
+        "path and ignores it; the option is accepted for symmetry",
     )
     ap.add_argument("--workers", type=int, help="processes (default: all)")
     ap.add_argument(
@@ -481,7 +539,10 @@ def main() -> None:
     for p in results:
         p["label"] = by_coords.get((p["couple12"], p["couple21"]), "")
         p["distance"] = distance(p["window_us"], p["threshold"])
-    best, best_d = locate(results)
+    try:
+        best, best_d = locate(results)
+    except ValueError:  # nothing spikes: no table of closeness to write
+        best, best_d = None, math.nan
     default = next(p for p in results if p["label"] == next(iter(names)))
 
     print(markdown(results))
@@ -494,23 +555,29 @@ def main() -> None:
         )
     print(
         f"default point (node {NODE}): couple12={default['couple12']:.4f}, "
-        f"couple21={default['couple21']:.4f}, "
+        f"couple21={default['couple21']:.4f}, status {default['status']}, "
         f"{_fmt(default['window_us'], '.1f')} us, "
         f"{_fmt(default['threshold'], '.2f')} nS, "
         f"distance {_fmt(default['distance'], '.3f')}"
     )
-    print(
-        f"closest to the 45-compartment model ({MULTI_WINDOW_US} us, "
-        f"{MULTI_THRESHOLD_NS} nS): couple12={best['couple12']:.4g}, "
-        f"couple21={best['couple21']:.4g}, {best['window_us']:.1f} us, "
-        f"{best['threshold']:.2f} nS, distance {best_d:.3f}"
-    )
+    if best is None:
+        print(
+            "closest to the 45-compartment model: none, no point spikes "
+            f"(ceiling {ceiling:g} nS)"
+        )
+    else:
+        print(
+            f"closest to the 45-compartment model ({MULTI_WINDOW_US} us, "
+            f"{MULTI_THRESHOLD_NS} nS): couple12={best['couple12']:.4g}, "
+            f"couple21={best['couple21']:.4g}, {best['window_us']:.1f} us, "
+            f"{best['threshold']:.2f} nS, distance {best_d:.3f}"
+        )
     plot(results, step, best, out / "coupling_plane.png")
     (out / "coupling_plane.json").write_text(
         json.dumps(
             _clean(
                 {
-                    "mode": a.mode or "default",
+                    "mode_requested": _fast.requested(a.mode),
                     "quick": a.quick,
                     "margin": MARGIN,
                     "step": step,
@@ -520,7 +587,9 @@ def main() -> None:
                         "threshold_nS": MULTI_THRESHOLD_NS,
                     },
                     "points": results,
-                    "located": {**best, "distance": best_d},
+                    "located": None
+                    if best is None
+                    else {**best, "distance": best_d},
                     "default": default,
                     "extremes": extremes(results),
                 }

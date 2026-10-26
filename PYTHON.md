@@ -441,9 +441,10 @@ constants, that is `two_cpt(..., 3, "active-full", ..., gC=56.4)`. That figure
 comes from issue #84; the paper was not read here, so whether their gax is this
 `gC` is unconfirmed.
 
-`uv run scripts/coupling_plane.py` runs that sweep (#84); `figures/coupling_plane/`
-gets the figure and a JSON, and `--quick` is a smoke test with a coarse grid.
-The protocol, which the published row (not yet approved) follows:
+`uv run scripts/coupling_plane.py` runs that sweep (#84);
+`figures/coupling_plane/` gets the figure and a JSON, and `--quick` is a smoke
+test with a coarse grid. The row of results over the plane is proposed in the
+pull request and not published here until it is approved. The protocol:
 - the plane is Goldwyn et al.'s: forward coupling not weaker than backward
   (their Fig 3 leaves the upper left half empty) and the ratio of the two at
   most ten (their Methods, so that the axon's time constant stays an order of

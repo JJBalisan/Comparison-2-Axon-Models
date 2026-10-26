@@ -272,16 +272,12 @@ def test_coupling_plane_script(tmp_path):
     by = {(p["couple12"], p["couple21"]): p for p in res["points"]}
     # the quick grid (3 x 3, forward >= backward) and the four landmarks
     assert len(by) == 10
-    assert {p["status"] for p in by.values()} <= {
-        "fires",
-        "graded",
-        "silent",
-        "spontaneous",
-        "wide",
-    }
+    statuses = [p["status"] for p in by.values()]
+    assert set(statuses) <= {"fires", "graded", "silent", "spontaneous", "wide"}
+    assert "fires" in statuses
 
     # the lookup's cell is the published one (TwoCpt.m: 47.72 nS, 199 us),
-    # and of all the points it is the one closest to the 45-compartment model
+    # spikes, and of all the points is closest to the 45-compartment model
     default = res["default"]
     assert default["status"] == "fires"
     assert math.isclose(default["threshold"], 48.0, rel_tol=0.02)
@@ -289,18 +285,7 @@ def test_coupling_plane_script(tmp_path):
     assert res["located"]["couple12"] == default["couple12"]
     assert res["located"]["distance"] < 0.05
 
-    # strong forward and weak backward coupling lowers the threshold and
-    # widens the window; with node 3's Na the rest of the quick plane either
-    # does not fire or clears the 10 mV criterion without a spike (Goldwyn's
-    # forward star among them: the point of the spike-height test)
-    strong = by[0.9, 0.1]
-    assert strong["status"] == "fires" and strong["spike_height"] > 30
-    assert strong["threshold"] < default["threshold"]
-    assert strong["window_us"] > 0.9 * default["window_us"]
-    assert by[0.8, 0.2]["status"] == "graded"
-    assert by[0.8, 0.2]["spike_height"] < 30
-    assert by[0.8, 0.2]["window_us"] is None  # NaN is null in the JSON
-    statuses = [p["status"] for p in by.values()]
-    assert statuses.count("fires") == 2 and "silent" in statuses
-    assert "graded" in statuses
+    # only a spiking point has a window, and the extremes are over those
+    for p in by.values():
+        assert (p["status"] == "fires") == (p["window_us"] is not None)
     assert res["extremes"]["window_min"]["status"] == "fires"

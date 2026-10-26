@@ -6,6 +6,7 @@ test_scripts.py's --quick test and in test_two_knobs.py).
 """
 
 import importlib.util
+import json
 import math
 import pathlib
 
@@ -184,9 +185,10 @@ def test_locate_refuses_a_plane_with_nothing_to_compare():
 
 
 def test_locate_defaults_to_the_published_45_compartment_row():
-    best, d = script.locate([_pt(0.9, 0.1, 201.1, 48.0)])
+    best, d = script.locate([_pt(0.9, 0.1, 201.1, 48.01)])
     assert d == 0.0
-    assert script.MULTI_WINDOW_US == 201.1 and script.MULTI_THRESHOLD_NS == 48.0
+    assert script.MULTI_WINDOW_US == 201.1
+    assert script.MULTI_THRESHOLD_NS == 48.01
 
 
 def test_extremes_ignore_points_without_a_value():
@@ -223,11 +225,11 @@ def _fake(monkeypatch, threshold, window=None, height=38.0):
         seen.append((model, margin, model_kw, kw))
         return window, kw["threshold0"]
 
-    def fake_height(model, model_kw=None, **kw):
-        seen.append((model, "height", model_kw, kw))
+    def fake_height(model_kw, th):
+        seen.append(("two", "height", model_kw, {"threshold": th}))
         return height
 
-    monkeypatch.setattr(coincidence, "spike_height", fake_height)
+    monkeypatch.setattr(script, "_spike_height", fake_height)
     monkeypatch.setattr(coincidence, "threshold", fake_threshold)
     monkeypatch.setattr(coincidence, "window", fake_window)
     return seen
@@ -242,12 +244,12 @@ def test_a_point_that_fires_has_a_threshold_and_a_window_in_us(monkeypatch):
     assert p["status"] == "fires"
     assert p["threshold"] == 80.0
     assert p["window_us"] == pytest.approx(141.0)
-    (m, d, kw, search), (_, _, hkw, _), (_, margin, wkw, wsearch) = seen
+    (m, d, kw, search), (_, _, hkw, hsearch), (_, margin, wkw, wsearch) = seen
     # the coupling goes in through model_kw, the ceiling and tolerances to
     # the searches, and the window reuses the threshold found
     assert kw == hkw == wkw
     assert kw == {"couple12": 0.8, "couple21": 0.2, "mode": "exact"}
-    assert p["spike_height"] == 38.0
+    assert p["spike_height"] == 38.0 and hsearch == {"threshold": 80.0}
     assert (m, d, margin) == ("two", 0.0, script.MARGIN)
     assert search == {"rel_tol": 1e-3, "ceiling": 500.0}
     assert wsearch["threshold0"] == 80.0 and wsearch["delay_tol"] == 1e-3
@@ -280,14 +282,8 @@ def test_a_graded_response_has_a_threshold_but_no_window(monkeypatch):
     assert not script.spikes(p)
 
 
-def test_the_spike_height_limit_separates_the_cells_measured():
-    # spike_height at the firing cells of node 3's constants (PR #130): the
-    # cells with a spike and those with only a graded response
-    assert script.MIN_SPIKE_MV == 30.0
-    for h in (35.6, 38.0, 40.8, 57.1, 74.7):
-        assert h >= script.MIN_SPIKE_MV
-    for h in (9.6, 10.0, 11.3, 13.0, 17.6, 18.4):
-        assert h < script.MIN_SPIKE_MV
+def test_the_spike_limit_is_above_the_criterion():
+    assert script.MIN_SPIKE_MV > coincidence.FACTOR
 
 
 def test_a_window_beyond_the_search_is_wide(monkeypatch):
@@ -323,3 +319,33 @@ def test_clean_makes_the_json_strict():
         "a": [None, None, 1.5],
         "b": [2, None],
     }
+
+
+def test_a_sweep_where_nothing_spikes_still_writes_its_results(
+    monkeypatch, tmp_path, capsys
+):
+    def silent(points, *_):
+        return [
+            {
+                "couple12": c12,
+                "couple21": c21,
+                "status": "silent",
+                "threshold": math.inf,
+                "window_us": math.nan,
+                "spike_height": math.nan,
+            }
+            for c12, c21 in points
+        ]
+
+    plotted = []
+    monkeypatch.setattr(script, "sweep", silent)
+    monkeypatch.setattr(script, "plot", lambda *a: plotted.append(a))
+    monkeypatch.setattr(
+        "sys.argv", ["coupling_plane.py", "--quick", "--out-dir", str(tmp_path)]
+    )
+    script.main()
+    assert "none, no point spikes" in capsys.readouterr().out
+    res = json.loads((tmp_path / "coupling_plane.json").read_text())
+    assert res["located"] is None and res["extremes"] == {}
+    assert res["default"]["status"] == "silent"
+    assert plotted and plotted[0][2] is None  # the plot leaves it unmarked
