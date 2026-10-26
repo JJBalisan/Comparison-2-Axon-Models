@@ -381,7 +381,8 @@ move the golden traces (`tests/golden_traces.json`) and the numbers here:
   it at `start`.
 - `TwoCpt.m` has calibrated axonal Na (`gNa2`) only for nodes 3 (119) and 5
   (25.5). Every other node gets the placeholder 140, so 2-CPT runs at those
-  nodes use an uncalibrated value.
+  nodes use an uncalibrated value. `two_cpt(..., gNa2=...)`
+  replaces it.
 - `Spiking.m` doesn't clear `reset` between columns.
 - `SA(2)` uses `1.66/3` where `0.66/2` was probably meant. The stored `Area.mat`
   was built with it.
@@ -415,6 +416,29 @@ model is the coupling-constant framework of Goldwyn, Remme & Rinzel 2019
 The old values survive as comments beside the new ones (`%8.5`, `%-58`).
 `GOLDWYN_2019` in `msoaxon/two.py` restores them:
 `two_cpt(..., v0=-58, r1=8.5, tau_est=0.34)`.
+
+The coupling `node` looks up (forward and backward constants, the area ratio,
+the KLT and h fractions and the axonal Na conductance) is a default, not a
+limit: keyword-only arguments of `two_cpt` and `two.get_params` replace any of
+it, each `None` keeping the lookup's value, so every call without them gives the
+same bits as before.
+
+| Argument | Meaning | Range |
+|---|---|---|
+| `gC` | coupling conductance [nS]; replaces what `r1` and the constants give, so `r1` stays at its default | > 0 |
+| `couple12`, `couple21` | forward (soma → axon) and backward coupling constants | (0, 1) |
+| `area_ratio` | axon to soma area ratio (sets the axon's time constant and capacitance) | > 0 |
+| `klt1`, `klt2`, `h1`, `h2`, `na1` | fraction of the compartment's resting conductance that is KLT, h and (soma) Na; a compartment's fractions sum to at most 1 | [0, 1] |
+| `gNa2` | axonal Na conductance [nS] | ≥ 0 |
+| `soma_na_vhalf`, `axon_na_vhalf` | Na inactivation midpoint [mV] (default −62.5); see "Somatic spike" | finite |
+
+They are validated before any run. The coupling plane of Goldwyn et al. 2019 is
+a sweep of `couple12` and `couple21`; searches take them in `model_kw`
+(`coincidence.threshold("two", 0.1, model_kw={"couple12": 0.5})`). Jing et al.
+2025 give their soma-axon coupling as gax = 56.4 nS; read as `gC`, on node 3's
+constants, that is `two_cpt(..., 3, "active-full", ..., gC=56.4)`. That figure
+comes from issue #84; the paper was not read here, so whether their gax is this
+`gC` is unconfirmed.
 
 ### Coincidence window
 
@@ -609,10 +633,10 @@ Each item has an issue (label `literature-2026-10`):
   time constant, Na oscillation parameters (#82)
 - temperature as a parameter rather than two Q10 literals (#82)
 - a Kv7 / M-type current (#85)
-- free two-compartment coupling instead of the `node` lookup (#84)
 
 Dendrites, listed here until October 2026, are in (see below), and so is
-the initiation-site readout (#80, `msoaxon.initiation`, table above).
+the initiation-site readout (#80, `msoaxon.initiation`, table above), and so is
+the free two-compartment coupling (#84, see "Lineage").
 
 ### Somatic spike
 
@@ -687,8 +711,67 @@ than the spike.
 
   So the two numbers reproduce the measurement only together, and the default
   rests with about 8× the available somatic Na that was measured. Whether that
-  is a deliberate choice in Lehnert et al. 2014 is open. The knob is for this
-  model only: `two_cpt` takes no membrane (#79).
+  is a deliberate choice in Lehnert et al. 2014 is open. `two_cpt` has the same
+  knob as `soma_na_vhalf` (and `axon_na_vhalf`), without a rebalance: it
+  subtracts the resting currents, so rest holds at `v0`. Its somatic Na
+  conductance stays calibrated at −62.5 mV, so a shift changes how many
+  channels are available at rest, not how many there are.
+
+  **Proposed table, for JJ's decision (#79).** Nothing here is a default or a
+  published number: `uv run scripts/na_availability.py` prints it and saves
+  `figures/na_availability/`. Rest {−68, −58} mV × somatic V½ {−62.5, −77} mV,
+  both models, V½ at the soma only, exact mode (no `native` shortcut). The
+  45-compartment cells use `membrane(rest, soma_na_vhalf=..., rebalance_rest=
+  True)` throughout, so its default cell differs a little from the published
+  `msoAxon.m` row (rheobase 3793 against 3784 pA, spike 7.2 / 13.1 / 17.8
+  against 7.4 / 13.3 / 18.2 mV). The EPSP is one somatic EPSG of a quarter of
+  that cell's coincident threshold; the window is at 3% above that threshold.
+
+  | 45-compartment: rest, V½ | inactivated | rheobase | Rin | EPSP half-width | 3% window | somatic spike 1.5× / 2× / 3× |
+  |---|---|---|---|---|---|---|
+  | −68, −62.5 | 33% | 3793 pA | 2.43 MΩ | 572 µs | 200 µs | 7.2 / 13.1 / 17.8 mV |
+  | −68, −77 | 76% | 4405 pA | 2.39 MΩ | 561 µs | 193 µs | no inflection (peak 23.8 / 30.1 / 38.9) |
+  | −58, −62.5 | 64% | 5289 pA | no stable rest | 329 µs | 137 µs | no inflection (peak 14.9 / 19.9 / 28.0) |
+  | −58, −77 | 92% | 6438 pA | no stable rest | 318 µs | 133 µs | no inflection (peak 14.2 / 18.2 / 25.0) |
+
+  | 2-compartment: rest, V½ | inactivated | rheobase | Rin | EPSP half-width | 3% window | somatic spike 1.5× / 2× / 3× |
+  |---|---|---|---|---|---|---|
+  | −68, −62.5 | 33% | 3846 pA | 2.43 MΩ | 588 µs | 199 µs | 6.4 / 13.0 / 17.8 mV |
+  | −68, −77 | 76% | 4426 pA | 2.39 MΩ | 577 µs | 191 µs | no inflection (peak 23.5 / 29.1 / 37.8) |
+  | −58, −62.5 | 64% | 1961 pA | 2.36 MΩ | 595 µs | 218 µs | no inflection (peak 13.2 / 16.2 / 21.5) |
+  | −58, −77 | 92% | 2033 pA | 2.33 MΩ | 588 µs | 215 µs | no inflection (peak 13.0 / 15.9 / 21.0) |
+
+  - **Scott's V½ moves the rheobase and little else:** at −68 mV, −77 raises
+    rheobase by 16% (45-compartment) and 15% (2-compartment), and moves Rin,
+    the EPSP half-width and the 3% window by 2–4%.
+  - **The somatic spike has no distinct inflection** (`spike_amplitude`'s
+    `distinct` is False) in any cell but the default one, at every multiple
+    scanned (1.1× to 10×, 2-compartment): with less somatic Na, or a depolarized
+    rest, the soma is a smooth hump that carries the axonal spike. The amplitude
+    protocol of Scott 2005 does not apply there; the peak above rest is listed
+    instead.
+  - **The 45-compartment model has no stable rest at −58 mV:** with the leak
+    rebalanced to hold −58, a 2 pA kick sets off a 0.18 mV oscillation with a
+    1.4 ms period that does not decay, whatever the kick, solver mode or step
+    size (the same at −60 mV, steady at −63 mV). The two-compartment model is
+    steady there. Rin is only reported where the rest is steady.
+  - **The models disagree at −58 mV, because they change different things:**
+    rheobase rises 39% in the 45-compartment model and falls 49% in the
+    2-compartment one; the window narrows from 200 to 137 µs in the first and
+    widens from 199 to 218 µs in the second. `two.get_params` recalibrates every
+    conductance to the lookup's resting fractions at `v0` (node 3,
+    `active-full`, −58 against −68 mV: `gNa1` 154 against 1645 nS, 0.09×;
+    `gKLT1` 0.20×; `gh1` 2.33×), so its −58 mV cell is a different cell, with
+    far less Na and KLT and more h. `membrane(rebalance_rest=True)` keeps the
+    maximal conductances and moves only the leak reversal, so the 45-compartment
+    cell is the same cell at another operating point. The rest axis is not the
+    same experiment in the two columns. (That calibration is the model's, from
+    TwoCpt.m, and is unchanged here.)
+  - **A preset is proposed, not added:** a named Scott-consistent membrane
+    (like `GOLDWYN_2019`: rest −58 mV, `soma_na_vhalf=-77`) would give the
+    rows above as one option. It needs the 45-compartment instability at −58
+    resolved first, and the full texts of Scott 2010 and Lehnert 2014's methods
+    to say which V½ goes where.
 - `rebalance_rest`: sets each leak reversal so rest stays at `v0`. Without it,
   removing KLT makes the cell fire with no input.
 
