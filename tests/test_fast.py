@@ -43,6 +43,22 @@ D_RA = multi.with_dendrites(conserve_totals=False, dendrite_ra=200.0)
 LAT, MED = int(D.lateral[2]), int(D.medial[2])
 DTX = {"soma_klt_scale": 0, "ais_klt_scale": 0, "rebalance_rest": True}
 MYOGA = (0.1, 0.3)
+IPSG = (0.28, 1.5)  # Roberts et al 2013 rise, Myoga et al 2014 decay
+# the "Events" lists: mixed kinetics, reversals and compartments, then
+# events that share a compartment and an onset (np.bincount adds them in
+# list order, so the sum's last bits depend on it)
+EVENTS = (
+    synaptic.Event(5.0, 1, 60.0),
+    synaptic.Event(5.2, 3, 40.0, MYOGA),
+    synaptic.Event(4.8, 1, 30.0, IPSG, -80.0),
+)
+EVENTS_SHARED = (
+    synaptic.Event(5.0, 1, 30.0),
+    synaptic.Event(5.0, 1, 20.0, MYOGA, -20.0),
+    synaptic.Event(5.0, 2, 10.0),
+    synaptic.Event(5.1, 1, 25.0),
+    synaptic.Event(5.0, 1, 0.1),
+)
 
 # (stim, start, stop, I, input_node, input_node2, SynParams keywords); ints
 # where the scripts and goldens pass ints
@@ -70,6 +86,19 @@ STIMULI = {
     ),
     "EPSGbilateral": ("EPSGbilateral", 5.0, 5.2, 60.0, 1, 3, {}),
     "EPSGbilateral-same": ("EPSGbilateral", 5.0, 5.1, 60.0, 2, 2, {}),
+    # start and stop are derived from the onsets, input_node is ignored; the
+    # run's I (the amplitude) scales every peak
+    "Events": ("Events", 0.0, 0.0, 1.0, 1, None, {"events": EVENTS}),
+    "Events-scaled": ("Events", 0.0, 0.0, 1.7, 1, None, {"events": EVENTS}),
+    "Events-shared": (
+        "Events",
+        0.0,
+        0.0,
+        1.0,
+        1,
+        None,
+        {"events": EVENTS_SHARED},
+    ),
 }
 
 
@@ -105,6 +134,19 @@ def configs():
                 morph,
             )
         out[f"{label}/EPSGbilateral"] = (bilateral, "active-full", None, morph)
+        # one event on each dendrite, one on the soma and one in the axon
+        events = (
+            synaptic.Event(5.0, LAT, 60.0),
+            synaptic.Event(5.1, MED, 60.0),
+            synaptic.Event(5.1, 1, 20.0, IPSG, -80.0),
+            synaptic.Event(5.3, 3, 10.0),
+        )
+        out[f"{label}/Events"] = (
+            ("Events", 0.0, 0.0, 1.0, 1, None, {"events": events}),
+            "active-full",
+            None,
+            morph,
+        )
     out["dendrites/mem"] = (
         bilateral,
         "active-KLT+H",
@@ -132,6 +174,8 @@ def setup(name):
         slope = 1 / (stop - start)
         edges.append(start + 1 / slope)
     times = [e + d for e in edges for d in (0.0, -1e-9, 1e-9)]
+    if s.events is not None:  # every onset, both sides
+        times += [t + d for t in s.events["t"] for d in (0.0, -1e-9, 1e-9)]
     times += list(np.random.default_rng(len(name)).uniform(0, 20, 12))
     if stim in ("Synaptic", "SynapticPair"):
         times += list(s.t_syn[500:1500:97])  # exactly on table points
@@ -260,7 +304,9 @@ def test_rust_rhs_rejects_a_mismatched_gating_dict(monkeypatch, change):
 
 @needs_ext
 @pytest.mark.skipif(not BITWISE, reason="bit-identical on darwin-arm64 only")
-@pytest.mark.parametrize("name", ["EPSGpair", "Synaptic", "dendrites/mem"])
+@pytest.mark.parametrize(
+    "name", ["EPSGpair", "Synaptic", "Events", "dendrites/mem"]
+)
 def test_runs_are_bit_identical_here(name):
     (stim, start, stop, amp, k, k2, syn_kw), mt, mem, morph = CONFIGS[name]
     syn = synaptic.SynParams(t_end=15.0, **syn_kw)
@@ -683,25 +729,16 @@ def test_asking_for_native_without_the_extension_warns(monkeypatch, no_env):
         assert _fast.resolve(None) == "exact"
 
 
-def test_native_falls_back_for_events(monkeypatch, fake_ext):
+def test_fast_builds_events_for_the_run_and_none_for_the_prefix(fake_ext):
     syn = synaptic.SynParams(
         t_end=8, events=(synaptic.Event(t=5.0, node=1, g=30.0),)
     )
-    with pytest.warns(UserWarning, match='"Events" is not in the Rust'):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # no fallback warning any more
         multi.mso_axon(
-            "Events",
-            0,
-            0,
-            1.0,
-            3,
-            "active-full",
-            8,
-            -68.0,
-            1,
-            syn=syn,
-            mode="native",
+            "Events", 0, 0, 1.0, 3, "active-full", 8, -68.0, 1, syn=syn
         )
-    assert fake_ext == []
+    assert fake_ext == ["Events", "none"]
 
 
 def test_segment_without_a_segment_method_is_scipy():
