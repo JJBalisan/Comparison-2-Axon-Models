@@ -26,12 +26,12 @@ BinarySearch.m's halving search.
 
 Event lists (issue #78). The searches above drive an EPSG pair; passing
 `events=` drives them with the "Events" stimulus instead, and the protocols
-at the end of the module (fibre counts, pre-pulses, Casarez-style ITD sweeps,
-are built on it. `events` is an event
-*source*, a callable (delay, amp) -> tuple of synaptic.Event, or a plain
-event tuple, which scales with the searched amplitude; the search runs it
-with I = 1 and varies amp, so a source can hold some events fixed (an IPSG, a
-pre-pulse) while it scales the rest. Calls without `events` are untouched.
+at the end of the module (fibre counts, pre-pulses, Casarez-style ITD sweeps)
+are built on it. `events` is an event *source*, a callable (delay, amp) ->
+tuple of synaptic.Event, or a plain event tuple, which scales with the
+searched amplitude; the search runs it with I = 1 and varies amp, so a source
+can hold some events fixed (a pre-pulse, an IPSG) while it scales the rest.
+Calls without `events` are untouched.
 """
 
 import dataclasses

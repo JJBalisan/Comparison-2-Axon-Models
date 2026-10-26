@@ -72,8 +72,8 @@ def fibre_window(
     a: argparse.Namespace, pool: futures.Executor
 ) -> dict[str, Any]:
     """Spike probability per delay for fibre drive, and its half-width."""
-    delays = np.round(np.arange(-0.8, 0.8001, 0.2 if a.quick else 0.1), 3)
-    n_trials = 4 if a.quick else a.trials
+    delays = np.round(np.arange(-0.8, 0.8001, 0.4 if a.quick else 0.1), 3)
+    n_trials = 3 if a.quick else a.trials
     repeats = 2 if a.quick else a.repeats
     out: dict[str, Any] = {"delays_ms": delays.tolist()}
     print(
@@ -85,7 +85,7 @@ def fibre_window(
         "half-width [us], mean +- sd (min-max over repeats)"
     )
     for name, model in MODELS.items():
-        for n in (2, 3):
+        for n in (2,) if a.quick else (2, 3):
             prob, summ = coincidence.fibre_window_trials(
                 model,
                 delays,
@@ -153,7 +153,7 @@ def prepulse(a: argparse.Namespace, pool: futures.Executor) -> dict[str, Any]:
 def trains(a: argparse.Namespace, pool: futures.Executor) -> dict[str, Any]:
     """The input resistance during EPSC trains."""
     rates = (200.0, 400.0) if a.quick else (100.0, 200.0, 300.0, 400.0)
-    n = 12 if a.quick else 20
+    n = 8 if a.quick else 20
     print(
         f"\n3. EPSC trains: {n} current pulses of 3 nA, input resistance "
         "during the train (Khurana 2011: up to +60%)"
@@ -187,8 +187,8 @@ def trains(a: argparse.Namespace, pool: futures.Executor) -> dict[str, Any]:
 
 def itd(a: argparse.Namespace, pool: futures.Executor) -> dict[str, Any]:
     """A Casarez-style trial-based ITD sweep."""
-    itds = np.round(np.linspace(-0.5, 0.5, 6 if a.quick else 11), 4)
-    n_trials = 4 if a.quick else a.trials
+    itds = np.round(np.linspace(-0.5, 0.5, 5 if a.quick else 11), 4)
+    n_trials = 3 if a.quick else a.trials
     print(
         f"\n4. ITD sweep: {coincidence.CASAREZ_N} synapses per side of "
         f"{coincidence.CASAREZ_G} nS, release probability "

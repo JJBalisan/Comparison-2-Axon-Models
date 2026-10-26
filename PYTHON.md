@@ -756,10 +756,11 @@ either
 The search runs a source with `I = 1` and the amplitude it is looking for, so
 calls without `events` are untouched (the golden traces, the benchmark and
 `scripts/benchmark_search.py --check` do not move), and `threshold` of an
-event pair agrees with the `EPSGpair` threshold within the search tolerance. `window(events=...)`
-measures a window on a *signed* delay, `window_edges` returns both edges and
-the centre: the reference is the lowest threshold over delay (`best_delay`),
-and with a plain identical pair it reproduces `window`'s width to a few µs.
+event pair agrees with the `EPSGpair` threshold within the search tolerance.
+`window(events=...)` measures a window on a *signed* delay, `window_edges`
+returns both edges and the centre: the reference is the lowest threshold over
+delay (`best_delay`), and with a plain identical pair it reproduces `window`'s
+width to a few µs.
 
 Builders in `msoaxon.synaptic` (each returns events; the seeded generator is
 a `numpy` `Generator` or a seed):

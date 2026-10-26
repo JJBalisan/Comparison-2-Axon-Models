@@ -48,7 +48,8 @@ class Event:
 
 
 # A conductance event driven from this far away is a current source to within
-# 1e-4 of its driving force: current_event uses it for EPSC-shaped currents.
+# the swing of v over it (7e-4 at rest, under 1e-3 for |v| < 100 mV):
+# current_event uses it for EPSC-shaped currents.
 CURRENT_E_REV = 1e5  # [mV]
 # The default onset [ms] of the protocol builders (_common.START, which this
 # module cannot import).

@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from msoaxon import Event, coincidence, measure, somatic, synaptic
+from msoaxon import Event, _common, coincidence, measure, somatic, synaptic
 
 TWO: dict[str, Any] = {"workers": 1}  # serial: the tests are small
 
@@ -184,10 +184,16 @@ def test_threshold_curve_takes_a_source():
     np.testing.assert_allclose(got, ref, rtol=2e-3)
 
 
+def test_pair_source_start_is_the_analysis_start():
+    # PairSource reproduces the EPSGpair stimulus the searches default to
+    assert synaptic.T0 == _common.START == coincidence.START
+
+
 def test_a_fixed_peak_in_a_source_is_not_scaled():
-    # a 60 nS IPSG ahead of the pair raises the threshold; the search varies
-    # only the excitation
+    # a 60 nS pre-pulse EPSG ahead of the pair raises the threshold (Kv1
+    # history); the search varies only the pair's amplitude
     inhibited = synaptic.PairSource(pre=((-0.5, 60.0),))
+    assert [e.g for e in inhibited(0.0, 80.0)] == [60.0, 80.0, 80.0]
     th = coincidence.threshold("two", 0.0, rel_tol=1e-3, events=inhibited)
     ref = coincidence.threshold("two", 0.0, rel_tol=1e-3)
     assert th != pytest.approx(ref, rel=0.01)
