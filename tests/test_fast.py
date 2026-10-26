@@ -573,10 +573,12 @@ def test_pool_workers_inherit_the_mode_env(monkeypatch, no_env):
     ctx = multiprocessing.get_context("forkserver")
     monkeypatch.setattr(_parallel, "pool_context", lambda: ctx)
     monkeypatch.setitem(_fast._STATE, "warned", False)
+    monkeypatch.setitem(_fast._STATE, "warned_native", False)
     with _parallel.process_pool(1) as pool:
         assert list(pool.map(_fast.requested, [None])) == [None]
     monkeypatch.setenv(_fast.MODE_ENV, "exact")
     monkeypatch.setitem(_fast._STATE, "warned", True)
+    monkeypatch.setitem(_fast._STATE, "warned_native", False)
     with _parallel.process_pool(1) as pool:
         state = pool.submit(_fast.parent_state).result()
     assert state == ("exact", (True, False))
