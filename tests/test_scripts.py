@@ -274,6 +274,7 @@ def test_coupling_plane_script(tmp_path):
     assert len(by) == 10
     assert {p["status"] for p in by.values()} <= {
         "fires",
+        "graded",
         "silent",
         "spontaneous",
         "wide",
@@ -288,12 +289,18 @@ def test_coupling_plane_script(tmp_path):
     assert res["located"]["couple12"] == default["couple12"]
     assert res["located"]["distance"] < 0.05
 
-    # Goldwyn 2019: weaker forward coupling, a narrower window and a higher
-    # threshold; and with node 3's Na, some of the plane does not fire
-    fwd = by[0.8, 0.2]
-    assert fwd["status"] == "fires"
-    assert fwd["window_us"] < default["window_us"]
-    assert fwd["threshold"] > default["threshold"]
+    # strong forward and weak backward coupling lowers the threshold and
+    # widens the window; with node 3's Na the rest of the quick plane either
+    # does not fire or clears the 10 mV criterion without a spike (Goldwyn's
+    # forward star among them: the point of the spike-height test)
+    strong = by[0.9, 0.1]
+    assert strong["status"] == "fires" and strong["spike_height"] > 30
+    assert strong["threshold"] < default["threshold"]
+    assert strong["window_us"] > 0.9 * default["window_us"]
+    assert by[0.8, 0.2]["status"] == "graded"
+    assert by[0.8, 0.2]["spike_height"] < 30
+    assert by[0.8, 0.2]["window_us"] is None  # NaN is null in the JSON
     statuses = [p["status"] for p in by.values()]
-    assert statuses.count("fires") >= 3 and "silent" in statuses
-    assert res["extremes"]["window_min"]["window_us"] <= fwd["window_us"]
+    assert statuses.count("fires") == 2 and "silent" in statuses
+    assert "graded" in statuses
+    assert res["extremes"]["window_min"]["status"] == "fires"

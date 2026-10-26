@@ -34,6 +34,7 @@ def _pt(c12, c21, window_us, threshold, status="fires"):
         "couple21": c21,
         "window_us": window_us,
         "threshold": threshold,
+        "spike_height": 38.0 if status == "fires" else math.nan,
         "status": status,
     }
 
@@ -151,6 +152,9 @@ def test_locate_finds_the_closest_point_of_a_synthetic_plane():
         _pt(0.9, 0.5, 200.0, math.inf, "silent"),  # a perfect window, no th
         _pt(0.8, 0.8, math.nan, math.nan, "spontaneous"),
         _pt(0.9, 0.1, None, None, "wide"),
+        # the 10 mV criterion cleared by a graded response: no window, but
+        # a threshold and a window that would be closest if they counted
+        _pt(0.2, 0.1, 200.0, 48.0, "graded"),
     ]
     best, d = script.locate(points, ref_w, ref_th)
     assert (best["couple12"], best["couple21"]) == (0.7, 0.3)
@@ -192,6 +196,7 @@ def test_extremes_ignore_points_without_a_value():
         _pt(0.9, 0.1, 201.0, 34.0),
         _pt(0.5, 0.5, math.nan, math.inf, "silent"),
         _pt(0.9, 0.9, None, None, "spontaneous"),
+        _pt(0.3, 0.1, 100.0, 20.0, "graded"),  # does not spike: not counted
     ]
     ex = script.extremes(points)
     assert ex["window_min"]["couple12"] == 0.8
@@ -204,8 +209,8 @@ def test_extremes_ignore_points_without_a_value():
 # --- the statuses of measure_point -------------------------------------------
 
 
-def _fake(monkeypatch, threshold, window=None):
-    """Replaces the two searches; returns the model keywords they saw."""
+def _fake(monkeypatch, threshold, window=None, height=38.0):
+    """Replaces the searches and the spike height; returns what they saw."""
     seen = []
 
     def fake_threshold(model, delay, model_kw=None, **kw):
@@ -218,6 +223,11 @@ def _fake(monkeypatch, threshold, window=None):
         seen.append((model, margin, model_kw, kw))
         return window, kw["threshold0"]
 
+    def fake_height(model, model_kw=None, **kw):
+        seen.append((model, "height", model_kw, kw))
+        return height
+
+    monkeypatch.setattr(coincidence, "spike_height", fake_height)
     monkeypatch.setattr(coincidence, "threshold", fake_threshold)
     monkeypatch.setattr(coincidence, "window", fake_window)
     return seen
@@ -232,10 +242,12 @@ def test_a_point_that_fires_has_a_threshold_and_a_window_in_us(monkeypatch):
     assert p["status"] == "fires"
     assert p["threshold"] == 80.0
     assert p["window_us"] == pytest.approx(141.0)
-    (m, d, kw, search), (_, margin, wkw, wsearch) = seen
+    (m, d, kw, search), (_, _, hkw, _), (_, margin, wkw, wsearch) = seen
     # the coupling goes in through model_kw, the ceiling and tolerances to
     # the searches, and the window reuses the threshold found
-    assert kw == wkw == {"couple12": 0.8, "couple21": 0.2, "mode": "exact"}
+    assert kw == hkw == wkw
+    assert kw == {"couple12": 0.8, "couple21": 0.2, "mode": "exact"}
+    assert p["spike_height"] == 38.0
     assert (m, d, margin) == ("two", 0.0, script.MARGIN)
     assert search == {"rel_tol": 1e-3, "ceiling": 500.0}
     assert wsearch["threshold0"] == 80.0 and wsearch["delay_tol"] == 1e-3
@@ -246,7 +258,8 @@ def test_a_cell_that_never_spikes_is_silent_and_has_no_window(monkeypatch):
     p = script.measure_point(TASK)
     assert p["status"] == "silent" and p["threshold"] == math.inf
     assert math.isnan(p["window_us"])
-    assert len(seen) == 1  # no window search without a threshold
+    assert len(seen) == 1  # no spike height or window without a threshold
+    assert math.isnan(p["spike_height"])
 
 
 def test_a_cell_that_fires_unprompted_is_spontaneous(monkeypatch):
@@ -254,6 +267,27 @@ def test_a_cell_that_fires_unprompted_is_spontaneous(monkeypatch):
     p = script.measure_point(TASK)
     assert p["status"] == "spontaneous"
     assert math.isnan(p["threshold"]) and math.isnan(p["window_us"])
+
+
+def test_a_graded_response_has_a_threshold_but_no_window(monkeypatch):
+    # the 10 mV criterion is cleared, but the cell's spike is only 18 mV tall
+    seen = _fake(monkeypatch, 80.3, window=0.141, height=18.0)
+    p = script.measure_point(TASK)
+    assert p["status"] == "graded"
+    assert p["threshold"] == 80.3 and p["spike_height"] == 18.0
+    assert math.isnan(p["window_us"])
+    assert len(seen) == 2  # the threshold and the height, no window search
+    assert not script.spikes(p)
+
+
+def test_the_spike_height_limit_separates_the_cells_measured():
+    # spike_height at the firing cells of node 3's constants (PR #130): the
+    # cells with a spike and those with only a graded response
+    assert script.MIN_SPIKE_MV == 30.0
+    for h in (35.6, 38.0, 40.8, 57.1, 74.7):
+        assert h >= script.MIN_SPIKE_MV
+    for h in (9.6, 10.0, 11.3, 13.0, 17.6, 18.4):
+        assert h < script.MIN_SPIKE_MV
 
 
 def test_a_window_beyond_the_search_is_wide(monkeypatch):
@@ -264,7 +298,7 @@ def test_a_window_beyond_the_search_is_wide(monkeypatch):
 
 
 def test_every_status_is_listed():
-    for status in ("fires", "silent", "spontaneous", "wide"):
+    for status in ("fires", "graded", "silent", "spontaneous", "wide"):
         assert status in script.STATUSES
 
 
@@ -279,7 +313,7 @@ def test_markdown_has_one_row_per_point_and_dashes_for_missing_values():
     rows = script.markdown(points).splitlines()
     assert len(rows) == 4  # header, rule, two points
     assert rows[2].startswith("| 0.3 | 0.2 |") and "| - | - | - |" in rows[2]
-    assert "| node 3 | fires | 33.91 | 201.3 |" in rows[3]
+    assert "| node 3 | fires | 33.91 | 38.0 | 201.3 |" in rows[3]
 
 
 def test_clean_makes_the_json_strict():

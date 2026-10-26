@@ -452,9 +452,12 @@ The protocol, which the published row (not yet approved) follows:
   axonal Na conductance. Goldwyn et al. instead re-reference g_Na for every
   configuration (the smallest at which two coincident inputs spike), so a
   weakly or strongly coupled cell here may not fire at all. Each point says
-  which of four things happened: both numbers found; nothing up to the
-  amplitude ceiling spiked (silent); the cell fired with no input; or the
-  input still spiked at the largest delay searched, so there is no window;
+  which of five things happened: a spike and both numbers found; the 10 mV
+  criterion cleared only by a graded depolarisation (the spike height,
+  `coincidence.spike_height`, is under three times the criterion, so there is
+  a threshold but no window); nothing up to the amplitude ceiling reached the
+  criterion (silent); the cell fired with no input; or the input still spiked
+  at the largest delay searched, so there is no window;
 - at each point the pair threshold at delay 0 is found, then the 3% window
   (`coincidence.window`, as in "Coincidence window") reusing that threshold;
 - the 45-compartment model is located as the point whose window and threshold

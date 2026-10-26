@@ -9,10 +9,13 @@ constants. Their Fig 3 plane has forward coupling no weaker than backward
 ratio couple12 / couple21 of at most ten. This sweeps that region on a regular
 grid and, at each point, finds the EPSG-pair threshold (coincident inputs) and
 the 3% coincidence window (coincidence.threshold and coincidence.window, as in
-scripts/coincidence_window.py), and says whether the cell fires at all. The
-area ratio, the channel fractions and the axonal Na conductance stay at node
-3's values, so unlike Goldwyn et al, who re-reference g_Na for every
-configuration, a weakly coupled cell may simply not fire.
+scripts/coincidence_window.py), and says whether the cell fires at all. A
+point counts as spiking only if its spike height (coincidence.spike_height) is
+at least MIN_SPIKE_MV: the 10 mV criterion alone is also cleared by a graded
+depolarisation in a cell that never spikes (status "graded"). The area ratio,
+the channel fractions and the axonal Na conductance stay at node 3's values,
+so unlike Goldwyn et al, who re-reference g_Na for every configuration, a
+weakly or strongly coupled cell may simply not fire.
 
 It marks the lookup's own point (node 3, the TwoCpt.m cell), Goldwyn's three
 example configurations and the 44 axon nodes' constants, and locates the
@@ -45,7 +48,13 @@ STARS = {
     "forward (Goldwyn)": (0.8, 0.2),
     "strong (Goldwyn)": (0.8, 0.7),
 }
-STATUSES = ("fires", "silent", "spontaneous", "wide")
+# A point counts as spiking only if its spike is at least this tall: the 10 mV
+# criterion (axon above soma) is also cleared by a graded depolarisation in a
+# cell that never spikes. A spike_height of 30 mV separates the two cleanly at
+# node 3's Na: the cells that spike reach 36 mV or more, the graded ones 19 mV
+# or less.
+MIN_SPIKE_MV = 3 * coincidence.FACTOR
+STATUSES = ("fires", "graded", "silent", "spontaneous", "wide")
 
 
 def axis(step: float, lo: float = AXIS_LO, hi: float = AXIS_HI) -> list[float]:
@@ -142,16 +151,22 @@ def distance(
     )
 
 
+def spikes(point: dict[str, Any]) -> bool:
+    """Returns whether a measured point has a spike (status "fires")."""
+    return point.get("status", "fires") == "fires"
+
+
 def locate(
     points: list[dict[str, Any]],
     ref_window_us: float = MULTI_WINDOW_US,
     ref_threshold: float = MULTI_THRESHOLD_NS,
 ) -> tuple[dict[str, Any], float]:
-    """Finds the point closest to a reference (window, threshold).
+    """Finds the spiking point closest to a reference (window, threshold).
 
     Args:
         points: Dicts with at least "window_us" and "threshold" (nan, inf or
-            None where there is no value); such points are never closest.
+            None where there is no value), and a "status"; points that do
+            not spike, or lack a value, are never closest.
         ref_window_us: The reference window [us].
         ref_threshold: The reference threshold [nS].
 
@@ -163,7 +178,7 @@ def locate(
         ValueError: If no point has a finite window and threshold.
     """
     best, best_d = None, math.inf
-    for p in points:
+    for p in filter(spikes, points):
         w, th = p["window_us"], p["threshold"]
         d = (
             math.nan
@@ -184,34 +199,37 @@ def measure_point(task: tuple[Any, ...]) -> dict[str, Any]:
         task: (couple12, couple21, mode, ceiling, rel_tol, delay_tol).
 
     Returns:
-        dict(couple12, couple21, status, threshold, window_us). The status
-        is "fires" (both found), "silent" (nothing up to the ceiling
-        spikes: threshold inf), "spontaneous" (the cell fires with no input)
-        or "wide" (the input still spikes at the search's largest delay, so
-        no window). Values that were not found are nan (threshold: inf for
-        "silent").
+        dict(couple12, couple21, status, threshold, window_us,
+        spike_height). The status is "fires" (a spike of at least
+        MIN_SPIKE_MV, and a window), "graded" (the 10 mV criterion is
+        cleared at `threshold` but only by a graded depolarisation: the
+        spike is shorter than MIN_SPIKE_MV, so there is no window to
+        measure), "silent" (nothing up to the ceiling clears it: threshold
+        inf), "spontaneous" (the cell fires with no input) or "wide" (the
+        input still spikes at the search's largest delay, so no window).
+        Values that were not found are nan (threshold: inf for "silent").
     """
     c12, c21, mode, ceiling, rel_tol, delay_tol = task
     kw = {"couple12": c12, "couple21": c21, "mode": mode}
-    out = {"couple12": c12, "couple21": c21}
+    out = {
+        "couple12": c12,
+        "couple21": c21,
+        "threshold": math.nan,
+        "window_us": math.nan,
+        "spike_height": math.nan,
+    }
     try:
         th = coincidence.threshold(
             "two", 0.0, model_kw=kw, rel_tol=rel_tol, ceiling=ceiling
         )
     except _bisect.FiresWithoutInputError:
-        return {
-            **out,
-            "status": "spontaneous",
-            "threshold": math.nan,
-            "window_us": math.nan,
-        }
+        return {**out, "status": "spontaneous"}
     if not math.isfinite(th):
-        return {
-            **out,
-            "status": "silent",
-            "threshold": th,
-            "window_us": math.nan,
-        }
+        return {**out, "status": "silent", "threshold": th}
+    height = coincidence.spike_height("two", model_kw=kw)
+    out |= {"threshold": th, "spike_height": height}
+    if height < MIN_SPIKE_MV:
+        return {**out, "status": "graded"}
     width, _ = coincidence.window(
         "two",
         MARGIN,
@@ -223,7 +241,6 @@ def measure_point(task: tuple[Any, ...]) -> dict[str, Any]:
     return {
         **out,
         "status": "fires" if math.isfinite(width) else "wide",
-        "threshold": th,
         "window_us": 1000 * width,
     }
 
@@ -262,16 +279,17 @@ def markdown(points: list[dict[str, Any]]) -> str:
     """Returns the points as a Markdown table, by forward then backward."""
     rows = [
         "| couple12 | couple21 | point | status | threshold (nS) "
-        "| 3% window (us) | distance to 45-cpt |",
-        "|---|---|---|---|---|---|---|",
+        "| spike (mV) | 3% window (us) | distance to 45-cpt |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for p in sorted(points, key=lambda p: (p["couple12"], p["couple21"])):
-        d = distance(p["window_us"], p["threshold"])
+        d = distance(p["window_us"], p["threshold"]) if spikes(p) else math.nan
         rows.append(
             f"| {p['couple12']:.4g} | {p['couple21']:.4g} "
             f"| {p.get('label', '')} | {p['status']} "
-            f"| {_fmt(p['threshold'], '.2f')} | {_fmt(p['window_us'], '.1f')} "
-            f"| {_fmt(d, '.3f')} |"
+            f"| {_fmt(p['threshold'], '.2f')} "
+            f"| {_fmt(p['spike_height'], '.1f')} "
+            f"| {_fmt(p['window_us'], '.1f')} | {_fmt(d, '.3f')} |"
         )
     return "\n".join(rows)
 
@@ -279,7 +297,7 @@ def markdown(points: list[dict[str, Any]]) -> str:
 def extremes(points: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Returns the points of smallest and largest window and threshold.
 
-    Only points with a finite value count.
+    Only spiking points with a finite value count.
 
     Args:
         points: Measured points (see measure_point()).
@@ -291,7 +309,9 @@ def extremes(points: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     out = {}
     for key, name in (("window_us", "window"), ("threshold", "threshold")):
         have = [
-            p for p in points if p[key] is not None and math.isfinite(p[key])
+            p
+            for p in filter(spikes, points)
+            if p[key] is not None and math.isfinite(p[key])
         ]
         if have:
             out[f"{name}_min"] = min(have, key=lambda p: p[key])
@@ -307,8 +327,9 @@ def plot(
 ) -> None:
     """Draws the window and the threshold over the plane.
 
-    Grid points are coloured squares (grey with a cross where nothing was
-    found); the lookup's point, Goldwyn's stars and the located point are
+    Grid points that spike are coloured squares; grey squares are cells with
+    a graded response only (a circle) or no spike or window (a cross); the
+    lookup's point, Goldwyn's stars and the located point are
     marked, and the grey dots are the 44 axon nodes' own constants.
     """
     # imported here rather than at the top, like the pool scripts, so importing
@@ -325,32 +346,40 @@ def plot(
         (axes[1], "threshold", "Coincident threshold (nS)"),
     ):
         found = [
-            p for p in points if p[key] is not None and math.isfinite(p[key])
+            p
+            for p in filter(spikes, points)
+            if p[key] is not None and math.isfinite(p[key])
         ]
-        lost = [p for p in points if p not in found]
-        vals = [p[key] for p in found]
+        graded = [p for p in points if p["status"] == "graded"]
+        lost = [p for p in points if p not in found and p not in graded]
+        size = 900 * step if step < 0.2 else 700
         sc = ax.scatter(
             [p["couple12"] for p in found],
             [p["couple21"] for p in found],
-            c=vals,
-            s=900 * step if step < 0.2 else 700,
+            c=[p[key] for p in found],
+            s=size,
             marker="s",
             cmap="viridis",
         )
-        ax.scatter(
-            [p["couple12"] for p in lost],
-            [p["couple21"] for p in lost],
-            c="0.85",
-            s=900 * step if step < 0.2 else 700,
-            marker="s",
-        )
-        ax.scatter(
-            [p["couple12"] for p in lost],
-            [p["couple21"] for p in lost],
-            c="0.4",
-            marker="x",
-            s=25,
-        )
+        for group, mark, label in (
+            (graded, "o", "graded response, no spike"),
+            (lost, "x", "no spike, or no window"),
+        ):
+            ax.scatter(
+                [p["couple12"] for p in group],
+                [p["couple21"] for p in group],
+                c="0.85",
+                s=size,
+                marker="s",
+            )
+            ax.scatter(
+                [p["couple12"] for p in group],
+                [p["couple21"] for p in group],
+                c="0.35",
+                marker=mark,
+                s=25,
+                label=label,
+            )
         ax.scatter(
             constants.COUPLING1,
             constants.COUPLING2,
@@ -394,8 +423,7 @@ def plot(
     axes[0].legend(fontsize=7, loc="upper left", frameon=True)
     fig.suptitle(
         "Two-compartment model over Goldwyn et al 2019's coupling plane "
-        "(node 3's area ratio, channels and axonal Na); grey: no spike "
-        "or no window",
+        "(node 3's area ratio, channels and axonal Na)",
         fontsize=10,
     )
     fig.tight_layout()
