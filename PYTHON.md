@@ -842,6 +842,19 @@ What it shows:
   spacing differs too: the paper's three rise from 242 to 317 Hz, here the spike
   and EPSG minima coincide near 430 Hz. The old row's 400–500 Hz was closer to
   the sine-train number only by coincidence of measures.
+  Why: a linearised soma impedance and single-parameter sweeps on the full model
+  put the resonance frequency at about the square root of the KLT slope
+  conductance over the capacitance times KLT's activation time constant. This
+  soma (Lehnert et al. 2014) has about 327 nS of KLT slope conductance at −68 mV
+  on 70 pF, with τ_w 1.07 ms, and KLT is 58% of its resting conductance;
+  Mikiel-Hunter's single compartment has about 36–49 nS on 25 pF with τ_w
+  1.51 ms at −58 mV. Doubling the soma capacitance or τ_w in this model each
+  brings the resonance to 250–260 Hz, and the 2-compartment model with Goldwyn
+  et al. 2019's passive targets (8.5 MΩ, 0.34 ms, −58 mV, the same as
+  Mikiel-Hunter's) resonates at 530 Hz, so the KLT fractions, not the passive
+  properties, set it. The paper's own regression across its recorded cells
+  (sine frequency = 390 − 9.3 × R_in, its Fig. 2B) gives about 368 Hz at this
+  model's 2.4 MΩ, well outside their 14 MΩ cells but in the same direction.
 - **The two models agree within 3%** on all three, so the resonance is the
   somatic KLT, not the axon's structure.
 - **The minima are broad:** the threshold stays within 1% of its minimum over
