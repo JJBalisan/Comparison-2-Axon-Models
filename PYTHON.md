@@ -600,8 +600,8 @@ Each item has an issue (label `literature-2026-10`):
   with a reversal below rest (below), but no `dt_inh` axis on the window yet
   (#77)
 - protocols on the event-list input (below): fibre counts, Poisson arrivals,
-  pre-pulse trains, and reaching it from the searches, which build their own
-  `SynParams` (#78)
+  pre-pulses, EPSC trains and a trial-based ITD sweep are built and reachable
+  from the searches; the results are proposals until approved (#78)
 - axon geometry as parameters: internode length, diameter, node length, AIS
   length and start and myelin capacitance are folded into the constants
   (#81)
@@ -736,9 +736,63 @@ order, as `np.bincount` does, so fast stays bit-identical to `"exact"` on
 darwin-arm64 (`tests/test_fast.py`). Native agrees with the reference to the
 golden tolerance (`tests/test_events.py`); there is no Events golden trace.
 
-Not yet: the searches (`coincidence`, `somatic` build their own `SynParams`),
-and a breakpoint policy for dense lists, where a Casarez-style hundred-synapse
-drive would mean hundreds of solver restarts (#78).
+Not yet: a breakpoint policy for dense lists, where a Casarez-style
+hundred-synapse drive means a hundred or more solver restarts per run (#78).
+
+### Events from the searches and the protocols (#78)
+
+`coincidence.threshold`, `threshold_curve`, `window`, `probability_trials` and
+`somatic.fires`, `response` and `rheobase` take `events=`, and then drive the
+cell with the `"Events"` stimulus instead of a pair or a step. `events` is
+either
+
+- a tuple of `Event`s, whose peaks the search scales (the searched amplitude
+  plays the role of `I`: `I=1` uses the peaks as given); it has no delay, so
+  `threshold`, `threshold_curve` and `probability_trials` reject a delay other
+  than 0 for it; or
+- an *event source*, a callable `(delay, amp) -> tuple[Event, ...]`, which can
+  hold some events fixed (a pre-pulse, an IPSG) and scale only the rest.
+  `synaptic.PairSource(start, tau, node, node2, pre)` is the EPSG pair with
+  its delay, a second compartment and fixed-peak pre-pulses.
+
+The search runs a source with `I = 1` and the amplitude it is looking for, so
+calls without `events` are untouched (the golden traces, the benchmark and
+`scripts/benchmark_search.py --check` do not move), and `threshold` of an
+event pair agrees with the `EPSGpair` threshold within the search tolerance.
+`window(events=...)` measures a window on a *signed* delay, `window_edges`
+returns both edges and the centre: the reference is the lowest threshold over
+delay (`best_delay`), and with a plain identical pair it reproduces `window`'s
+width to a few µs.
+
+Builders in `msoaxon.synaptic` (each returns events; the seeded generator is
+a `numpy` `Generator` or a seed):
+
+| Builder | What it draws |
+|---|---|
+| `fibre_events(n, rng, g=37, g_sd, jitter, release_p, rate, duration)` | n fibres of 37 nS (Couchman 2010), one spike each with Gaussian jitter, or a Poisson process, thinned by release probability |
+| `bilateral_events(delay, rng, n, nodes, ...)` | two sides of `fibre_events`, the second `delay` after the first |
+| `current_event`, `epsc_train` | EPSC-shaped currents: a conductance driven from a reversal of 10^5 mV, so the current does not depend on the voltage |
+
+Protocols on top, in `msoaxon.coincidence` and `msoaxon.measure`:
+
+- `bilateral_probability`, `fibre_window_trials`: spike probability per delay
+  for random fibres, and the half-width of that curve over repeated
+  experiments (`measure.curve_summary`: peak, full width at half maximum,
+  centre and centroid).
+- `prepulse_thresholds`: the pair threshold after an EPSG at chosen onsets
+  before it (Franken 2015).
+- `measure.train_rin`: the soma input resistance during an EPSC train. The
+  probe is a slow hyperpolarising current event whose response at its peak is
+  quasi-steady, averaged over one train period so that the train's own
+  transients cancel; the train is run with and without it.
+- `itd_sweep`: a Casarez-style trial-based ITD sweep, 125 synapses per side
+  at release probability 0.45 by default. Their unitary conductance is not in
+  the notes this was built from: `CASAREZ_G` (1.1 nS) is calibrated to this
+  model so that the sweep is tuned, not measured. The defaults are a small
+  sweep (11 ITDs, 20 trials); the paper's 400 trials in 10 µs steps is the
+  same call with `itds` and `n_trials` set.
+
+`scripts/event_protocols.py` runs all four and prints the tables.
 
 ## Dendrites
 
