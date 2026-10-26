@@ -205,10 +205,20 @@ itself). The Jacobian is filled by forward-difference
 products `J v` on two right-hand-side calls (step `1e-7 (1 + max |x|)`), one
 per colour of the pattern.
 
-**max_step.** diffsol has no step cap, so `max_step` is emulated: whenever the
-next step would be longer, the integrator's stop time is moved to one
-`max_step` ahead. Only the step length is bounded; the tolerances are never
-changed.
+**Newton solve.** The Newton matrix I - cJ has a fixed shape (each gate
+couples only to itself and its own compartment's voltage; the voltage block is
+a tree), so it is solved directly on that structure: every gate is eliminated
+into its compartment's diagonal, then the tree is solved leaves to root, in
+O(n) with no ordering or symbolic step. A linearisation whose pattern is not
+exactly that, or whose tree pivot falls under 1e-3 of its diagonal, goes to
+faer's sparse LU instead (`MSOAXON_NATIVE_LOG_FALLBACK=1` logs each one; none
+occurs on the golden cases or the benchmark).
+
+**max_step.** diffsol has no step cap, so `max_step` is emulated: before every
+step the controller's growth bounds are narrowed so that no step is proposed
+past the cap, and should one still be longer the integrator's stop time is
+moved to one `max_step` ahead. Only the step length is bounded; the tolerances
+are never changed.
 
 **Events.** `spike_event` and `settled_event` carry a `spec` the native segment
 reads; Rust evaluates the same functions as root functions, stops on a rising

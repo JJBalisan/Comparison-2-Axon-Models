@@ -6,6 +6,53 @@ and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least. The `msoaxon-fast` crate in `rust/` carries the
 same version as the package, bumped in the same release PR.
 
+## 1.6.0 (26 Oct 2026)
+
+Phase 1 of the Rust port (#28), three parallel lanes: the `"Events"` stimulus
+joins the Rust right-hand side, native mode meets the 8x bar with a structured
+Newton solve, and CI builds the crate on every wheel platform with a cache.
+Model results are unchanged: fast stays bit-identical to the reference on
+darwin-arm64, the golden traces, the 28 pinned thresholds and the benchmark's
+300 runs hold in every mode, and the default mode is still `"fast"`.
+
+### Added
+
+- `mode="fast"` and `mode="native"` run the `"Events"` stimulus in the Rust
+  right-hand side instead of falling back to `"exact"` with a warning: the
+  event table goes to Rust whole and each event is evaluated at its own
+  compartment in numpy's summation order, so fast is bit-identical to
+  `"exact"` on darwin-arm64 and native agrees within the golden tolerance
+  (#107).
+- Native mode solves the Newton matrix directly on the model's
+  tree-plus-diagonal structure, with faer's sparse LU as the fallback (none
+  occurs on the golden cases or the benchmark). The integrator is about 1.4x
+  faster and a threshold search about 8x faster than fast mode (0.121 s
+  against the 0.963 s baseline; the coincidence window 8.8x). PYTHON.md's
+  "Native mode" section describes the solve and the `max_step` emulation
+  (#105).
+
+### Changed
+
+- Native mode bounds `max_step` through the step controller's growth limits
+  rather than a stop-time hop at every capped step, so a capped 110 ms step
+  refactorises 1492 times instead of 13008; uncapped runs take the same steps
+  as before (#105).
+- `rust/Cargo.toml` depends on `diffsol-la =0.3.0` directly (the linear-solver
+  trait diffsol does not re-export).
+- CI: `Swatinem/rust-cache` in the fast and wheel jobs (second-run job times
+  about halved), the `prototype/diffsol-real` crate built and tested on
+  ubuntu, `prototype/diffsol-probe` frozen as a snapshot, and the fast jobs
+  run on Windows and linux-aarch64 too, so native mode has run on every wheel
+  target (#106, #109, #113, #114). On linux-aarch64 Rust fuses the
+  multiply-add in `interp` and numpy's build does not, one ulp apart; the
+  non-bitwise comparison allows 1e-15 absolute for it.
+
+### Fixed
+
+- Native mode: a non-terminal root crossed in the step before a stop time no
+  longer panics inside diffsol (`StopTimeBeforeCurrentTime`); the stop time is
+  re-armed after every root (#106).
+
 ## 1.5.0 (26 Oct 2026)
 
 The first release with the Rust integrator (#28, Phase 0 and lane D): an
