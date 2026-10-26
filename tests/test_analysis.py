@@ -249,10 +249,12 @@ def test_spike_amplitude_trace_is_the_measured_run():
 
 def test_passive_step_matches_the_dendrites_table():
     # PYTHON.md / figures/dendrites: lumped model, rest-rebalanced, 2.4 / 4.7
-    # MOhm
+    # MOhm. Pinned on the reference: the response is a microvolt difference
+    # of two runs, so another integrator's steps (mode="native") move
+    # rin_peak by ~1e-3, past these digits though not the table's
 
     r = measure.passive_step(
-        "multi", mem=multi.membrane(-68.0, rebalance_rest=True)
+        "multi", mem=multi.membrane(-68.0, rebalance_rest=True), mode="exact"
     )
     assert np.isclose(r["rin_steady"], 2.4307, rtol=1e-4)
     assert np.isclose(r["rin_peak"], 4.6815, rtol=1e-4)

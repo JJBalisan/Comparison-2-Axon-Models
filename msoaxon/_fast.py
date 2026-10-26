@@ -3,15 +3,15 @@
 `msoaxon_fast` (rust/, the `fast` extra) ports multi._rhs to Rust,
 expression for expression in numpy's floating-point order. multi._rhs stays
 the reference: mso_axon(mode="exact") runs it, mode="fast" runs the port
-under scipy's BDF, and mode="native" (opt-in) runs the port under a Rust BDF
+under scipy's BDF, and mode="native" runs the port under a Rust BDF
 integrator (diffsol), so no Python is left in the time loop (Native).
 
 Mode, per mso_axon call: an explicit mode= wins, then the MSOAXON_MODE
-environment variable, then the default, which is "fast" when the extension
-imports, else "exact" (silently when the extra is not installed; with a
-warning when it is installed but fails to load). Every configuration is
-ported. Asking for "fast" or "native" (by argument or environment) when it
-can't run warns and runs "exact". "native" is never the default.
+environment variable, then the default, which is "native" when the
+extension imports, else "exact" (silently when the extra is not installed;
+with a warning when it is installed but fails to load). Every configuration
+is ported. Asking for "fast" or "native" (by argument or environment) when
+it can't run warns and runs "exact".
 
 The first fast run in a process checks the port against multi._rhs on a few
 fixed states and reports the result in a DriftWarning: bit-identical on the
@@ -125,13 +125,13 @@ def effective(mode: str | None) -> str:
         mode: The mode passed to mso_axon, or None.
 
     Returns:
-        "native" when asked for and the extension imports; "fast" when
-        nothing or "fast" is asked for and it imports; else "exact".
+        "fast" when asked for and the extension imports; "native" when
+        nothing or "native" is asked for and it imports; else "exact".
     """
     want = requested(mode)
     if want == "exact" or _ext is None:
         return "exact"
-    return "native" if want == "native" else "fast"
+    return "fast" if want == "fast" else "native"
 
 
 def resolve(mode: str | None) -> str:
@@ -371,6 +371,9 @@ class Native:
 
         Raises:
             ValueError: For an event without a `spec`.
+            RuntimeError: If diffsol fails on the segment, as
+                _solve._segment raises for scipy's BDF; the message
+                keeps diffsol's.
         """
         if self._integrator is None:
             self._integrator = self._rhs.integrator()
@@ -388,16 +391,23 @@ class Native:
                 spike = (int(spec[1]), float(spec[2]))
             else:
                 settled = (float(spec[1]), int(spec[2]), float(spec[3]))
-        t, ys, stopped = self._integrator.run(
-            np.ascontiguousarray(y, dtype=np.float64),
-            float(a),
-            float(b),
-            float(rtol),
-            float(atol),
-            float(max_step),
-            spike,
-            settled,
-        )
+        try:
+            t, ys, stopped = self._integrator.run(
+                np.ascontiguousarray(y, dtype=np.float64),
+                float(a),
+                float(b),
+                float(rtol),
+                float(atol),
+                float(max_step),
+                spike,
+                settled,
+            )
+        except ValueError as e:
+            # diffsol's own failures (rust/src/integrate.rs prefixes them);
+            # the argument checks stay ValueError
+            if not str(e).startswith("diffsol:"):
+                raise
+            raise RuntimeError(f"integration failed on [{a}, {b}]: {e}") from e
         return t, ys.T, stopped
 
 
@@ -529,7 +539,8 @@ def _warn_drift() -> None:
             f"difference {worst:.1e})"
         )
     warnings.warn(
-        f'msoaxon is running its Rust right-hand side (mode="fast"); '
+        f'msoaxon is running its Rust right-hand side (mode="fast", under '
+        f"scipy's BDF; the default is mode=\"native\"); "
         f"{verdict}. Results may differ from the numpy reference in the "
         f'last bits on other hardware. Pass mode="exact" (or set '
         f"{MODE_ENV}=exact) to run the reference; silence this with "
@@ -542,12 +553,14 @@ def _warn_drift() -> None:
 def _warn_native() -> None:
     """Issues the native DriftWarning."""
     warnings.warn(
-        'msoaxon is running its Rust BDF integrator (mode="native"): '
-        "diffsol's BDF over the Rust right-hand side, in place of scipy's. "
-        "Results agree with the numpy reference within the solver "
-        "tolerance, not bit for bit: the steps, and so the last digits and "
-        'event times, are its own. Pass mode="fast" or mode="exact" (or '
-        f"set {MODE_ENV}) for scipy's BDF; silence this with "
+        'msoaxon is running its Rust BDF integrator (mode="native", the '
+        "default when the msoaxon-fast extension is installed): diffsol's "
+        "BDF over the Rust right-hand side, in place of scipy's. Results "
+        "agree with the numpy reference within the solver tolerance, not "
+        "bit for bit: the steps, and so the last digits and event times, "
+        'are its own. Pass mode="fast" (the same right-hand side) or '
+        f'mode="exact" (the numpy reference), or set {MODE_ENV}, for '
+        "scipy's BDF; silence this with "
         'warnings.filterwarnings("ignore", category=msoaxon.DriftWarning).',
         DriftWarning,
         stacklevel=4,

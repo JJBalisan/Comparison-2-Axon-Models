@@ -28,12 +28,13 @@ addopts = "-n auto --strict-markers"  # pytest-xdist: one worker per CPU; -n 0 r
 markers = ["slow: end-to-end script runs (CI runs them on one Python version only)"]
 # forking a multi-threaded process can deadlock; _parallel.pool_context avoids it,
 # so a pool that still forks from a threaded process fails the test
-# the first fast run's DriftWarning is noise here, except in tests/test_fast.py,
-# whose pytest.warns still sees it. Matched by message: naming the class would
-# import msoaxon before coverage starts
+# the first fast and native runs' DriftWarnings are noise here, except in
+# tests/test_fast.py, whose pytest.warns still sees them. Matched by message:
+# naming the class would import msoaxon before coverage starts
 filterwarnings = [
   'error:This process .* is multi-threaded:DeprecationWarning',
   'ignore:msoaxon is running its Rust right-hand side:UserWarning',
+  'ignore:msoaxon is running its Rust BDF integrator:UserWarning',
 ]
 
 [tool.coverage.run]

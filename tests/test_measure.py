@@ -15,8 +15,10 @@ def _step(model="multi", **kw):
 def test_default_membrane_matches_the_rebalanced_values():
     # Before the fix: 61.4 / 68.7 MOhm and tau 0.0, because the baseline was
     # v0 and the membrane drifts by more than the step's response (microvolts).
-    reb = _step(mem=multi.membrane(-68.0, rebalance_rest=True))
-    r = _step()
+    # pinned on the reference, as in test_analysis: native's steps move
+    # rin_peak by ~1e-3
+    reb = _step(mem=multi.membrane(-68.0, rebalance_rest=True), mode="exact")
+    r = _step(mode="exact")
     assert 2.4 <= reb["rin_steady"] < 2.5 and 4.6 <= reb["rin_peak"] < 4.7
     # The default membrane rests ~0.13 mV below v0 where the conductances
     # differ a little, so it reads ~2% higher: 2.5 / 4.8 at one decimal.
@@ -30,7 +32,7 @@ def test_default_membrane_matches_the_rebalanced_values():
 
 def test_rebalanced_membrane_is_unchanged():
     # The dendrites table values (see test_analysis) on the coarse grid.
-    r = _step(mem=multi.membrane(-68.0, rebalance_rest=True))
+    r = _step(mem=multi.membrane(-68.0, rebalance_rest=True), mode="exact")
     assert np.isclose(r["rin_steady"], 2.4307, rtol=1e-4)
     assert np.isclose(r["rin_peak"], 4.6814, rtol=1e-4)
     assert np.isclose(r["tau"], 0.1197, atol=1e-4)
