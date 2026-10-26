@@ -12,8 +12,15 @@
 //! through a hand-written `OdeEquations` (diffsol's builder can only detect
 //! one, by NaN probes); the Jacobian is filled by
 //! forward-difference `Jv` products, one per colour of that pattern.
-//! `max_step` is not a diffsol option: it is emulated with stop-time hops,
-//! set only when the next step would be longer.
+//! `max_step` is not a diffsol option: it is emulated by narrowing the
+//! controller's growth bounds before every step, so that no step is
+//! proposed past it, with a stop-time hop as the fallback when a step
+//! still would be longer.
+//!
+//! `prototype/diffsol-probe` is the design record (why diffsol, the
+//! pitfalls, the costs); this file is the source of truth.
+
+use std::cell::RefCell;
 
 use diffsol::matrix::sparsity::MatrixSparsity;
 use diffsol::{
@@ -84,6 +91,8 @@ struct Eqn {
     sparsity: <M as Matrix>::Sparsity,
     coloring: JacobianColoring<M>,
     ctx: C,
+    /// Two state-sized buffers for `jv` and `roots`, so neither allocates.
+    scratch: RefCell<[Vec<f64>; 2]>,
 }
 
 impl Eqn {
@@ -91,11 +100,13 @@ impl Eqn {
     /// 1e-7 (1 + max |x|) of the diffsol prototypes (issue #28).
     fn jv(&self, x: &[f64], t: f64, v: &[f64], y: &mut [f64]) {
         let h = 1e-7 * (1.0 + x.iter().fold(0.0_f64, |a, b| a.max(b.abs())));
-        let xp: Vec<f64> = x.iter().zip(v).map(|(a, b)| a + h * b).collect();
-        let mut f0 = vec![0.0; x.len()];
-        self.rhs.eval(t, x, &mut f0);
-        self.rhs.eval(t, &xp, y);
-        for (a, b) in y.iter_mut().zip(&f0) {
+        let [xp, f0] = &mut *self.scratch.borrow_mut();
+        for ((p, a), b) in xp.iter_mut().zip(x).zip(v) {
+            *p = a + h * b;
+        }
+        self.rhs.eval(t, x, f0);
+        self.rhs.eval(t, xp, y);
+        for (a, b) in y.iter_mut().zip(f0.iter()) {
             *a = (*a - b) / h;
         }
     }
@@ -110,8 +121,8 @@ impl Eqn {
         g[1] = -1.0;
         if let Some(s) = self.events.settled {
             if t >= s.t_off && x[s.axon_col] - x[0] < s.threshold {
-                let mut dx = vec![0.0; x.len()];
-                self.rhs.eval(t, x, &mut dx);
+                let [dx, _] = &mut *self.scratch.borrow_mut();
+                self.rhs.eval(t, x, dx);
                 if dx[..self.rhs.n()].iter().all(|d| *d < 0.0) {
                     g[1] = 1.0;
                 }
@@ -263,6 +274,7 @@ impl Integrator {
             sparsity,
             coloring,
             ctx,
+            scratch: RefCell::new([vec![0.0; nstates], vec![0.0; nstates]]),
         };
         let problem = OdeBuilder::<M>::new()
             .h0(H0)
@@ -290,9 +302,11 @@ impl Integrator {
     /// there (the root lies inside the last accepted step, whose end is not
     /// output), and sets `stopped`. A falling crossing does not stop it.
     ///
-    /// `max_step` (none if not finite and positive) bounds every step: when
-    /// the solver's next step would be longer, the stop time is moved to
-    /// one `max_step` ahead; the tolerances are never touched.
+    /// `max_step` (none if not finite and positive) bounds every step:
+    /// before each step the controller's growth bounds are narrowed so the
+    /// step after it can be at most `max_step`, and should the next step
+    /// still be longer the stop time is moved to one `max_step` ahead; the
+    /// tolerances are never touched.
     #[allow(clippy::too_many_arguments)]
     pub fn run(
         &mut self,
@@ -341,12 +355,41 @@ impl Integrator {
             s.set_step_size(h0, &problem.atol, problem.rtol, &problem.eqn, 1);
         }
         let mut solver = problem.bdf_solver::<LS>(state).map_err(err)?;
-        let mut stop = cap.map_or(t1, |h| (t0 + h).min(t1));
+        // diffsol's growth bounds, narrowed below while max_step binds. A
+        // hop shortens the step the controller chose after the Newton
+        // matrix was already refactorised for it, so every hop cost two LU
+        // set-ups; a step that is never proposed past the cap costs none.
+        let (grow_max, grow_min) = {
+            let c = solver.config();
+            (c.maximum_timestep_growth, c.minimum_timestep_growth)
+        };
+        let next_stop = |h: f64, t: f64| match cap {
+            Some(c) if h > c => (t + c).min(t1),
+            _ => t1,
+        };
+        let mut stop = next_stop(h0, t0);
         solver.set_stop_time(stop).map_err(err)?;
+        // the vector the output rows are copied out of (diffsol's vectors
+        // lend their slice only to a closure on a mutable operand)
+        let mut row = V::zeros(n, ctx);
+        let push = |out: &mut Run, row: &mut V, t: f64, y: &V| {
+            out.t.push(t);
+            row.for_each_batch_host([y], |_, [y], _| out.y.extend_from_slice(y));
+        };
         let mut g_prev = [0.0; 2];
         loop {
+            if let Some(c) = cap {
+                // the next step is h * factor with factor <= the growth
+                // bound; lowering the dead zone's floor with it lets the
+                // step grow to the cap itself, as scipy's clip does
+                let g = grow_max.min(c / solver.state().h);
+                let cfg = solver.config_mut();
+                cfg.maximum_timestep_growth = g;
+                cfg.minimum_timestep_growth = grow_min.min(g);
+            }
             let reason = solver.step().map_err(err)?;
             let tt = solver.state().t;
+            let root = matches!(reason, OdeSolverStopReason::RootFound(..));
             if let OdeSolverStopReason::RootFound(t_root, idx) = reason {
                 // the step started at the last row; a rising crossing is
                 // one that started below zero
@@ -355,26 +398,23 @@ impl Integrator {
                     .eqn
                     .roots(start, out.t[out.t.len() - 1], &mut g_prev);
                 if g_prev[idx] < 0.0 {
-                    let y = solver.interpolate(t_root).map_err(err)?.clone_as_vec();
-                    out.t.push(t_root);
-                    out.y.extend_from_slice(&y);
+                    let y = solver.interpolate(t_root).map_err(err)?;
+                    push(&mut out, &mut row, t_root, &y);
                     out.stopped = true;
                     return Ok(out);
                 }
             }
             let at_stop = matches!(reason, OdeSolverStopReason::TstopReached) || tt >= stop - 1e-9;
             if at_stop && stop >= t1 - 1e-9 {
-                out.t.push(t1);
-                out.y.extend_from_slice(&solver.state().y.clone_as_vec());
+                push(&mut out, &mut row, t1, solver.state().y);
                 return Ok(out);
             }
-            out.t.push(tt);
-            out.y.extend_from_slice(&solver.state().y.clone_as_vec());
-            let want = match cap {
-                Some(h) if solver.state().h > h => (tt + h).min(t1),
-                _ => t1,
-            };
-            if at_stop || want != stop {
+            push(&mut out, &mut row, tt, solver.state().y);
+            // a RootFound step returns before diffsol checks the stop time,
+            // so the next step could pass it (StopTimeBeforeCurrentTime, a
+            // panic inside diffsol): re-arm it after every root
+            let want = next_stop(solver.state().h, tt);
+            if at_stop || root || want != stop {
                 stop = want;
                 solver.set_stop_time(stop).map_err(err)?;
             }
@@ -533,5 +573,61 @@ mod tests {
         let r = run(&mut it, &y0, 2.0, 0.5, &ev);
         assert!(!r.stopped);
         assert_eq!(r.t, free.t);
+    }
+
+    /// The relaxing x[10] of `a_falling_crossing_does_not_stop_the_run`:
+    /// its y0 and event-free run.
+    fn relaxing(it: &mut Integrator, t1: f64, max_step: f64, h0: f64) -> (Vec<f64>, Run) {
+        let mut y0 = state();
+        y0[10] += 30.0;
+        let free = it
+            .run(&y0, 0.0, t1, TOL, TOL, max_step, h0, &Events::default())
+            .unwrap();
+        (y0, free)
+    }
+
+    /// A spike event that `r` crosses, falling, inside its step k.
+    fn falling_in_step(r: &Run, k: usize) -> Events {
+        let d = diff(r, 10);
+        assert!(d[k] < d[k - 1], "step {k} does not fall");
+        let spike = Spike {
+            axon_col: 10,
+            factor: 0.5 * (d[k - 1] + d[k]),
+        };
+        Events {
+            spike: Some(spike),
+            settled: None,
+        }
+    }
+
+    #[test]
+    fn a_falling_crossing_just_before_t1_still_ends_on_t1() {
+        // diffsol returns RootFound before it shortens the next step to the
+        // stop time: without a re-arm the next step passes t1 and diffsol
+        // panics (StopTimeBeforeCurrentTime)
+        let mut it = Integrator::new(model()).unwrap();
+        let (y0, free) = relaxing(&mut it, 2.0, 0.5, H0);
+        let k = free.t.len() / 2;
+        let ev = falling_in_step(&free, k);
+        let t1 = 0.5 * (free.t[k] + free.t[k + 1]);
+        let r = it.run(&y0, 0.0, t1, TOL, TOL, 0.5, H0, &ev).unwrap();
+        assert!(!r.stopped);
+        assert_eq!(*r.t.last().unwrap(), t1);
+        assert_eq!(r.t[..=k], free.t[..=k]);
+    }
+
+    #[test]
+    fn a_falling_crossing_inside_a_hop_does_not_stop_the_run() {
+        // h0 above max_step: the first step is cut to a stop time one
+        // max_step ahead, and the crossing lies inside it
+        let (t1, cap) = (5e-5, 1e-6);
+        let mut it = Integrator::new(model()).unwrap();
+        let (y0, free) = relaxing(&mut it, t1, cap, 2.0 * cap);
+        assert!((free.t[1] - cap).abs() < 1e-18, "no hop: {}", free.t[1]);
+        let ev = falling_in_step(&free, 1);
+        let r = it.run(&y0, 0.0, t1, TOL, TOL, cap, 2.0 * cap, &ev).unwrap();
+        assert!(!r.stopped);
+        assert_eq!(r.t, free.t);
+        assert!(r.t.windows(2).all(|w| w[1] - w[0] <= cap * (1.0 + 1e-9)));
     }
 }
