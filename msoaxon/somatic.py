@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 from scipy import interpolate
 
-from msoaxon import _bisect, _common, _dispatch, coincidence, multi
+from msoaxon import _bisect, _common, _dispatch, coincidence, multi, synaptic
 
 START, STOP, T_END = _common.START, 105.0, 110.0
 FACTOR = _common.FACTOR  # spike = axon rises this far above soma
@@ -74,6 +74,23 @@ def _factor(
     )
 
 
+def _run_args(
+    I: float, events: synaptic.EventsLike | None
+) -> tuple[tuple[Any, ...], float, synaptic.SynParams | None]:
+    """Returns the stimulus arguments of one run: the step, or the events.
+
+    Returns:
+        (stim, start, stop), I and syn for _dispatch: the 100 ms step of
+        amplitude I, or, with events, the "Events" stimulus of
+        events scaled by I (events as in coincidence.threshold(), with
+        delay 0), run for T_END ms.
+    """
+    if events is None:
+        return ("step", START, STOP), I, None
+    syn = synaptic.event_syn(synaptic.as_source(events), 0.0, I, T_END)
+    return ("Events", 0.0, 0.0), 1.0, syn
+
+
 def fires(
     model: str,
     I: float,
@@ -83,6 +100,7 @@ def fires(
     *,
     criterion: coincidence.Criterion = FACTOR,
     model_kw: dict[str, Any] | None = None,
+    events: synaptic.EventsLike | None = None,
 ) -> bool:
     """Returns whether a 100 ms somatic step makes compartment `node` spike.
 
@@ -98,6 +116,11 @@ def fires(
         model_kw: Further model keywords, as in coincidence.threshold():
             mode, morph, model_type, max_step, or r1/tau_est for "two"
             (Goldwyn 2019: v0=-58, r1=8.5, tau_est=0.34).
+        events: Drive the cell with an event list instead of the step
+            (an event tuple, or a source called with delay 0: see
+            coincidence.threshold()), its peaks scaled by `I`: a train
+            of EPSGs over the run's 110 ms, say. I is then a scale, not
+            a current.
 
     Returns:
         True if it spikes.
@@ -106,16 +129,18 @@ def fires(
         ValueError: If mem is given both as `mem` and in model_kw.
     """
     kw = _merge_kw(mem, model_kw)
+    (stim, start, stop), amp, syn = _run_args(I, events)
     return _dispatch.spikes(
         model,
-        "step",
-        START,
-        STOP,
-        I,
+        stim,
+        start,
+        stop,
+        amp,
         node,
         T_END,
         v0,
         1,
+        syn,
         factor=_factor(criterion, model, node, v0, kw),
         **kw,
     )
@@ -130,6 +155,7 @@ def response(
     *,
     criterion: coincidence.Criterion = FACTOR,
     model_kw: dict[str, Any] | None = None,
+    events: synaptic.EventsLike | None = None,
 ) -> tuple[bool, float]:
     """Runs a 100 ms somatic step like fires(), and says how close it came.
 
@@ -142,6 +168,7 @@ def response(
             shorthand for model_kw={"mem": mem}.
         criterion: The spike criterion (see fires()).
         model_kw: Further model keywords (see fires()).
+        events: An event list to run instead of the step (see fires()).
 
     Returns:
         (spiked, peak): fires()'s answer, and the largest axon - soma of
@@ -151,16 +178,18 @@ def response(
         ValueError: If mem is given both as `mem` and in model_kw.
     """
     kw = _merge_kw(mem, model_kw)
+    (stim, start, stop), amp, syn = _run_args(I, events)
     return _dispatch.response(
         model,
-        "step",
-        START,
-        STOP,
-        I,
+        stim,
+        start,
+        stop,
+        amp,
         node,
         T_END,
         v0,
         1,
+        syn,
         factor=_factor(criterion, model, node, v0, kw),
         **kw,
     )
@@ -176,6 +205,7 @@ def rheobase(
     *,
     criterion: coincidence.Criterion = FACTOR,
     model_kw: dict[str, Any] | None = None,
+    events: synaptic.EventsLike | None = None,
 ) -> float:
     """Finds the smallest 100 ms somatic step that fires.
 
@@ -198,9 +228,15 @@ def rheobase(
         guess: The first amplitude tried [pA].
         criterion: The spike criterion (see fires()).
         model_kw: Further model keywords (see fires()).
+        events: An event list (see fires()): the search then finds the
+            smallest scale of its peaks that fires, an EPSG train's
+            rheobase in the sense of "how much synaptic drive". `guess`
+            and the ceiling (1e6) are then in that scale's units: pass a
+            guess near the answer (the default 2000 suits pA).
 
     Returns:
-        The rheobase [pA], or inf if nothing up to 1e6 pA fires.
+        The rheobase [pA], or inf if nothing up to 1e6 pA fires; with
+        events, the scale of the list (inf above 1e6).
 
     Raises:
         _bisect.FiresWithoutInputError: If the cell fires with no input.
@@ -214,7 +250,7 @@ def rheobase(
     try:
         return _bisect.smallest_crossing(
             lambda I: response(
-                model, I, node, v0, criterion=factor, model_kw=kw
+                model, I, node, v0, criterion=factor, model_kw=kw, events=events
             ),
             guess,
             1e6,
@@ -230,6 +266,7 @@ def rheobase(
             v0,
             kw.get("mem"),
             **({"model_kw": extra} if extra else {}),
+            **({} if events is None else {"events": True}),
         )
         raise _bisect.FiresWithoutInputError(
             f"somatic.rheobase({config}): {e}"
