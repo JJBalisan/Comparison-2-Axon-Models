@@ -664,8 +664,9 @@ def two_cpt(
     replaces that one value, and without them every result is the node
     lookup's, bit for bit. They are validated, with get_params's rules,
     before anything runs. For example, Jing et al. 2025 give their
-    soma-axon coupling as gax = 56.4 nS (read here as gC; their abstract
-    was all that was checked), on the coupling constants of node 3:
+    soma-axon coupling as gax = 56.4 nS (read here as gC, which is
+    unconfirmed: the paper was not read), on the coupling constants of
+    node 3:
 
         two_cpt("EPSG", 5, 5, 1.0, 3, "active-full", 20, -68, 1, gC=56.4)
 
