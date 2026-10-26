@@ -438,13 +438,23 @@ def test_drift_warning_fires_once_per_process(monkeypatch):
     with pytest.warns(msoaxon.DriftWarning) as record:
         for _ in range(2):
             msoaxon.mso_axon(
-                "EPSGpair", 5, 5.1, 30, 3, "active-full", 8, -68.0, 1
+                "EPSGpair",
+                5,
+                5.1,
+                30,
+                3,
+                "active-full",
+                8,
+                -68.0,
+                1,
+                mode="fast",
             )
     drift = [w for w in record if issubclass(w.category, _fast.DriftWarning)]
     assert len(drift) == 1
     text = str(drift[0].message)
     assert 'mode="exact"' in text and "filterwarnings" in text
     assert "other hardware" in text
+    assert 'the default is mode="native"' in text
     if BITWISE:
         assert "bit-identical" in text
     assert drift[0].filename == __file__  # points at the caller
@@ -478,17 +488,27 @@ def no_env(monkeypatch):
 
 @pytest.fixture
 def fake_ext(monkeypatch, no_env):
-    """Pretends the extension is installed; its RHS is multi._rhs."""
+    """Pretends the extension is installed; its RHS is multi._rhs.
+
+    Records (mode, stim_type) per build; a fake native RHS has no
+    `segment`, so scipy integrates it.
+    """
     built = []
 
-    def build(stim_type, s, input_node, active, mem, morph, input_node2=None):
-        built.append(stim_type)
-        return lambda t, x: multi._rhs(
-            t, x, stim_type, s, input_node, active, mem, morph, input_node2
-        )
+    def builder(mode):
+        def build(
+            stim_type, s, input_node, active, mem, morph, input_node2=None
+        ):
+            built.append((mode, stim_type))
+            return lambda t, x: multi._rhs(
+                t, x, stim_type, s, input_node, active, mem, morph, input_node2
+            )
+
+        return build
 
     monkeypatch.setattr(_fast, "_ext", object())
-    monkeypatch.setattr(_fast, "build", build)
+    monkeypatch.setattr(_fast, "build", builder("fast"))
+    monkeypatch.setattr(_fast, "build_native", builder("native"))
     return built
 
 
@@ -517,10 +537,11 @@ def test_asking_for_fast_without_the_extension_warns(monkeypatch, no_env):
         assert _fast.resolve(None) == "exact"
 
 
-def test_default_is_fast_when_installed(fake_ext):
-    assert _fast.resolve(None) == "fast"
+def test_default_is_native_when_installed(fake_ext):
+    assert _fast.effective(None) == _fast.resolve(None) == "native"
     multi.mso_axon("EPSGpair", 5, 5.1, 30, 3, "active-full", 8, -68.0, 1)
-    assert fake_ext == ["EPSGpair", "none"]  # run and quiet prefix
+    # run and quiet prefix
+    assert fake_ext == [("native", "EPSGpair"), ("native", "none")]
 
 
 def test_env_overrides_the_default_not_the_argument(fake_ext, monkeypatch):
@@ -530,7 +551,7 @@ def test_env_overrides_the_default_not_the_argument(fake_ext, monkeypatch):
     multi.mso_axon("EPSGpair", 5, 5.1, 30, 3, "active-full", 8, -68.0, 1)
     assert fake_ext == []
     monkeypatch.setenv(_fast.MODE_ENV, "")  # empty means unset
-    assert _fast.resolve(None) == "fast"
+    assert _fast.resolve(None) == "native"
 
 
 def test_unknown_modes_are_rejected(monkeypatch, no_env):
@@ -567,10 +588,11 @@ def test_mode_is_part_of_the_quiet_cache_key(fake_ext, fresh_quiet_cache):
 def test_run_model_passes_mode_to_multi_only(fake_ext):
     args = ("EPSGpair", 5, 5.1, 30, 3, 8, -68.0, 1)
     _dispatch.run_model("multi", *args, mode="fast")
-    assert fake_ext == ["EPSGpair", "none"]
+    assert fake_ext == [("fast", "EPSGpair"), ("fast", "none")]
     _dispatch.run_model("multi", *args, mode="exact")
     _dispatch.run_model("two", *args, mode="fast")  # no fast two_cpt: ignored
-    assert fake_ext == ["EPSGpair", "none"]
+    _dispatch.run_model("two", *args)  # nor a native one
+    assert fake_ext == [("fast", "EPSGpair"), ("fast", "none")]
 
 
 def test_pool_workers_inherit_the_mode_env(monkeypatch, no_env):
@@ -684,9 +706,9 @@ def fake_runs(monkeypatch):
 def test_spike_height_cache_keys_the_resolved_mode(
     fake_ext, fake_runs, monkeypatch
 ):
-    # unset, the mode resolves to "fast" here (fake extension); once
-    # MSOAXON_MODE=exact it resolves to "exact", so the cached fast height
-    # must not serve it
+    # unset, the mode resolves to "native" here (fake extension); once
+    # MSOAXON_MODE=exact it resolves to "exact", so the cached native
+    # height must not serve it
     assert coincidence.spike_height("multi", node=2) == 30.0
     monkeypatch.setenv(_fast.MODE_ENV, "exact")
     assert coincidence.spike_height("multi", node=2) == 30.0
@@ -695,8 +717,10 @@ def test_spike_height_cache_keys_the_resolved_mode(
     coincidence.spike_height("multi", node=2, model_kw={"mode": "exact"})
     assert len(fake_runs) == 2
     monkeypatch.delenv(_fast.MODE_ENV)
-    coincidence.spike_height("multi", node=2, model_kw={"mode": "fast"})
+    coincidence.spike_height("multi", node=2, model_kw={"mode": "native"})
     assert len(fake_runs) == 2  # the first, unset-mode entry
+    coincidence.spike_height("multi", node=2, model_kw={"mode": "fast"})
+    assert len(fake_runs) == 3  # fast is not the default: a miss
 
 
 # --- the native mode ----------------------------------------------------------
@@ -715,14 +739,14 @@ def test_modes_add_native_between_fast_and_exact():
     assert _fast.MODES == ("fast", "native", "exact")
 
 
-def test_native_is_opt_in(fake_ext, monkeypatch):
-    assert _fast.effective(None) == "fast"
-    assert _fast.effective("native") == "native"
-    assert _fast.effective("exact") == "exact"
-    monkeypatch.setenv(_fast.MODE_ENV, "native")
+def test_native_is_the_default_fast_and_exact_stay(fake_ext, monkeypatch):
     assert _fast.effective(None) == "native"
-    assert _fast.resolve(None) == "native"
-    assert _fast.effective("fast") == "fast"  # explicit wins
+    assert _fast.effective("fast") == "fast"
+    assert _fast.effective("exact") == "exact"
+    monkeypatch.setenv(_fast.MODE_ENV, "fast")
+    assert _fast.effective(None) == "fast"
+    assert _fast.resolve(None) == "fast"
+    assert _fast.effective("native") == "native"  # explicit wins
 
 
 def test_asking_for_native_without_the_extension_warns(monkeypatch, no_env):
@@ -737,7 +761,9 @@ def test_asking_for_native_without_the_extension_warns(monkeypatch, no_env):
         assert _fast.resolve(None) == "exact"
 
 
-def test_fast_builds_events_for_the_run_and_none_for_the_prefix(fake_ext):
+def test_rust_modes_build_events_for_the_run_and_none_for_the_prefix(
+    fake_ext,
+):
     syn = synaptic.SynParams(
         t_end=8, events=(synaptic.Event(t=5.0, node=1, g=30.0),)
     )
@@ -746,7 +772,25 @@ def test_fast_builds_events_for_the_run_and_none_for_the_prefix(fake_ext):
         multi.mso_axon(
             "Events", 0, 0, 1.0, 3, "active-full", 8, -68.0, 1, syn=syn
         )
-    assert fake_ext == ["Events", "none"]
+        multi.mso_axon(
+            "Events",
+            0,
+            0,
+            1.0,
+            3,
+            "active-full",
+            8,
+            -68.0,
+            1,
+            syn=syn,
+            mode="fast",
+        )
+    assert fake_ext == [
+        ("native", "Events"),
+        ("native", "none"),
+        ("fast", "Events"),
+        ("fast", "none"),
+    ]
 
 
 def test_segment_without_a_segment_method_is_scipy():
@@ -822,6 +866,52 @@ def test_native_rejects_an_event_it_cannot_run():
         native.segment(0.0, 1.0, y0, 1e-8, 1e-8, 0.8, [lambda t, x: 1.0])
 
 
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "exact",
+        pytest.param("fast", marks=needs_ext),
+        pytest.param("native", marks=needs_ext),
+    ],
+)
+def test_a_solver_failure_is_a_runtime_error_in_every_mode(mode, quiet_native):
+    # an EPSG pair of 1e30 nS: scipy's step size underflows, diffsol's too
+    with pytest.raises(RuntimeError, match=r"integration failed on \[5") as e:
+        multi.mso_axon(*EPSG8[:3], 1e30, *EPSG8[4:], mode=mode)
+    if mode == "native":
+        assert "diffsol: " in str(e.value)  # diffsol's own message, kept
+        assert isinstance(e.value.__cause__, ValueError)
+
+
+@needs_ext
+def test_native_argument_errors_stay_value_errors():
+    _, native, mem = _native_rhs()
+    y0 = multi.initial_state(multi.LUMPED, mem, -68.0)
+    with pytest.raises(ValueError, match="need t0 < t1"):
+        native.segment(1.0, 1.0, y0, 1e-8, 1e-8, 0.8)
+
+
+@pytest.mark.parametrize(
+    ("message", "raised"),
+    [
+        ("diffsol: Sparsity error", RuntimeError),
+        ("the pattern indexes 3 of its 4 entries", ValueError),
+    ],
+)
+def test_building_the_integrator_maps_diffsol_errors_too(message, raised):
+    # the first segment builds the integrator; diffsol failing there is a
+    # solver failure like one during the run, a check of ours is not
+    class Rhs:
+        def integrator(self):
+            raise ValueError(message)
+
+    with pytest.raises(raised, match=message) as e:
+        _fast.Native(Rhs()).segment(0.0, 1.0, np.zeros(7), 1e-8, 1e-8, 0.8)
+    if raised is RuntimeError:
+        assert str(e.value).startswith("integration failed on [0.0, 1.0]")
+        assert isinstance(e.value.__cause__, ValueError)
+
+
 @needs_ext
 def test_native_spike_stop_agrees_with_scipys_event(quiet_native):
     kw = {"stop_on_spike": 20.0}
@@ -895,4 +985,20 @@ def test_native_drift_warning_fires_once_and_says_tolerance(monkeypatch):
     text = str(drift[0].message)
     assert 'mode="native"' in text and "within the solver" in text
     assert "not bit for bit" in text and "filterwarnings" in text
+    assert "the default when the msoaxon-fast extension is installed" in text
+    assert 'Pass mode="fast" (the same right-hand side) or' in text
+    assert 'mode="exact" (the numpy reference)' in text
     assert drift[0].filename == __file__
+
+
+@needs_ext
+def test_a_bare_default_run_issues_the_native_warning(monkeypatch):
+    monkeypatch.setitem(_fast._STATE, "warned_native", False)
+    monkeypatch.setitem(_fast._STATE, "warned", False)
+    monkeypatch.delenv(_fast.MODE_ENV, raising=False)
+    with pytest.warns(msoaxon.DriftWarning) as record:
+        msoaxon.mso_axon(*EPSG8)  # no mode, no MSOAXON_MODE
+    drift = [w for w in record if issubclass(w.category, _fast.DriftWarning)]
+    assert len(drift) == 1
+    assert "Rust BDF integrator" in str(drift[0].message)
+    assert _fast._STATE == {"warned": False, "warned_native": True}

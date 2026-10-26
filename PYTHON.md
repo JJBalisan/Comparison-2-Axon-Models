@@ -117,9 +117,9 @@ numpy path and ignores it.
 | `mode` | Right-hand side |
 |---|---|
 | `"exact"` | `multi._rhs`, the numpy reference |
-| `"fast"` | the Rust port; warns and runs `"exact"` if the extension is missing |
-| `"native"` | the Rust port under a Rust BDF integrator (opt-in, see below); warns and runs `"exact"` if the extension is missing |
-| `None` (default) | `MSOAXON_MODE` if set (`exact`, `fast` or `native`), else `"fast"` when the extension is installed, else `"exact"` (silently) |
+| `"fast"` | the Rust port under scipy's BDF; warns and runs `"exact"` if the extension is missing |
+| `"native"` | the Rust port under a Rust BDF integrator (see below); warns and runs `"exact"` if the extension is missing |
+| `None` (default) | `MSOAXON_MODE` if set (`exact`, `fast` or `native`), else `"native"` when the extension is installed, else `"exact"` (silently) |
 
 `MSOAXON_MODE=exact uv run scripts/...` runs a whole script on the reference,
 worker processes included (pools hand their workers the parent's setting).
@@ -169,16 +169,20 @@ unchanged.
 `tests/test_fast.py` compares the two right-hand sides on sampled states across
 every covered configuration (to 1e-12 relative, and bit for bit on
 darwin-arm64), and `tests/test_golden.py` runs every multi-compartment trace in
-both modes. CI runs the suite without the extension (the fallback) on Linux and
-macOS, and with it on both (`pytest-fast`), which also prints the self-check.
+every mode. CI runs the suite without the extension (the fallback) on Linux and
+macOS, and with it, where the default is `"native"`, on both and on Windows and
+linux-aarch64 (`pytest-fast`), which also prints the self-check.
 
 ### Native mode: the BDF integrator in Rust
 
 `mode="native"` (or `MSOAXON_MODE=native`) takes the rest of the time loop out
 of Python: the same Rust right-hand side, integrated by a Rust BDF solver
 ([diffsol](https://github.com/martinjrobins/diffsol) 0.18.0, pure Rust, no
-SUNDIALS or SuiteSparse) instead of scipy's. It is opt-in; the default stays
-`"fast"` until native has been judged on more than the checks below.
+SUNDIALS or SuiteSparse) instead of scipy's. It is the default whenever the
+extension is installed (#106); `mode="fast"` keeps scipy's BDF over the same
+right-hand side and `mode="exact"` the numpy reference, by argument or
+`MSOAXON_MODE`. A diffsol failure raises `RuntimeError("integration failed on
+[a, b]: diffsol: ...")`, as scipy's does.
 
 What runs where: `mso_axon` still splits the run at the stimulus breakpoints,
 keeps the pre-stimulus cache (keyed with the mode, so a native prefix never
@@ -195,9 +199,8 @@ bit any other mode; at the same `RTOL = ATOL = 1e-8` it agrees with the
 reference within the solver tolerance. It is judged by the golden traces
 (`tests/test_golden.py` runs every multi case in native too, at rtol 1e-4 /
 atol 5e-3 mV and `t_last` exact, dendrite trees included) and by
-`MSOAXON_MODE=native uv run scripts/benchmark_search.py --check` (0 flipped
-spike decisions). The first native run in a process issues its own
-`msoaxon.DriftWarning` saying so.
+`uv run scripts/benchmark_search.py --check` (0 flipped spike decisions). The
+first native run in a process issues its own `msoaxon.DriftWarning` saying so.
 
 **Jacobian.** diffsol is given the pattern explicitly, not left to detect it:
 `core::tree_jac_sparsity` of the run's own morphology (the Rust twin of
@@ -255,7 +258,10 @@ RHS with the numpy one through scipy, so they become an RHS-only comparison.
 jpg-grid halvings in `tests/test_coverage.py`, the one-flip budget at rel 2e-4
 in `tests/test_analysis.py` and `tests/test_scripts.py`, and the somatic table
 in `tests/test_somatic.py` (per-point tolerances from the `max_step` spread, see
-"How stable the numbers are").
+"How stable the numbers are"). The four-digit `measure.passive_step` pins in
+`tests/test_measure.py` and `tests/test_analysis.py` run `mode="exact"`: their
+response is a microvolt difference of two runs, and native's steps move
+`rin_peak` by about 1e-3, past those digits but not the published ones.
 
 **Python-only behaviour to reproduce, or keep in Python:**
 - `spike_amplitude`: a not-a-knot `CubicSpline` on a float `np.arange` grid at

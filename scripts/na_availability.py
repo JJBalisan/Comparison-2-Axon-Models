@@ -294,7 +294,7 @@ def main() -> None:
         default=None,
         choices=("exact", "fast", "native"),
         help="the 45-compartment model's solver mode (default: "
-        "MSOAXON_MODE, else fast when the extension is built; the "
+        "MSOAXON_MODE, else native when the extension is built; the "
         "2-compartment model runs scipy whatever this is)",
     )
     ap.add_argument(

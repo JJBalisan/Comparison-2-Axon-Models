@@ -15,10 +15,11 @@ the two-compartment model of TwoCpt.m, printed as tables and saved as JSON:
 4. A Casarez-style trial-based ITD sweep (125 synapses per side, release
    probability 0.45), with a small default number of trials.
 
-Runs in the default mode (fast, bit-identical to the reference here, when the
-Rust extension is installed). --mode native uses the Rust BDF integrator for
-the 45-compartment model instead (within solver tolerance, about 8x faster),
-and says so in the tables.
+Runs in the default mode (native when the Rust extension is installed: the
+Rust BDF integrator for the 45-compartment model, within solver tolerance of
+the reference). --mode fast keeps scipy's BDF over the Rust right-hand side
+(bit-identical to the reference here, about 8x slower), --mode exact the
+numpy reference, and the tables say which ran.
 """  # noqa: E501 (printed verbatim as --help)
 
 import argparse
@@ -47,8 +48,8 @@ def main() -> None:
     ap.add_argument(
         "--mode",
         choices=("fast", "native", "exact"),
-        help="mso_axon's mode for the 45-compartment model (default: fast "
-        "when the extension is installed)",
+        help="mso_axon's mode for the 45-compartment model (default: "
+        "native when the extension is installed)",
     )
     ap.add_argument("--repeats", type=int, default=8)
     ap.add_argument("--trials", type=int, default=30)

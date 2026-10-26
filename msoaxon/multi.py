@@ -963,12 +963,13 @@ def mso_axon(
             is over and no spike can follow (_solve.settled_event), for
             callers that only need yes/no.
         mode: "exact" runs the numpy right-hand side (_rhs, the
-            reference); "fast" runs its Rust port (the `fast` extra),
-            which issues a DriftWarning on first use; "native" (opt-in)
-            also integrates in Rust (diffsol's BDF), agreeing with the
-            reference within the solver tolerance. None (default):
-            the MSOAXON_MODE environment variable if set, else "fast"
-            when the extension is installed, else "exact". See _fast.
+            reference); "fast" runs its Rust port (the `fast` extra)
+            under scipy's BDF; "native" also integrates in Rust
+            (diffsol's BDF), agreeing with the reference within the
+            solver tolerance. Each issues a DriftWarning on first use.
+            None (default): the MSOAXON_MODE environment variable if
+            set, else "native" when the extension is installed, else
+            "exact". See _fast.
 
     Returns:
         (t, y) with y shaped (n_times, 7 * n); see the module docstring

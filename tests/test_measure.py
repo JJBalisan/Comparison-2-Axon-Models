@@ -3,9 +3,13 @@
 import numpy as np
 import pytest
 
-from msoaxon import measure, multi
+from msoaxon import _fast, measure, multi
 
 N_GRID = 20001  # coarser than the default; plenty for these tolerances
+needs_ext = pytest.mark.skipif(
+    not _fast.available(), reason="needs the fast extra (msoaxon_fast)"
+)
+NATIVE_RTOL = 1e-2  # native's steps move rin_peak by ~1e-3 (test_analysis)
 
 
 def _step(model="multi", **kw):
@@ -15,8 +19,10 @@ def _step(model="multi", **kw):
 def test_default_membrane_matches_the_rebalanced_values():
     # Before the fix: 61.4 / 68.7 MOhm and tau 0.0, because the baseline was
     # v0 and the membrane drifts by more than the step's response (microvolts).
-    reb = _step(mem=multi.membrane(-68.0, rebalance_rest=True))
-    r = _step()
+    # pinned on the reference, as in test_analysis: native's steps move
+    # rin_peak by ~1e-3
+    reb = _step(mem=multi.membrane(-68.0, rebalance_rest=True), mode="exact")
+    r = _step(mode="exact")
     assert 2.4 <= reb["rin_steady"] < 2.5 and 4.6 <= reb["rin_peak"] < 4.7
     # The default membrane rests ~0.13 mV below v0 where the conductances
     # differ a little, so it reads ~2% higher: 2.5 / 4.8 at one decimal.
@@ -28,12 +34,35 @@ def test_default_membrane_matches_the_rebalanced_values():
     assert np.isclose(r["tau"], 0.1217, atol=1e-3)
 
 
+@needs_ext
+def test_default_membrane_in_native_mode():
+    # the default mode's counterpart of the reference pins above
+    r = _step(mode="native")
+    for key, want in (("rin_steady", 2.4826), ("rin_peak", 4.7619)):
+        assert np.isclose(r[key], want, rtol=NATIVE_RTOL)
+    # tau is a first crossing on the grid, so it moves in whole grid steps
+    # (2 us here, past rtol 1e-2): the reference test's atol plus one step
+    step = (44.9 - 5) / (N_GRID - 1)
+    assert abs(r["tau"] - 0.1217) <= 1e-3 + step
+
+
 def test_rebalanced_membrane_is_unchanged():
     # The dendrites table values (see test_analysis) on the coarse grid.
-    r = _step(mem=multi.membrane(-68.0, rebalance_rest=True))
+    r = _step(mem=multi.membrane(-68.0, rebalance_rest=True), mode="exact")
     assert np.isclose(r["rin_steady"], 2.4307, rtol=1e-4)
     assert np.isclose(r["rin_peak"], 4.6814, rtol=1e-4)
     assert np.isclose(r["tau"], 0.1197, atol=1e-4)
+
+
+@needs_ext
+def test_rebalanced_membrane_in_native_mode():
+    r = _step(mem=multi.membrane(-68.0, rebalance_rest=True), mode="native")
+    for key, want in (
+        ("rin_steady", 2.4307),
+        ("rin_peak", 4.6814),
+        ("tau", 0.1197),
+    ):
+        assert np.isclose(r[key], want, rtol=NATIVE_RTOL)
 
 
 def test_rebalancing_at_the_settled_voltage_explains_the_default_offset():
