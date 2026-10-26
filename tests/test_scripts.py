@@ -216,3 +216,16 @@ def test_event_protocols_script(tmp_path):
         )
         assert res["itd"][model]["peak"] > 0.5
         assert len(res["fibres"][f"{model}_2"]["half_widths_us"]) == 2
+
+
+def test_inhibition_window_script(tmp_path):
+    out = run_script("inhibition_window.py", "--quick", "--out-dir", tmp_path)
+    res = json.loads((tmp_path / "inhibition_window.json").read_text())
+    assert "noisy-trial check" in out and res["g_inh"] == 40.0
+
+    case = res["2-cpt, TwoCpt.m, KLT present"]
+    # an IPSG that lags by 0.2 ms raises the threshold, and the optimum moves
+    # towards the second EPSG leading
+    assert case["+0.2"]["th0"] > case["none"]["th0"]
+    assert (case["+0.2"]["lo"] + case["+0.2"]["hi"]) / 2 < -0.02
+    assert res["noisy_check"]["peak"] > 0

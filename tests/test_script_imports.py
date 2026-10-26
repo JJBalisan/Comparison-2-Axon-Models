@@ -25,6 +25,7 @@ PROBE = (
         "dendrites.py",
         "coincidence_window.py",
         "event_protocols.py",
+        "inhibition_window.py",
         "making_threshold_graphs.py",
         "somatic_spike.py",
         "na_availability.py",
