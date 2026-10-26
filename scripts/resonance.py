@@ -201,8 +201,9 @@ def main() -> None:
     ap.add_argument(
         "--mode",
         choices=("exact", "fast", "native"),
-        help="model mode (default: fast); native is about 8x faster and "
-        "agrees within solver tolerance",
+        help="model mode (default: native when the extension is installed, "
+        "within solver tolerance of the reference; fast is about 8x slower "
+        "and bit-identical to exact here)",
     )
     ap.add_argument("--workers", type=int, help="processes (default: all)")
     ap.add_argument(

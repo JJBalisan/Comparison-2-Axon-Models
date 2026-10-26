@@ -371,12 +371,10 @@ class Native:
 
         Raises:
             ValueError: For an event without a `spec`.
-            RuntimeError: If diffsol fails on the segment, as
-                _solve._segment raises for scipy's BDF; the message
-                keeps diffsol's.
+            RuntimeError: If diffsol fails on the segment (or building
+                its problem, on the first), as _solve._segment raises
+                for scipy's BDF; the message keeps diffsol's.
         """
-        if self._integrator is None:
-            self._integrator = self._rhs.integrator()
         spike = settled = None
         if events is not None and not isinstance(events, list | tuple):
             events = [events]
@@ -392,6 +390,8 @@ class Native:
             else:
                 settled = (float(spec[1]), int(spec[2]), float(spec[3]))
         try:
+            if self._integrator is None:
+                self._integrator = self._rhs.integrator()
             t, ys, stopped = self._integrator.run(
                 np.ascontiguousarray(y, dtype=np.float64),
                 float(a),
@@ -403,8 +403,9 @@ class Native:
                 settled,
             )
         except ValueError as e:
-            # diffsol's own failures (rust/src/integrate.rs prefixes them);
-            # the argument checks stay ValueError
+            # diffsol's own failures, building the problem or solving it
+            # (rust/src/integrate.rs prefixes them); the argument checks
+            # stay ValueError
             if not str(e).startswith("diffsol:"):
                 raise
             raise RuntimeError(f"integration failed on [{a}, {b}]: {e}") from e

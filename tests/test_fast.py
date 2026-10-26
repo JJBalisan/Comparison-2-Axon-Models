@@ -867,12 +867,15 @@ def test_native_rejects_an_event_it_cannot_run():
 
 
 @pytest.mark.parametrize(
-    "mode", ["exact", pytest.param("fast", marks=needs_ext), "native"]
+    "mode",
+    [
+        "exact",
+        pytest.param("fast", marks=needs_ext),
+        pytest.param("native", marks=needs_ext),
+    ],
 )
 def test_a_solver_failure_is_a_runtime_error_in_every_mode(mode, quiet_native):
     # an EPSG pair of 1e30 nS: scipy's step size underflows, diffsol's too
-    if mode == "native" and not _fast.available():
-        pytest.skip("needs the fast extra (msoaxon_fast)")
     with pytest.raises(RuntimeError, match=r"integration failed on \[5") as e:
         multi.mso_axon(*EPSG8[:3], 1e30, *EPSG8[4:], mode=mode)
     if mode == "native":
@@ -886,6 +889,27 @@ def test_native_argument_errors_stay_value_errors():
     y0 = multi.initial_state(multi.LUMPED, mem, -68.0)
     with pytest.raises(ValueError, match="need t0 < t1"):
         native.segment(1.0, 1.0, y0, 1e-8, 1e-8, 0.8)
+
+
+@pytest.mark.parametrize(
+    ("message", "raised"),
+    [
+        ("diffsol: Sparsity error", RuntimeError),
+        ("the pattern indexes 3 of its 4 entries", ValueError),
+    ],
+)
+def test_building_the_integrator_maps_diffsol_errors_too(message, raised):
+    # the first segment builds the integrator; diffsol failing there is a
+    # solver failure like one during the run, a check of ours is not
+    class Rhs:
+        def integrator(self):
+            raise ValueError(message)
+
+    with pytest.raises(raised, match=message) as e:
+        _fast.Native(Rhs()).segment(0.0, 1.0, np.zeros(7), 1e-8, 1e-8, 0.8)
+    if raised is RuntimeError:
+        assert str(e.value).startswith("integration failed on [0.0, 1.0]")
+        assert isinstance(e.value.__cause__, ValueError)
 
 
 @needs_ext
@@ -961,4 +985,20 @@ def test_native_drift_warning_fires_once_and_says_tolerance(monkeypatch):
     text = str(drift[0].message)
     assert 'mode="native"' in text and "within the solver" in text
     assert "not bit for bit" in text and "filterwarnings" in text
+    assert "the default when the msoaxon-fast extension is installed" in text
+    assert 'Pass mode="fast" (the same right-hand side) or' in text
+    assert 'mode="exact" (the numpy reference)' in text
     assert drift[0].filename == __file__
+
+
+@needs_ext
+def test_a_bare_default_run_issues_the_native_warning(monkeypatch):
+    monkeypatch.setitem(_fast._STATE, "warned_native", False)
+    monkeypatch.setitem(_fast._STATE, "warned", False)
+    monkeypatch.delenv(_fast.MODE_ENV, raising=False)
+    with pytest.warns(msoaxon.DriftWarning) as record:
+        msoaxon.mso_axon(*EPSG8)  # no mode, no MSOAXON_MODE
+    drift = [w for w in record if issubclass(w.category, _fast.DriftWarning)]
+    assert len(drift) == 1
+    assert "Rust BDF integrator" in str(drift[0].message)
+    assert _fast._STATE == {"warned": False, "warned_native": True}

@@ -11,6 +11,7 @@ import msoaxon
 from msoaxon import (
     _common,
     _dispatch,
+    _fast,
     _parallel,
     _solve,
     coincidence,
@@ -259,6 +260,24 @@ def test_passive_step_matches_the_dendrites_table():
     assert np.isclose(r["rin_steady"], 2.4307, rtol=1e-4)
     assert np.isclose(r["rin_peak"], 4.6815, rtol=1e-4)
     assert np.isclose(r["tau"], 0.1191, atol=1e-4)
+
+
+@pytest.mark.skipif(
+    not _fast.available(), reason="needs the fast extra (msoaxon_fast)"
+)
+def test_passive_step_matches_the_dendrites_table_in_native_mode():
+    # the default mode's counterpart: the same values to 1e-2, and the
+    # table's one decimal exactly
+    r = measure.passive_step(
+        "multi", mem=multi.membrane(-68.0, rebalance_rest=True), mode="native"
+    )
+    for key, want in (
+        ("rin_steady", 2.4307),
+        ("rin_peak", 4.6815),
+        ("tau", 0.1191),
+    ):
+        assert np.isclose(r[key], want, rtol=1e-2)
+    assert (round(r["rin_steady"], 1), round(r["rin_peak"], 1)) == (2.4, 4.7)
 
 
 def test_count_rising_edges():
