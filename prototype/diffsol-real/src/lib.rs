@@ -97,6 +97,9 @@ impl RhsArgs {
             g_syn: self.g_syn.clone(),
             vsyn: self.vsyn.unwrap_or(0.0),
             diff: self.diff,
+            // the captured cases have no event list ("Events" came to
+            // core.rs after them; the fixtures stay as dumped)
+            events: None,
         };
         core::MultiRhs::new(params, &spec)
     }
