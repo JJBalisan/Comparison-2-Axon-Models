@@ -281,7 +281,8 @@ def build(
 
     Args:
         stim_type: The stimulus name, or "none".
-        s: The stimulus settings (_common.stimulus).
+        s: The stimulus settings (_common.stimulus); for "Events" its
+            event table (s.events) goes to Rust whole.
         input_node: Where the stimulus enters, 1-indexed.
         active: Which gates (m, h, p, w, z, a) evolve.
         mem: Channel overrides (multi.membrane()).
@@ -427,6 +428,16 @@ def _build(
             g_syn=_f64(s.g_syn),
             vsyn=float(s.VsynE),
             diff=float(s.diff),
+        )
+    if stim_type == "Events":
+        # "amp" is the run's I, which scales every event's peak
+        stim.update(
+            {
+                f"ev_{name}": (
+                    np.asarray(a, dtype=np.int64) if name == "k" else _f64(a)
+                )
+                for name, a in s.events.items()
+            }
         )
     return _ext.MultiRhs(
         g_na=_f64(mem.g_na),

@@ -7,6 +7,8 @@ compare right-hand sides rather than traces: a last-bit difference moves
 the solver's steps.
 """
 
+import platform
+import sys
 import warnings
 
 import numpy as np
@@ -263,20 +265,78 @@ def test_runs_share_the_quiet_prefix_and_the_settled_stop_works(
     assert len(_solve._QUIET_CACHE) == 1
 
 
-def test_fast_mode_falls_back_to_exact_with_a_warning():
-    syn = SynParams(
-        t_end=10.0, events=(Event(5.0, 1, 60.0), Event(5.2, 1, 60.0))
-    )
-    args = ("Events", 0.0, 0.0, 1.0, 3, "active-full", 10.0, -68.0, 1, syn)
-    if not _fast.available():
-        pytest.skip("needs the fast extra")
-    with pytest.warns(UserWarning, match="not in the Rust right-hand side"):
-        t_f, x_f = multi.mso_axon(*args, mode="fast")
+BITWISE = sys.platform == "darwin" and platform.machine() == "arm64"
+needs_ext = pytest.mark.skipif(
+    not _fast.available(), reason="needs the fast extra (msoaxon_fast)"
+)
+# the golden traces' tolerance (tests/test_golden.py), rtol and atol [mV]
+TOLERANCE = {"rtol": 1e-4, "atol": 5e-3}
+SAMPLE_TIMES = (1.0, 5.1, 5.3, 5.6, 6.0, 7.0, 9.0, 12.0)
+# no Events golden trace exists, so the modes are compared with each other
+# as test_golden compares them with the traces: soma and axon sampled by
+# linear interpolation. A pair at the EPSGpair golden's 100 nS, a stronger one
+# that drives the axon to a partial spike, and a mixed list: a leading IPSG, a
+# pair and an axonal event
+MODE_CASES = {
+    "pair": (Event(5.0, 1, 100.0), Event(5.2, 1, 100.0)),
+    "strong": (Event(5.0, 1, 300.0), Event(5.2, 1, 300.0)),
+    "mixed": (
+        Event(4.7, 1, 30.0, IPSG, -80.0),
+        Event(5.0, 1, 50.0),
+        Event(5.2, 1, 50.0),
+        Event(5.1, 3, 20.0, MYOGA),
+    ),
+}
+
+
+def _mode_run(events, mode):
+    syn = SynParams(t_end=T_END, events=events)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", _fast.DriftWarning)
+        return multi.mso_axon(
+            "Events",
+            0.0,
+            0.0,
+            1.0,
+            3,
+            "active-full",
+            T_END,
+            -68.0,
+            1,
+            syn,
+            mode=mode,
+        )
+
+
+@needs_ext
+def test_fast_mode_runs_events_in_rust():
+    events = MODE_CASES["pair"]
+    # nothing but the DriftWarning is raised: no fallback to "exact"
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        t_e, x_e = multi.mso_axon(*args, mode="exact")
-    assert t_f.tobytes() == t_e.tobytes()
-    assert x_f.tobytes() == x_e.tobytes()
+        warnings.simplefilter("ignore", _fast.DriftWarning)
+        t_f, x_f = _mode_run(events, "fast")
+    t_e, x_e = _mode_run(events, "exact")
+    if BITWISE:  # numpy and Rust share a libm here (tests/test_fast.py)
+        assert t_f.tobytes() == t_e.tobytes()
+        assert x_f.tobytes() == x_e.tobytes()
+    else:
+        assert t_f[-1] == t_e[-1] == T_END
+        np.testing.assert_allclose(x_f[-1], x_e[-1], **TOLERANCE)
+
+
+@needs_ext
+@pytest.mark.parametrize("mode", ["fast", "native"])
+@pytest.mark.parametrize("case", sorted(MODE_CASES))
+def test_events_in_every_mode_agree_at_the_golden_tolerance(case, mode):
+    events = MODE_CASES[case]
+    t_e, x_e = _mode_run(events, "exact")
+    t_m, x_m = _mode_run(events, mode)
+    assert t_m[-1] == t_e[-1] == T_END
+    for col in (0, 2):  # the soma and the third compartment
+        want = np.interp(SAMPLE_TIMES, t_e, x_e[:, col])
+        got = np.interp(SAMPLE_TIMES, t_m, x_m[:, col])
+        np.testing.assert_allclose(got, want, **TOLERANCE)
 
 
 # --- a demonstration ----------------------------------------------------------

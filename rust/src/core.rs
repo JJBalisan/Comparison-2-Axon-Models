@@ -6,8 +6,8 @@
 //! pattern.
 //!
 //! A port of `msoaxon.multi._rhs` (with `external_current`,
-//! `bilateral_current`, `axial_current` and the gating functions of
-//! `msoaxon.constants`). The Python code is the reference. Every expression
+//! `bilateral_current`, `events_current`, `axial_current` and the gating
+//! functions of `msoaxon.constants`). The Python code is the reference. Every expression
 //! keeps numpy's floating-point evaluation order, operation for operation, so
 //! that on a platform where numpy and Rust call the same libm the result is
 //! bit-identical. Two details matter:
@@ -233,6 +233,17 @@ enum Stim {
         b: usize,
         w: Epsg,
     },
+    /// The "Events" stimulus: one EPSG-shaped conductance per event, each at
+    /// its own compartment and voltage (`multi.events_current`).
+    Events {
+        onset: Vec<f64>,
+        k: Vec<usize>,
+        /// `scale * g`: numpy multiplies the run's `I` into each peak first,
+        /// so folding it in once keeps the bits and saves a multiply a call.
+        scale_g: Vec<f64>,
+        e_rev: Vec<f64>,
+        w: Vec<Epsg>,
+    },
 }
 
 impl Stim {
@@ -356,6 +367,28 @@ impl Stim {
                 total[b] += ib;
                 return;
             }
+            Stim::Events {
+                ref onset,
+                ref k,
+                ref scale_g,
+                ref e_rev,
+                ref w,
+            } => {
+                // np.bincount(k, weights=-i / sa[k], minlength=n): a fresh
+                // zero per compartment, each event added in list order, then
+                // the sums added to every compartment (an exact 0.0 where no
+                // event enters, which also turns an event's -0.0 into +0.0)
+                let mut density = vec![0.0f64; total.len()];
+                for e in 0..onset.len() {
+                    let ke = k[e];
+                    let i = scale_g[e] * (e_rev[e] - v[ke]) * w[e].unitary(t - onset[e]);
+                    density[ke] += -i / sa[ke];
+                }
+                for (sum, d) in total.iter_mut().zip(&density) {
+                    *sum += d;
+                }
+                return;
+            }
         };
         total[k] += iext;
     }
@@ -422,6 +455,23 @@ pub struct StimSpec {
     pub g_syn: Option<Vec<f64>>,
     pub vsyn: f64,
     pub diff: Option<f64>,
+    /// The event table of "Events"; `amp` is the run's `I`, scaling every peak.
+    pub events: Option<EventTable>,
+}
+
+/// The arrays of `synaptic.event_arrays`, one entry per event.
+///
+/// `k` is the 0-based compartment, `inv_peak` is `1 / peak` as Python
+/// computes it (`synaptic.epsg_inv_peak`).
+#[derive(Clone, Debug, Default)]
+pub struct EventTable {
+    pub t: Vec<f64>,
+    pub k: Vec<i64>,
+    pub g: Vec<f64>,
+    pub rise: Vec<f64>,
+    pub decay: Vec<f64>,
+    pub inv_peak: Vec<f64>,
+    pub e_rev: Vec<f64>,
 }
 
 impl Default for StimSpec {
@@ -439,6 +489,7 @@ impl Default for StimSpec {
             g_syn: None,
             vsyn: 0.0,
             diff: None,
+            events: None,
         }
     }
 }
@@ -542,6 +593,7 @@ impl MultiRhs {
             ref g_syn,
             vsyn,
             diff,
+            ref events,
         } = *spec;
         let w = Epsg {
             inv_peak: epsg.0,
@@ -622,6 +674,47 @@ impl MultiRhs {
                 b: index("k2", k2, n)?,
                 w,
             },
+            "Events" => {
+                let Some(ev) = events else {
+                    return Err(CoreError::new("Events needs an event table"));
+                };
+                let count = ev.t.len();
+                if count == 0 {
+                    return Err(CoreError::new("Events needs at least one event"));
+                }
+                for (name, v) in [
+                    ("g", &ev.g),
+                    ("rise", &ev.rise),
+                    ("decay", &ev.decay),
+                    ("inv_peak", &ev.inv_peak),
+                    ("e_rev", &ev.e_rev),
+                ] {
+                    check_len(&format!("events {name}"), v, count)?;
+                }
+                if ev.k.len() != count {
+                    return Err(CoreError::new(format!(
+                        "events k has {} entries, expected {count}",
+                        ev.k.len()
+                    )));
+                }
+                Stim::Events {
+                    onset: ev.t.clone(),
+                    k: ev
+                        .k
+                        .iter()
+                        .map(|&i| index("events k", i, n))
+                        .collect::<Result<Vec<_>, _>>()?,
+                    scale_g: ev.g.iter().map(|g| amp * g).collect(),
+                    e_rev: ev.e_rev.clone(),
+                    w: (0..count)
+                        .map(|e| Epsg {
+                            inv_peak: ev.inv_peak[e],
+                            decay: ev.decay[e],
+                            rise: ev.rise[e],
+                        })
+                        .collect(),
+                }
+            }
             other => return Err(CoreError::new(format!("unknown stim_type {other:?}"))),
         };
         Ok(MultiRhs {
@@ -1038,6 +1131,52 @@ pub(crate) mod tests {
         }
     }
 
+    /// The `Params` of [`model`], to build a model through `MultiRhs::new`.
+    fn model_params() -> Params {
+        let base = model();
+        Params {
+            g_na: base.g_na,
+            g_kht: base.g_kht,
+            g_klt: base.g_klt,
+            g_h: base.g_h,
+            g_lk: base.g_lk,
+            vlk: base.vlk,
+            na_vhalf: base.na_vhalf,
+            cap: base.cap,
+            sa: base.sa,
+            g_ax: base.g_ax,
+            parent: base.parent.iter().map(|&i| i as i64).collect(),
+            child: base.child.iter().map(|&i| i as i64).collect(),
+            active: base.active,
+            gating: base.gating,
+        }
+    }
+
+    /// An EPSG at the soma, a slower IPSG-like event at compartment 10 that
+    /// starts first, and a second soma event.
+    fn events_table() -> EventTable {
+        EventTable {
+            t: vec![5.0, 4.8, 5.2],
+            k: vec![0, 10, 0],
+            g: vec![60.0, 30.0, 40.0],
+            rise: vec![0.1, 0.28, 0.1],
+            decay: vec![0.18, 1.5, 0.18],
+            inv_peak: vec![1.0 / 0.21317, 2.5, 1.0 / 0.21317],
+            e_rev: vec![0.0, -80.0, 0.0],
+        }
+    }
+
+    /// [`model`] with [`events_table`], `scale` being the run's I.
+    pub(crate) fn events_model(scale: f64) -> MultiRhs {
+        let spec = StimSpec {
+            stim_type: "Events".to_string(),
+            amp: scale,
+            events: Some(events_table()),
+            ..StimSpec::default()
+        };
+        MultiRhs::new(model_params(), &spec).unwrap()
+    }
+
     /// V from -75 mV in 0.7 mV steps, the six gates a fixed pattern in
     /// 0.05..0.95.
     pub(crate) fn state() -> Vec<f64> {
@@ -1171,5 +1310,119 @@ pub(crate) mod tests {
             .map(|e| rows[e])
             .collect();
         assert_eq!(col2[..4], [1, 2, 3, 44]);
+    }
+
+    #[test]
+    fn events_leave_the_jacobian_pattern_unchanged() {
+        let rhs = events_model(1.0);
+        let n = rhs.n();
+        let (parent, child) = rhs.edges();
+        assert_eq!(tree_jac_sparsity(n, parent, child), chain_jac_sparsity(n));
+        // and the claim behind it: an event reads and drives only its own
+        // compartment, so dV of the soma and of compartment 10 does not move
+        // when the voltage of a compartment that is not their neighbour does
+        let (x, mut base, mut moved) = (state(), vec![0.0; 315], vec![0.0; 315]);
+        rhs.eval(5.1, &x, &mut base);
+        for j in [3, 20, 30] {
+            let mut y = x.clone();
+            y[j] += 1.0;
+            rhs.eval(5.1, &y, &mut moved);
+            for r in [0, 10] {
+                assert_eq!(base[r].to_bits(), moved[r].to_bits(), "V{j} -> dV{r}");
+            }
+        }
+        // control: the event at 10 does read V[10]
+        let mut y = x.clone();
+        y[10] += 1.0;
+        rhs.eval(5.1, &y, &mut moved);
+        assert_ne!(base[10].to_bits(), moved[10].to_bits());
+    }
+
+    #[test]
+    fn one_event_is_the_epsg_pair_half_bit_for_bit() {
+        // Python: test_multi_single_event_is_the_epsgpair_half_bit_for_bit.
+        // One soma event with g = 1 and scale = the amplitude against an
+        // EPSG pair whose second waveform lies beyond the horizon.
+        let single = |stim| MultiRhs { stim, ..model() };
+        let w = default_epsg();
+        let event = single(Stim::Events {
+            onset: vec![5.0],
+            k: vec![0],
+            scale_g: vec![100.0 * 1.0],
+            e_rev: vec![0.0],
+            w: vec![w],
+        });
+        let pair = single(Stim::EpsgPair {
+            start: 5.0,
+            td: 14.0,
+            amp: 100.0,
+            k: 0,
+            w,
+        });
+        let x = state();
+        let (mut a, mut b) = (vec![0.0; 315], vec![0.0; 315]);
+        for t in [5.0 + 1e-9, 5.05, 5.3, 7.0, 15.0] {
+            event.eval(t, &x, &mut a);
+            pair.eval(t, &x, &mut b);
+            for (i, (u, v)) in a.iter().zip(&b).enumerate() {
+                assert_eq!(u.to_bits(), v.to_bits(), "t={t} out[{i}]");
+            }
+        }
+    }
+
+    #[test]
+    fn events_touch_only_their_compartments_and_nothing_before_onset() {
+        let (x, mut one, mut two) = (state(), vec![0.0; 315], vec![0.0; 315]);
+        events_model(1.0).eval(5.3, &x, &mut one);
+        events_model(2.0).eval(5.3, &x, &mut two);
+        // the events act on compartments 0 and 10 alone
+        let mut none = vec![0.0; 315];
+        MultiRhs {
+            stim: Stim::None,
+            ..events_model(1.0)
+        }
+        .eval(5.3, &x, &mut none);
+        for i in 0..45 {
+            let touched = i == 0 || i == 10;
+            assert_eq!(one[i] != none[i], touched, "dV[{i}]");
+            assert_eq!(two[i] != none[i], touched, "dV[{i}]");
+        }
+        // before every onset the current is an exact zero
+        let (mut early, mut quiet) = (vec![0.0; 315], vec![0.0; 315]);
+        events_model(1.0).eval(4.0, &x, &mut early);
+        MultiRhs {
+            stim: Stim::None,
+            ..events_model(1.0)
+        }
+        .eval(4.0, &x, &mut quiet);
+        assert_eq!(early, quiet);
+    }
+
+    #[test]
+    fn an_event_table_is_validated() {
+        let build = |edit: &dyn Fn(&mut StimSpec)| {
+            let mut spec = StimSpec {
+                stim_type: "Events".to_string(),
+                events: Some(events_table()),
+                ..StimSpec::default()
+            };
+            edit(&mut spec);
+            MultiRhs::new(model_params(), &spec).err().map(|e| e.0)
+        };
+        assert_eq!(build(&|_| {}), None);
+        assert_eq!(
+            build(&|s| s.events = None).as_deref(),
+            Some("Events needs an event table")
+        );
+        assert_eq!(
+            build(&|s| s.events = Some(EventTable::default())).as_deref(),
+            Some("Events needs at least one event")
+        );
+        let msg = build(&|s| s.events.as_mut().unwrap().k[2] = 45).unwrap();
+        assert!(msg.contains("events k=45 is not in 0..45"), "{msg}");
+        let msg = build(&|s| s.events.as_mut().unwrap().g.push(1.0)).unwrap();
+        assert!(msg.contains("events g has 4 entries, expected 3"), "{msg}");
+        let msg = build(&|s| s.events.as_mut().unwrap().k.push(0)).unwrap();
+        assert!(msg.contains("events k has 4 entries, expected 3"), "{msg}");
     }
 }

@@ -13,7 +13,6 @@ has 7 blocks of n = 45 + dendrite compartments.
 """
 
 import dataclasses
-import warnings
 from typing import Any
 
 import numpy as np
@@ -843,9 +842,7 @@ def mso_axon(
                 number of EPSG-shaped conductances, each with its own
                 onset, compartment, peak, kinetics and reversal, never
                 cut off); I scales every peak (1.0 uses them as given);
-                start, stop and input_node are ignored. Not in the Rust
-                right-hand side yet: mode="fast" and "native" fall back
-                to "exact" with a warning.
+                start, stop and input_node are ignored.
         start: See stim_type [ms].
         stop: See stim_type [ms].
         I: See stim_type.
@@ -935,13 +932,6 @@ def mso_axon(
         onsets=() if s.events is None else s.events["t"],
     )
     mode = _fast.resolve(mode)
-    if stim_type == "Events" and mode in ("fast", "native"):
-        warnings.warn(
-            '"Events" is not in the Rust right-hand side yet; running '
-            'mode="exact"',
-            stacklevel=2,
-        )
-        mode = "exact"
     if mode in ("fast", "native"):
         # native: the same Rust right-hand side, its segments solved in Rust
         build = _fast.build if mode == "fast" else _fast.build_native

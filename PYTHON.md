@@ -144,8 +144,8 @@ warnings.filterwarnings("ignore", category=msoaxon.DriftWarning)
 ```
 
 or pass `mode="exact"` to use the reference. Everything `multi._rhs` handles is
-ported: every stimulus (Synaptic and SynapticPair included), the lumped chain
-and `with_dendrites()` trees, `membrane()` overrides and every model type, so
+ported: every stimulus (Synaptic, SynapticPair and Events included), the
+lumped chain and `with_dendrites()` trees, `membrane()` overrides and every model type, so
 `mode="fast"` never falls back to `"exact"` for a configuration.
 
 **Speed** (Apple M1 Max, Python 3.12, best of 3; the machine was busy, so read
@@ -218,8 +218,9 @@ output, as in solve_ivp). The settled stop keeps the strict "every dV < 0".
 With no input it can therefore fire right at `t_off` in a run that scipy
 integrated to `t_end`: the same answer, an earlier stop.
 
-`"Events"` is not in the Rust right-hand side yet, so native falls back to
-`"exact"` with a warning, as fast does.
+`"Events"` runs under native like every other stimulus: its event table goes
+to Rust whole and each event is evaluated at its own compartment, so the
+Jacobian pattern above is unchanged.
 
 ## Port contract
 
@@ -588,7 +589,7 @@ Each item has an issue (label `literature-2026-10`):
   (#77)
 - protocols on the event-list input (below): fibre counts, Poisson arrivals,
   pre-pulse trains, and reaching it from the searches, which build their own
-  `SynParams`; and its Rust right-hand side (#78)
+  `SynParams` (#78)
 - axon geometry as parameters: internode length, diameter, node length, AIS
   length and start and myelin capacitance are folded into the constants
   (#81)
@@ -716,10 +717,16 @@ node to the axon. Two things it does differently, on purpose:
 - **Each event drives its own compartment**, in `two_cpt` too, where `EPSG`
   keeps `TwoCptODE.m`'s soma driving force even for axonal input.
 
-Not yet: the Rust right-hand side (`mode="fast"` falls back to `"exact"` with
-a warning), the searches (`coincidence`, `somatic` build their own
-`SynParams`), and a breakpoint policy for dense lists, where a Casarez-style
-hundred-synapse drive would mean hundreds of solver restarts (#78).
+**Rust.** `mode="fast"` and `mode="native"` run it in the Rust right-hand side
+(`Stim::Events`, #107): the event arrays of `synaptic.event_arrays` are handed
+over once, and each call adds the events' currents per compartment in list
+order, as `np.bincount` does, so fast stays bit-identical to `"exact"` on
+darwin-arm64 (`tests/test_fast.py`). Native agrees with the reference to the
+golden tolerance (`tests/test_events.py`); there is no Events golden trace.
+
+Not yet: the searches (`coincidence`, `somatic` build their own `SynParams`),
+and a breakpoint policy for dense lists, where a Casarez-style hundred-synapse
+drive would mean hundreds of solver restarts (#78).
 
 ## Dendrites
 

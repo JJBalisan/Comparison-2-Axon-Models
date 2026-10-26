@@ -43,12 +43,15 @@ impl MultiRhs {
     /// fields of `_common.stimulus`, with `k`/`k2` the 0-based input
     /// compartments and `epsg` = (1 / peak, decay, rise). `gating` maps
     /// every name declared in `Gating` to its value (`_fast._gating()`).
+    /// "Events" takes its table as the `ev_*` arrays, one entry per event
+    /// (`synaptic.event_arrays`; `ev_k` 0-based), with `amp` the run's `I`.
     #[new]
     #[pyo3(signature = (
         *, g_na, g_kht, g_klt, g_h, g_lk, vlk, na_vhalf, cap, sa, g_ax,
         parent, child, active, gating, stim_type, start=0.0,
         stop=0.0, amp=0.0, k=0, k2=0, f=0.0, epsg=(1.0, 1.0, 1.0),
-        t_syn=None, g_syn=None, vsyn=0.0, diff=None
+        t_syn=None, g_syn=None, vsyn=0.0, diff=None, ev_t=None, ev_k=None,
+        ev_g=None, ev_rise=None, ev_decay=None, ev_inv_peak=None, ev_e_rev=None
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -78,7 +81,35 @@ impl MultiRhs {
         g_syn: Option<PyReadonlyArray1<'_, f64>>,
         vsyn: f64,
         diff: Option<f64>,
+        ev_t: Option<PyReadonlyArray1<'_, f64>>,
+        ev_k: Option<PyReadonlyArray1<'_, i64>>,
+        ev_g: Option<PyReadonlyArray1<'_, f64>>,
+        ev_rise: Option<PyReadonlyArray1<'_, f64>>,
+        ev_decay: Option<PyReadonlyArray1<'_, f64>>,
+        ev_inv_peak: Option<PyReadonlyArray1<'_, f64>>,
+        ev_e_rev: Option<PyReadonlyArray1<'_, f64>>,
     ) -> PyResult<Self> {
+        // all seven arrays or none: a table with a missing column is a bug
+        let events = match (ev_t, ev_k, ev_g, ev_rise, ev_decay, ev_inv_peak, ev_e_rev) {
+            (None, None, None, None, None, None, None) => None,
+            (Some(t), Some(k), Some(g), Some(rise), Some(decay), Some(inv_peak), Some(e_rev)) => {
+                Some(core::EventTable {
+                    t: to_vec(&t),
+                    k: k.as_array().to_vec(),
+                    g: to_vec(&g),
+                    rise: to_vec(&rise),
+                    decay: to_vec(&decay),
+                    inv_peak: to_vec(&inv_peak),
+                    e_rev: to_vec(&e_rev),
+                })
+            }
+            _ => {
+                return Err(PyValueError::new_err(
+                    "the ev_* arrays (t, k, g, rise, decay, inv_peak, e_rev) \
+                     go together: pass all seven or none",
+                ))
+            }
+        };
         let params = core::Params {
             g_na: to_vec(&g_na),
             g_kht: to_vec(&g_kht),
@@ -108,6 +139,7 @@ impl MultiRhs {
             g_syn: g_syn.as_ref().map(to_vec),
             vsyn,
             diff,
+            events,
         };
         Ok(MultiRhs {
             inner: core::MultiRhs::new(params, &spec)?,
