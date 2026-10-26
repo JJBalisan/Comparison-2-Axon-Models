@@ -448,6 +448,35 @@ constants, that is `two_cpt(..., 3, "active-full", ..., gC=56.4)`. That figure
 comes from issue #84; the paper was not read here, so whether their gax is this
 `gC` is unconfirmed.
 
+`uv run scripts/coupling_plane.py` runs that sweep (#84);
+`figures/coupling_plane/` gets the figure and a JSON, and `--quick` is a smoke
+test with a coarse grid. The row of results over the plane is proposed in the
+pull request and not published here until it is approved. The protocol:
+- the plane is Goldwyn et al.'s: forward coupling not weaker than backward
+  (their Fig 3 leaves the upper left half empty) and the ratio of the two at
+  most ten (their Methods, so that the axon's time constant stays an order of
+  magnitude below the soma's), on a regular grid of both axes;
+- everything else is node 3's: the area ratio, the channel fractions and the
+  axonal Na conductance. Goldwyn et al. instead re-reference g_Na for every
+  configuration (the smallest at which two coincident inputs spike), so a
+  weakly or strongly coupled cell here may not fire at all. Each point says
+  which of five things happened: a spike and both numbers found; the 10 mV
+  criterion cleared only by a graded depolarisation (the spike height,
+  `coincidence.spike_height`, is under three times the criterion, so there is
+  a threshold but no window); nothing up to the amplitude ceiling reached the
+  criterion (silent); the cell fired with no input; or the input still spiked
+  at the largest delay searched, so there is no window;
+- at each point the pair threshold at delay 0 is found, then the 3% window
+  (`coincidence.window`, as in "Coincidence window") reusing that threshold;
+- the 45-compartment model is located as the point whose window and threshold
+  lie closest to its own, as a fraction of each (a relative distance, since
+  the two have different units). The lookup's own point (node 3) and Goldwyn
+  et al.'s three example configurations are always run, whether or not the
+  grid reaches them, and the 44 axon nodes' own constants are drawn on the
+  figure; Goldwyn et al. do not report a window or a threshold in nS over this
+  plane (their Fig 5 is a firing-rate difference at re-referenced g_Na, their
+  Fig 10F a refractory period), so the row compares trends, not numbers.
+
 ### Coincidence window
 
 Measured the way Myoga et al. 2014 did in adult gerbil MSO at 35 °C

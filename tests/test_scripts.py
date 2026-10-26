@@ -262,3 +262,30 @@ def test_inhibition_window_script(tmp_path):
     assert case["+0.2"]["th0"] > case["none"]["th0"]
     assert (case["+0.2"]["lo"] + case["+0.2"]["hi"]) / 2 < -0.02
     assert res["noisy_check"]["peak"] > 0
+
+
+def test_coupling_plane_script(tmp_path):
+    out = run_script("coupling_plane.py", "--quick", "--out-dir", tmp_path)
+    res = json.loads((tmp_path / "coupling_plane.json").read_text())
+    assert "closest to the 45-compartment model" in out
+    assert (tmp_path / "coupling_plane.png").stat().st_size > 0
+    by = {(p["couple12"], p["couple21"]): p for p in res["points"]}
+    # the quick grid (3 x 3, forward >= backward) and the four landmarks
+    assert len(by) == 10
+    statuses = [p["status"] for p in by.values()]
+    assert set(statuses) <= {"fires", "graded", "silent", "spontaneous", "wide"}
+    assert "fires" in statuses
+
+    # the lookup's cell is the published one (TwoCpt.m: 47.72 nS, 199 us),
+    # spikes, and of all the points is closest to the 45-compartment model
+    default = res["default"]
+    assert default["status"] == "fires"
+    assert math.isclose(default["threshold"], 48.0, rel_tol=0.02)
+    assert math.isclose(default["window_us"], 199.0, rel_tol=0.03)
+    assert res["located"]["couple12"] == default["couple12"]
+    assert res["located"]["distance"] < 0.05
+
+    # only a spiking point has a window, and the extremes are over those
+    for p in by.values():
+        assert (p["status"] == "fires") == (p["window_us"] is not None)
+    assert res["extremes"]["window_min"]["status"] == "fires"
