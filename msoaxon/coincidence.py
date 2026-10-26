@@ -27,7 +27,7 @@ BinarySearch.m's halving search.
 Event lists (issue #78). The searches above drive an EPSG pair; passing
 `events=` drives them with the "Events" stimulus instead, and the protocols
 at the end of the module (fibre counts, pre-pulses, Casarez-style ITD sweeps,
-and the `dt_inh` axis of issue #77) are built on it. `events` is an event
+are built on it. `events` is an event
 *source*, a callable (delay, amp) -> tuple of synaptic.Event, or a plain
 event tuple, which scales with the searched amplitude; the search runs it
 with I = 1 and varies amp, so a source can hold some events fixed (an IPSG, a
@@ -176,41 +176,9 @@ def _spikes(
     )[0]
 
 
-def _source(
-    events: synaptic.EventsLike | None,
-    dt_inh: float | None = None,
-    inh: synaptic.Inhibition | None = None,
-    *,
-    tau: tuple[float, float] = synaptic.EPSG_TAU,
-    node: int = 1,
-    node2: int | None = None,
-) -> synaptic.Source | None:
-    """Returns the event source a call's events / dt_inh / inh stand for.
-
-    Args:
-        events: An event tuple, an event source, or None.
-        dt_inh: The IPSG onset relative to the pair's first EPSG [ms], or
-            None for no inhibition axis.
-        inh: The IPSG's settings; its own dt is used when dt_inh is None.
-        tau: The EPSG kinetics of the pair that dt_inh builds.
-        node: Where the pair's first EPSG enters.
-        node2: Where the second enters, or None for node.
-
-    Returns:
-        None for an EPSG-pair call (all three None); the source of
-        events; or a PairSource with an Inhibition.
-
-    Raises:
-        ValueError: If events is given together with dt_inh or inh.
-    """
-    if dt_inh is None and inh is None:
-        return None if events is None else synaptic.as_source(events)
-    if events is not None:
-        raise ValueError("give events or dt_inh / inh, not both")
-    inh = inh or synaptic.Inhibition()
-    if dt_inh is not None:
-        inh = dataclasses.replace(inh, dt=dt_inh)
-    return synaptic.PairSource(tau=tuple(tau), node=node, node2=node2, inh=inh)
+def _source(events: synaptic.EventsLike | None) -> synaptic.Source | None:
+    """Returns the event source of a call's events, or None for a pair."""
+    return None if events is None else synaptic.as_source(events)
 
 
 def _check_delay(source: synaptic.Source | None, delay: float) -> None:
@@ -471,8 +439,6 @@ def window(
     input_node2: int | None = None,
     criterion: Criterion = FACTOR,
     events: synaptic.EventsLike | None = None,
-    dt_inh: float | None = None,
-    inh: synaptic.Inhibition | None = None,
 ) -> tuple[float, float]:
     """Finds the coincidence-window width at `margin` directly.
 
@@ -509,16 +475,10 @@ def window(
         criterion: The spike criterion (see threshold()). A given
             threshold0 must have been found with the same one.
         events: An event source (see threshold()) to measure instead of
-            the pair, or None. With events, dt_inh or inh the window is
-            measured by window_edges (the delay is signed, and its
-            reference is the lowest threshold over delay, th0 below), and
-            threshold0 may not be given.
-        dt_inh: The onset of an IPSG relative to the pair's first EPSG
-            [ms]; negative leads. Builds a synaptic.PairSource from
-            epsg_tau, input_node and input_node2 with the IPSG of `inh`.
-        inh: The IPSG's settings (synaptic.Inhibition: peak, kinetics,
-            reversal, compartment); by default a 40 nS glycinergic one.
-            Without dt_inh its own dt is used.
+            the pair, or None. With events the window is measured by
+            window_edges (the delay is signed, and its reference is the
+            lowest threshold over delay, th0 below), and threshold0 may
+            not be given.
 
     Returns:
         (width, th0): the width [ms], nan if the input still spikes at
@@ -530,12 +490,10 @@ def window(
     Raises:
         ValueError: If delay_tol is not > 0, or rel_tol is not > 0 when
             th0 is searched for (checked before any run), or if
-            threshold0 is given with events, dt_inh or inh.
+            threshold0 is given with events.
     """
     _bisect.check_positive("delay_tol", delay_tol)
-    source = _source(
-        events, dt_inh, inh, tau=epsg_tau, node=input_node, node2=input_node2
-    )
+    source = _source(events)
     if source is not None:
         if threshold0 is not None:
             raise ValueError(
@@ -907,9 +865,6 @@ def probability_trials(
     input_node2: int | None = None,
     criterion: Criterion = FACTOR,
     events: synaptic.EventsLike | None = None,
-    dt_inh: float | None = None,
-    inh: synaptic.Inhibition | None = None,
-    inh_jitter: float = 0.0,
 ) -> np.ndarray:
     """Measures spike probability per delay from noisy trials.
 
@@ -918,11 +873,9 @@ def probability_trials(
     N(0, jitter) ms independently. For EPSGbilateral the earlier EPSG is
     always at input_node.
 
-    With events, dt_inh or inh the trial is the event source's events at
-    that delay (see window()) and amplitude, with the same noise: every
-    onset moves by N(0, jitter) ms, those of inhibitory events (a
-    reversal below 0 mV) by N(0, inh_jitter) instead. The delays are
-    signed, and onsets are kept at or after 0.
+    With events the trial is the event source's events at that delay and
+    amplitude, with the same noise: every onset moves by N(0, jitter) ms.
+    The delays are signed, and onsets are kept at or after 0.
 
     Args:
         model: "multi" or "two".
@@ -946,18 +899,11 @@ def probability_trials(
         criterion: The spike criterion (see threshold()), resolved here
             once rather than in every worker.
         events: An event source or tuple (see threshold()), or None.
-        dt_inh: The IPSG onset relative to the pair's first EPSG [ms]
-            (see window()).
-        inh: The IPSG's settings (see window()).
-        inh_jitter: The standard deviation of the inhibitory events'
-            onsets [ms], with events, dt_inh or inh.
 
     Returns:
         An array with the fraction of trials that spiked, per delay.
     """
-    source = _source(
-        events, dt_inh, inh, tau=epsg_tau, node=input_node, node2=input_node2
-    )
+    source = _source(events)
     if source is not None:
         return _probability_events(
             model,
@@ -967,7 +913,6 @@ def probability_trials(
             n_trials,
             amp_cv,
             jitter,
-            inh_jitter,
             node,
             v0,
             model_kw,
@@ -1021,7 +966,6 @@ def _probability_events(
     n_trials: int,
     amp_cv: float,
     jitter: float,
-    inh_jitter: float,
     node: int,
     v0: float,
     model_kw: dict[str, Any] | None,
@@ -1041,13 +985,7 @@ def _probability_events(
                 tuple(
                     dataclasses.replace(
                         e,
-                        t=max(
-                            e.t
-                            + rng.normal(
-                                0, inh_jitter if e.e_rev < 0 else jitter
-                            ),
-                            0.0,
-                        ),
+                        t=max(e.t + rng.normal(0, jitter), 0.0),
                     )
                     for e in source(float(d), amp)
                 )
