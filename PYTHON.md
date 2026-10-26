@@ -16,7 +16,7 @@ uv run scripts/making_threshold_graphs.py --node 3         # Making_Threshold_gr
 uv run scripts/making_threshold_graphs.py --only EPSGpair --jpg-grid   # the repo's jpgs
 ```
 
-`dendrites.py`, `coincidence_window.py` and `somatic_spike.py` take `--quick`
+`dendrites.py`, `coincidence_window.py`, `somatic_spike.py` and `resonance.py` take `--quick`
 (coarse delay grids, 1% threshold tolerance, fewer multiples), and
 `making_threshold_graphs.py` takes `--points N`. The same code runs in seconds
 instead of minutes; the numbers are for smoke tests, not results.
@@ -55,6 +55,7 @@ Code that isn't a port of a MATLAB file:
 | `msoaxon/coincidence.py` | Myoga-style coincidence windows; `stim=`, `input_node=`, `input_node2=` pick the input sites, `model_kw` passes model options such as `morph` |
 | `msoaxon/somatic.py` | rheobase and the Scott et al. 2005 somatic spike amplitude |
 | `msoaxon/measure.py` | input resistance and time constant from a current step; soma trace on a grid |
+| `msoaxon/resonance.py` | soma impedance, sine-train and EPSG-train thresholds over frequency (#83) |
 | `msoaxon/_fast.py` | the optional Rust right-hand side: mode selection, self-check, `DriftWarning` |
 | `rust/` | the `msoaxon-fast` extension (PyO3, built by maturin): `multi._rhs` in Rust |
 
@@ -547,7 +548,9 @@ Values are for the Python port.
 | Spike initiation site | AIS (compartment 3) for an EPSG pair at 1.25–3× threshold; under sustained input 0–36% of spikes start at node 1 or 2 where 50 or more spikes fired, 8% at 350 Hz and the default `gE` (`initiation.py`, #80) | AIS; 5–60% of spikes start at node 1 or 2 under sustained input (Lehnert 2014) |
 | Input resistance, active, at rest | 2.4 MΩ steady, ~4.7 MΩ peak with the leak rebalanced at −68 mV (`rebalance_rest=True`, as in the dendrites table); 2.5 / 4.8 MΩ for the default membrane, which settles at −68.13 mV where the conductances differ a little (`measure.passive_step`, #68) | 5 MΩ (Lehnert's model); ~7 MΩ measured |
 | Somatic spike, from inflection (100 ms step) | 7.4 / 13.3 / 18.2 mV at 1.5× / 2× / 3× rheobase | 17 ± 2 mV mature, 5–15 mV near threshold, graded |
-| Best frequency for half-wave sine input | 400–500 Hz | spike resonance 285 Hz, EPSC-train threshold minimum 317 Hz; subthreshold resonance 242 Hz (Mikiel-Hunter et al. 2016, [doi](https://doi.org/10.1371/journal.pcbi.1005166)); a suprathreshold measure belongs against the first two (#83) |
+| Subthreshold resonance: peak of the soma impedance, small rectified sine (`resonance.py`, #83) | 363 Hz, Q 2.8 (2-compartment: 354 Hz, Q 2.75) | 242 Hz, Q 1.88 (Mikiel-Hunter et al. 2016, [doi](https://doi.org/10.1371/journal.pcbi.1005166); their model at 35 °C, Q over the input resistance) |
+| Spike resonance: sine frequency with the lowest firing threshold | 428 Hz (2-compartment: 429 Hz) | 285 Hz (same model) |
+| EPSG-train threshold minimum: rate with the lowest threshold | 426 Hz (2-compartment: 420 Hz) | 317 Hz (same model, EPSC train) |
 
 The initiation site is read from a finished run by `msoaxon.initiation`. It
 cannot use a fraction of each compartment's own peak: the input enters at the
@@ -689,8 +692,86 @@ than the spike.
   model only: `two_cpt` takes no membrane (#79).
 - `rebalance_rest`: sets each leak reversal so rest stays at `v0`. Without it,
   removing KLT makes the cell fire with no input.
+- `klt_to_leak`: replaces KLT by a leak, keeping rest (see Resonance below).
 
 The defaults are `msoAxon.m`'s membrane, unchanged.
+
+### Resonance
+
+`uv run scripts/resonance.py` reproduces this; `figures/resonance/` gets the
+curves and a JSON. `--quick` is a smoke test, `--mode native` is about 8× faster
+and agrees within solver tolerance.
+
+Mikiel-Hunter, Kotak & Rinzel 2016
+([doi](https://doi.org/10.1371/journal.pcbi.1005166)) give three frequencies for
+their gerbil MSO model at 35 °C, all KLT dependent: **242 Hz** subthreshold
+resonance, **285 Hz** spike resonance and **317 Hz** for the EPSC-train
+threshold minimum. The old row of the table above gave the model's 400–500 Hz
+from `BinarySearch.m`'s `sine` sweep, which stops after one half-cycle
+(`start + 1/(2f)`; thresholds 4.2–4.3 nA at 400–600 Hz, lowest at 500 Hz in
+both models), and set it against the subthreshold number: a single pulse's
+width against a resonance, a mismatch of measure.
+`msoaxon/resonance.py` measures all three the way the paper does:
+- **Subthreshold:** the soma's impedance from a 20 pA rectified `sine` at one
+  frequency per run (no chirp: a new `stim_type` would need the Rust side). The
+  half-wave sine is I/π + (I/2) sin ωt plus even harmonics, so over whole cycles
+  the response at the fundamental, divided by the stimulus's own, is the
+  impedance (within about 1% from 5 to 80 pA, and from 30 to 100 ms of settling
+  and 4 to 20 cycles). Q is the peak over |Z| at 20 Hz, not over the DC
+  resistance the paper uses.
+- **Spike:** the smallest sine train (50 ms, peak current) that makes node 3 rise
+  10 mV above the soma, over frequency.
+- **EPSG train:** the smallest peak conductance of a train of EPSGs at the soma
+  (an `Events` list, 50 ms) at each rate.
+- **Resonance** means an interior peak (|Z|) or dip (threshold) more than 5%
+  from the value at the lowest frequency (`resonance.MIN_RATIO`); the minimum is
+  a parabola through the five points around the best, after a second, finer
+  pass.
+
+| | R_in (steady) | Subthreshold resonance, Q | Spike resonance | EPSG-train minimum |
+|---|---|---|---|---|
+| Mikiel-Hunter 2016 (model, 35 °C) | | 242 Hz, 1.88 | 285 Hz | 317 Hz |
+| 45-compartment (`msoAxon.m`) | 2.5 MΩ | 363 Hz, 2.79 | 428 Hz | 426 Hz |
+| 45-compartment, rest rebalanced | 2.4 MΩ | 367 Hz, 2.82 | 439 Hz | 451 Hz |
+| 45-compartment, KLT frozen at its resting conductance (`klt_to_leak="chord"`) | 9.1 MΩ | none (low-pass) | none (rises with frequency) | none (falls to 800 Hz) |
+| 45-compartment, KLT replaced by its slope conductance (`klt_to_leak="slope"`) | 2.6 MΩ | none (Q 1.00) | none (2% dip at 154 Hz) | none (flat) |
+| 2-compartment (`TwoCpt.m`) | 2.4 MΩ | 354 Hz, 2.75 | 429 Hz | 420 Hz |
+
+What it shows:
+- **The mechanism is the paper's.** All three resonances need KLT: with KLT
+  replaced by a leak the impedance is low-pass, the sine threshold rises with
+  frequency and the EPSG-train threshold no longer has a minimum. Both
+  substitutions were measured, because "a leak of equal conductance at rest" and
+  "an unchanged input resistance" are different leaks for a conductance that
+  grows with depolarisation. The frozen one (the paper's dynamic clamp, gates
+  held at rest) has KLT's conductance at `v0` but loses its slope, so the steady
+  input resistance rises from 2.4 to 9.1 MΩ. The slope one has KLT's slope
+  conductance, which keeps the steady resistance (2.6 MΩ) but is not a
+  conductance the channel ever has at rest. The result is the same for both.
+- **The frequencies are not.** The model resonates 1.3–1.5× higher than the
+  paper's: 363 against 242 Hz, 428 against 285 Hz, 426 against 317 Hz. The
+  spacing differs too: the paper's three rise from 242 to 317 Hz, here the spike
+  and EPSG minima coincide near 427 Hz. The old row's 400–500 Hz was closer to
+  the sine-train number only by coincidence of measures.
+- **The two models agree within 3%** on all three, so the resonance is the
+  somatic KLT, not the axon's structure.
+- **The minima are broad:** the threshold stays within 1% of its minimum over
+  420–450 Hz (sine) and 410–445 Hz (EPSG), so the arms' differences of 10–25 Hz
+  (default against rebalanced) are inside the flat bottom.
+- **The EPSG-train minimum is shallow:** 12–14% below the threshold at 100 Hz
+  (which is the single-event one), against the paper's 41.5%; the sine
+  threshold at 100 Hz is 2.8× its minimum. Away from the dip a
+  train needs the single-event threshold, so the membrane does not sum EPSGs at
+  rates that do not match its ring.
+- **Train length:** from 50 to 500 ms (the paper's) thresholds fall 4–9% and the
+  minima move from 428 to 424 Hz (sine) and 427 to 424 Hz (EPSG).
+- **Not done:** `two_cpt` takes no membrane (#79), so the substitution is only
+  for the 45-compartment model, and the paper's dV/dt criterion, hyperpolarising
+  half-cycle scaling (0.5) and 0.3 ms EPSC are not reproduced; the repo's
+  criterion, a rectified sine and the repo's EPSG are used.
+
+With `klt_to_leak` the leak lives in the morphology, so the `Membrane` carries
+its own copy of it: pass `mem` alone to `mso_axon`, or `morph=mem.morph`.
 
 ## Event-list input
 
