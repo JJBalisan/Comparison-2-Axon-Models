@@ -27,4 +27,5 @@ uv run python prototype/diffsol-real/dump_cases.py OUT_DIR [--fixture F]
 uv run python prototype/diffsol-real/compare.py CASE_DIR OUT_DIR
 ```
 
-Keep this crate's `Cargo.lock` diffsol pin in step with `rust/Cargo.lock`.
+Keep this crate's `Cargo.lock` diffsol pin in step with `rust/Cargo.lock`
+(#110), or CI's cache for it misses.
