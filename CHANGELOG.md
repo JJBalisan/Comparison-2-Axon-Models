@@ -6,6 +6,61 @@ and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least. The `msoaxon-fast` crate in `rust/` carries the
 same version as the package, bumped in the same release PR.
 
+## 1.7.0 (26 Oct 2026)
+
+Phase 1's second round and the three Python lanes from the 25 October
+literature review, reviewed and merged in parallel: native mode fills its
+Jacobian analytically, the searches take event lists, the two-compartment
+model's coupling and Na availability are free parameters, inhibition is an
+event with a timing axis, and the resonance protocol replaces the old
+half-wave-sine row. Model results are unchanged: fast stays bit-identical
+to the reference on darwin-arm64, the golden traces, the 28 pinned
+thresholds and the benchmark's 300 runs hold in every mode, no tolerance
+moved, and the default mode is still `"fast"`.
+
+### Added
+
+- `events=` on `coincidence.threshold`, `threshold_curve`, `window`,
+  `probability_trials` and `somatic.fires`, `response`, `rheobase`: an
+  event tuple or an event source (a callable giving the events for a delay
+  and an amplitude); calls without it are unchanged. On top of it:
+  `coincidence.window_edges`, `best_delay`, `trial_spikes`,
+  `bilateral_probability`, `fibre_window_trials`, `itd_sweep`,
+  `prepulse_thresholds`; `synaptic.PairSource`, `Fixed`, `fibre_events`,
+  `bilateral_events`, `current_event`, `epsc_train`;
+  `measure.curve_summary`, `train_rin`; and `scripts/event_protocols.py`
+  for the fibre-drive, pre-pulse, EPSC-train and ITD protocols (#78).
+- Inhibition as an event: `synaptic.ipsg`, `synaptic.Inhibition`,
+  `PairSource(inh=...)`, and `dt_inh` / `inh` on `coincidence.window` and
+  `probability_trials` (`inh_jitter` on the latter), with
+  `scripts/inhibition_window.py` (#77).
+- Keyword-only `gC`, `couple12`, `couple21`, `area_ratio`, `klt1`, `klt2`,
+  `h1`, `h2`, `na1` and `gNa2` on `two_cpt` and `two.get_params`, each
+  defaulting to the `node` lookup's value, validated before any run (#84);
+  `soma_na_vhalf` and `axon_na_vhalf` on the same (default −62.5 mV),
+  `TwoCptParams.na_vhalf1` and `na_vhalf2`, and `scripts/na_availability.py`
+  for the rest × Na V½ 2 × 2 of both models (#79).
+- `msoaxon.resonance` (the soma's impedance, and the sine-train and
+  EPSG-train thresholds over frequency), `scripts/resonance.py`, and
+  `membrane(klt_to_leak="chord" | "slope")`, which replaces KLT by a leak
+  that keeps the rest potential; the default membrane is unchanged (#83).
+
+### Changed
+
+- Native mode fills the BDF Jacobian analytically (`MultiRhs::jacobian`)
+  instead of by forward differences: the same steps on the EPSGpair and
+  step harness cases (the Synaptic goldens move by a few steps, within
+  tolerance), about 8–10% less CPU per run, and an exact Jacobian where the
+  old fill was off by up to 1.5e-4 relative (#105).
+- PYTHON.md: the "Best frequency for half-wave sine input" row is replaced
+  by subthreshold, spike and EPSG-train resonance rows against
+  Mikiel-Hunter et al. 2016, with a Resonance section that says why the
+  model's frequencies sit 1.3–1.5× above the paper's; the two-compartment
+  keyword table and the proposed Na-availability 2 × 2 are documented.
+- CI: the `pytest` job's timeout is 20 minutes; the 3.12 slow-test run,
+  which runs every script's `--quick` smoke test without the Rust
+  extension, outgrew 10.
+
 ## 1.6.0 (26 Oct 2026)
 
 Phase 1 of the Rust port (#28), three parallel lanes: the `"Events"` stimulus

@@ -1,6 +1,6 @@
 [package]
 name = "msoaxon-fast"
-version = "1.6.0"
+version = "1.7.0"
 edition = "2021"
 rust-version = "1.99"  # see rust-toolchain.toml
 description = "Rust right-hand side for msoaxon's 45-compartment model"
