@@ -17,9 +17,11 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
-# about 60 s locally, ~4 min on a CI runner; the scripts don't depend on the
-# Python version, so CI runs these on 3.12 only (deselect locally with -m "not
-# slow")
+# The scripts don't depend on the Python version, so CI runs these on 3.12
+# only (deselect locally with -m "not slow"), in exact mode (no Rust
+# extension). na_availability's --quick (pooled; no searches where the 45-
+# compartment rest is unsteady, which cost minutes) took 47-56 s wall on 4
+# workers, 90 CPU-s, with this machine at a load average of ~215.
 pytestmark = pytest.mark.slow
 
 
@@ -151,6 +153,43 @@ def test_resonance_script(tmp_path):
     )
 
 
+def test_na_availability_script(tmp_path):
+    run_script("na_availability.py", "--quick", "--out-dir", tmp_path)
+    res = json.loads((tmp_path / "na_availability.json").read_text())
+
+    assert set(res) == {"45-compartment", "2-compartment"}
+    for cells in res.values():
+        assert [(c["rest_mV"], c["vhalf_mV"]) for c in cells] == [
+            (-68.0, -62.5),
+            (-68.0, -77.0),
+            (-58.0, -62.5),
+            (-58.0, -77.0),
+        ]
+        # the issue's table: 1 - hinf at rest with the model's own slope
+        got = [round(c["inactivated"], 2) for c in cells]
+        assert got == [0.33, 0.76, 0.64, 0.92]
+        for c in cells:
+            # Rin is read from a step only where the rest is steady
+            # (RIPPLE_MAX = 0.01 mV in the script)
+            assert (c["rin_steady_MOhm"] is None) == (
+                c["rest_ripple_mV"] >= 0.01
+            )
+            if c["rheobase_pA"] is None:
+                continue  # --quick skips the searches at an unsteady rest
+            assert 50 < c["window_3pct_us"] < 400
+            assert 100 < c["epsp_half_width_us"] < 2000
+        # less available Na at rest takes more current to fire
+        for lo, hi in ((0, 1), (2, 3)):
+            if cells[lo]["rheobase_pA"] and cells[hi]["rheobase_pA"]:
+                assert cells[hi]["rheobase_pA"] > cells[lo]["rheobase_pA"]
+    # the default cells are the published ones (PYTHON.md: 3.8 nA, 2.4 MOhm)
+    for model in res.values():
+        assert math.isclose(model[0]["rheobase_pA"], 3800, rel_tol=0.03)
+        assert math.isclose(model[0]["rin_steady_MOhm"], 2.4, rel_tol=0.05)
+    # the 2-compartment model is steady at both rests
+    assert all(c["rin_steady_MOhm"] for c in res["2-compartment"])
+
+
 def test_making_threshold_graphs_script(tmp_path):
     out = run_script(
         "making_threshold_graphs.py",
@@ -183,3 +222,30 @@ def test_phase0_harness_script(tmp_path):
     assert res["threshold_s"] > 0 < res["window_s"]
     assert res["steps_epsgpair_20ms"] > 100
     assert res["steps_step_110ms"] > 100
+
+
+def test_event_protocols_script(tmp_path):
+    out = run_script("event_protocols.py", "--quick", "--out-dir", tmp_path)
+    res = json.loads((tmp_path / "event_protocols.json").read_text())
+    for heading in (
+        "1. Fibre drive",
+        "2. Pre-pulse",
+        "3. EPSC trains",
+        "4. ITD",
+    ):
+        assert heading in out
+    assert res["mode"] in ("fast", "exact", "native")
+
+    # Franken et al 2015: a preceding EPSG raises the pair threshold
+    for model in ("multi", "two"):
+        pre = res["prepulse"][f"{model}_37"]
+        assert math.isclose(pre["th0"], 48.0, rel_tol=0.02)
+        assert all(r > 0 for r in pre["rise"])
+        assert pre["rise"][0] > pre["rise"][2]  # -1.0 ms beats -0.5 ms
+        # the faster the train, the more KLT is open and the lower Rin
+        assert (
+            res["trains"][f"{model}_400"]["change"]
+            < (res["trains"][f"{model}_200"]["change"])
+        )
+        assert res["itd"][model]["peak"] > 0.5
+        assert len(res["fibres"][f"{model}_2"]["half_widths_us"]) == 2

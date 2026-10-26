@@ -2,6 +2,8 @@
 
 import dataclasses
 import functools
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 
@@ -43,6 +45,257 @@ class Event:
     g: float = 1.0
     tau: tuple[float, float] = EPSG_TAU
     e_rev: float = 0.0
+
+
+# A conductance event driven from this far away is a current source to within
+# the swing of v over it (7e-4 at rest, under 1e-3 for |v| < 100 mV):
+# current_event uses it for EPSC-shaped currents.
+CURRENT_E_REV = 1e5  # [mV]
+# The default onset [ms] of the protocol builders (_common.START, which this
+# module cannot import).
+T0 = 5.0
+
+
+def current_event(
+    t: float,
+    amp: float,
+    node: int = 1,
+    tau: tuple[float, float] = EPSG_TAU,
+) -> Event:
+    """Returns an event that injects an EPSC-shaped current, not a conductance.
+
+    The event is a conductance of amp / CURRENT_E_REV nS driven from a
+    reversal of CURRENT_E_REV mV, so its current, g * (e_rev - v), stays
+    amp * waveform to within the swing of v (1e-3 of it). A run's I
+    scales it like any event.
+
+    Args:
+        t: Onset [ms].
+        amp: Peak current [pA]; negative hyperpolarises.
+        node: The compartment it enters, 1-indexed.
+        tau: The (rise, decay) time constants [ms].
+
+    Returns:
+        The Event.
+    """
+    return Event(t, node, amp / CURRENT_E_REV, tuple(tau), CURRENT_E_REV)
+
+
+def epsc_train(
+    n: int,
+    rate: float,
+    amp: float,
+    t0: float = T0,
+    node: int = 1,
+    tau: tuple[float, float] = EPSG_TAU,
+) -> tuple[Event, ...]:
+    """Returns a regular train of EPSC-shaped current events.
+
+    Args:
+        n: The number of pulses.
+        rate: The pulse rate [Hz].
+        amp: Each pulse's peak current [pA].
+        t0: The first onset [ms].
+        node: The compartment it enters, 1-indexed.
+        tau: The (rise, decay) time constants of each pulse [ms].
+
+    Returns:
+        n current events, 1000 / rate ms apart.
+    """
+    return tuple(
+        current_event(t0 + k * 1000.0 / rate, amp, node, tau) for k in range(n)
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class Fixed:
+    """A fixed event list whose peaks scale with the searched amplitude.
+
+    The simplest event source (see Source): the list is the shape of
+    the input, and the search's amplitude multiplies every g, as `I`
+    does in mso_axon("Events", ...). It has no delay.
+
+    Attributes:
+        events: The events; their g is the peak at amplitude 1.
+    """
+
+    events: tuple[Event, ...]
+
+    def __call__(self, _delay: float, amp: float) -> tuple[Event, ...]:
+        """Returns the events with every peak multiplied by amp."""
+        return tuple(dataclasses.replace(e, g=e.g * amp) for e in self.events)
+
+
+@dataclasses.dataclass(frozen=True)
+class PairSource:
+    """Two EPSGs `delay` apart, with optional pre-pulses.
+
+    The first EPSG is at `start` and the second at start + delay, so a
+    negative delay puts the second first; both have the searched amplitude.
+    Pre-pulses are timed against the first EPSG and keep their own
+    peaks. With a node2 the two EPSGs enter different
+    compartments, as EPSGbilateral does.
+
+    Attributes:
+        start: The first EPSG's onset [ms].
+        tau: The EPSGs' (rise, decay) time constants [ms].
+        node: Where the first EPSG enters, 1-indexed.
+        node2: Where the second enters, or None for node.
+        pre: (dt, g) pairs: an EPSG of peak g [nS] at start + dt, with
+            the pair's kinetics and node.
+    """
+
+    start: float = T0
+    tau: tuple[float, float] = EPSG_TAU
+    node: int = 1
+    node2: int | None = None
+    pre: tuple[tuple[float, float], ...] = ()
+
+    def __call__(self, delay: float, amp: float) -> tuple[Event, ...]:
+        """Returns the events of one trial at this delay and amplitude."""
+        tau = tuple(self.tau)
+        out = [Event(self.start + dt, self.node, g, tau) for dt, g in self.pre]
+        out.append(Event(self.start, self.node, amp, tau))
+        node2 = self.node if self.node2 is None else self.node2
+        out.append(Event(self.start + delay, node2, amp, tau))
+        return tuple(out)
+
+
+# An event source: (delay, amp) -> the events of one run. The coincidence and
+# somatic searches run it with I = 1 and vary amp, so a source can hold some
+# events fixed (an IPSG, a pre-pulse) while it scales the rest.
+Source = Callable[[float, float], tuple[Event, ...]]
+# what the searches' `events=` takes: a source, or a tuple of Events (see Fixed)
+EventsLike = tuple[Event, ...] | Source
+
+
+def as_source(events: EventsLike) -> Source:
+    """Returns an event source for a list of events or a source.
+
+    Args:
+        events: A source (returned as given), or a non-empty sequence of
+            Events, wrapped in Fixed.
+
+    Returns:
+        The source.
+
+    Raises:
+        ValueError: If events is an empty sequence.
+    """
+    if callable(events):
+        return events
+    events = tuple(events)
+    if not events:
+        raise ValueError('"Events" needs at least one Event')
+    return Fixed(events)
+
+
+def fibre_events(
+    n: int,
+    rng: np.random.Generator | int | None,
+    t0: float = T0,
+    g: float = 37.0,
+    g_sd: float = 0.0,
+    jitter: float = 0.0,
+    node: int = 1,
+    tau: tuple[float, float] = EPSG_TAU,
+    release_p: float = 1.0,
+    rate: float | None = None,
+    duration: float = 0.0,
+) -> tuple[Event, ...]:
+    """Draws the excitatory events of n fibres (or synapses).
+
+    Couchman et al 2010: MSO neurons get 4 to 8 fibres of 37 +/- 4 nS.
+    With rate None every fibre fires once, at t0 plus a Gaussian jitter
+    (the first-spike jitter of an AVCN bushy cell); with a rate each
+    fibre fires a Poisson process of that rate over [t0, t0 + duration),
+    its spikes uniform in the window. Each spike releases with
+    probability release_p, and each release is an EPSG of peak
+    g * N(1, g_sd / g) (never below 0).
+
+    Args:
+        n: The number of fibres.
+        rng: A numpy Generator, or a seed for one.
+        t0: The nominal onset [ms] (the start of the window with a rate).
+        g: The mean peak [nS].
+        g_sd: The standard deviation of the peak [nS] (Couchman: 4).
+        jitter: The standard deviation of each onset [ms], with rate
+            None.
+        node: The compartment the events enter, 1-indexed.
+        tau: The (rise, decay) time constants [ms].
+        release_p: The probability a spike releases.
+        rate: The Poisson rate per fibre [Hz], or None for one jittered
+            spike each.
+        duration: The window of the Poisson process [ms].
+
+    Returns:
+        The events, sorted by onset (none if nothing released), onsets
+        clipped to be at least 0.
+
+    Raises:
+        ValueError: If n is negative, release_p is outside [0, 1], or
+            rate is given with a duration that is not positive.
+    """
+    if n < 0 or not 0 <= release_p <= 1:
+        raise ValueError(
+            f"fibre_events needs n >= 0 and 0 <= release_p <= 1, got "
+            f"{n}, {release_p}"
+        )
+    rng = np.random.default_rng(rng)
+    if rate is None:
+        times = (
+            t0 + jitter * rng.standard_normal(n) if jitter else np.full(n, t0)
+        )
+    else:
+        if duration <= 0:
+            raise ValueError(
+                f"a Poisson drive needs duration > 0, got {duration}"
+            )
+        counts = rng.poisson(rate * duration / 1000.0, n)
+        times = t0 + duration * rng.random(counts.sum())
+    released = rng.random(len(times)) < release_p
+    times = times[released]
+    peaks = g + g_sd * rng.standard_normal(len(times))
+    order = np.argsort(times, kind="stable")
+    tau = tuple(tau)
+    return tuple(
+        Event(float(max(times[i], 0.0)), node, float(max(peaks[i], 0.0)), tau)
+        for i in order
+    )
+
+
+def bilateral_events(
+    delay: float,
+    rng: np.random.Generator | int | None,
+    n: int = 4,
+    nodes: tuple[int, int] = (1, 1),
+    t0: float = T0,
+    **kw: Any,
+) -> tuple[Event, ...]:
+    """Draws the events of two sides, the second `delay` after the first.
+
+    Each side is fibre_events(n, ...): the sides differ in the onset
+    window (t0 and t0 + delay) and node. With the default 4 fibres of
+    37 nS this is the Couchman et al 2010 input; with n = 125 and a
+    release_p of 0.45 it is the Casarez et al 2026 one.
+
+    Args:
+        delay: Onset of the second side relative to the first [ms];
+            negative puts it first.
+        rng: A numpy Generator, or a seed for one; both sides draw from it.
+        n: The number of fibres (synapses) per side.
+        nodes: The compartment of each side, 1-indexed.
+        t0: The first side's nominal onset [ms].
+        **kw: Further fibre_events arguments (g, g_sd, jitter, tau,
+            release_p, rate, duration), the same for both sides.
+
+    Returns:
+        The events of both sides, sorted by onset.
+    """
+    rng = np.random.default_rng(rng)
+    first = fibre_events(n, rng, t0, node=nodes[0], **kw)
+    second = fibre_events(n, rng, t0 + delay, node=nodes[1], **kw)
+    return tuple(sorted(first + second, key=lambda e: e.t))
 
 
 def check_events(
@@ -220,6 +473,23 @@ class SynParams:
     # EPSG/EPSGpair (rise, decay) [ms]; Myoga et al 2014 used decay 0.3
     epsg_tau: tuple = EPSG_TAU
     events: tuple[Event, ...] = ()  # the "Events" stimulus (see Event)
+
+
+def event_syn(
+    source: Source, delay: float, amp: float, t_end: float
+) -> SynParams:
+    """Returns the SynParams of one run of an event source.
+
+    Args:
+        source: See as_source.
+        delay: The delay passed to the source [ms].
+        amp: The amplitude passed to the source.
+        t_end: End of the run [ms].
+
+    Returns:
+        SynParams(t_end, events=source(delay, amp)).
+    """
+    return SynParams(t_end=t_end, events=tuple(source(delay, amp)))
 
 
 def synaptic(syn: SynParams) -> tuple[np.ndarray, np.ndarray]:

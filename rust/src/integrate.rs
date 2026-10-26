@@ -1,8 +1,9 @@
 //! The BDF integrator of `mode="native"`: diffsol 0.18 over [`MultiRhs`].
 //!
 //! Plain Rust, no pyo3. [`Integrator`] is built once per right-hand side
-//! (the Jacobian pattern, its colouring and the diffsol problem) and
-//! [`Integrator::run`] then solves one segment of `_solve.integrate`, the
+//! (the Jacobian pattern, where its analytic values go, and the diffsol
+//! problem) and [`Integrator::run`] then solves one segment of
+//! `_solve.integrate`, the
 //! job `_solve._segment` gives scipy's BDF in the other modes: from a fresh
 //! state at the segment start, every accepted step recorded, stopped by the
 //! two terminal events of `_solve` (`spike_event`, `settled_event`).
@@ -10,8 +11,8 @@
 //! The pattern is `core::tree_jac_sparsity` of the run's own morphology
 //! (every stimulus couples a compartment only to itself), handed to diffsol
 //! through a hand-written `OdeEquations` (diffsol's builder can only detect
-//! one, by NaN probes); the Jacobian is filled by
-//! forward-difference `Jv` products, one per colour of that pattern, and
+//! one, by NaN probes); the Jacobian is filled analytically
+//! ([`MultiRhs::jacobian`]; `Jv` products stay forward differences), and
 //! the Newton matrix I - cJ is solved directly on that pattern's structure
 //! ([`TreeLu`]), with faer's sparse LU as the fall-back.
 //! `max_step` is not a diffsol option: it is emulated by narrowing the
@@ -28,9 +29,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use diffsol::matrix::sparsity::MatrixSparsity;
 use diffsol::{
     BdfState, ConstantOp, Context, DiffsolError, FaerContext, FaerSparseLU, FaerSparseMat, FaerVec,
-    JacobianColoring, LaError, Matrix, MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeBuilder,
-    OdeEquations, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    OdeSolverStopReason, Op, ParameterisedOp, UnitCallable, Vector,
+    LaError, Matrix, MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations,
+    OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op,
+    ParameterisedOp, UnitCallable, Vector, VectorIndex,
 };
 use diffsol_la::{LinearOp, LinearSolver as LaLinearSolver};
 
@@ -85,15 +86,21 @@ fn err(e: impl Into<DiffsolError>) -> CoreError {
     CoreError(format!("diffsol: {}", e.into()))
 }
 
-/// The equations diffsol solves: the right-hand side, its pattern and
-/// colouring, and the events of the current run.
+/// The equations diffsol solves: the right-hand side, its pattern, and the
+/// events of the current run.
 struct Eqn {
     rhs: MultiRhs,
     events: Events,
     nstates: usize,
     y0: V,
     sparsity: <M as Matrix>::Sparsity,
-    coloring: JacobianColoring<M>,
+    /// Where each value of [`MultiRhs::jacobian`] (in `tree_jac_sparsity`
+    /// order) goes among a pattern matrix's values, and 0..nnz to read
+    /// them in order: diffsol's own colouring writes its values this way.
+    jac_dst: <V as Vector>::Index,
+    jac_src: <V as Vector>::Index,
+    /// The Jacobian's values, nnz long.
+    jac: RefCell<V>,
     ctx: C,
     /// Two state-sized buffers for `jv` and `roots`, so neither allocates.
     scratch: RefCell<[Vec<f64>; 2]>,
@@ -181,8 +188,13 @@ impl NonLinearOpJacobian for Rhs<'_> {
         let e = self.0;
         y.for_each_batch_host([x, v], |y, [x, v], _| e.jv(x, t, v, y));
     }
+    /// The analytic Jacobian; `y` has the pattern of `jacobian_sparsity`
+    /// (diffsol builds the matrix it hands in from it).
     fn jacobian_inplace(&self, x: &V, t: f64, y: &mut M) {
-        self.0.coloring.jacobian_inplace(self, x, t, y);
+        let e = self.0;
+        let mut vals = e.jac.borrow_mut();
+        vals.for_each_batch_host([x], |out, [x], _| e.rhs.jacobian(t, x, out));
+        y.set_data_with_indices(&e.jac_dst, &e.jac_src, &vals);
     }
     fn jacobian_sparsity(&self) -> Option<<M as Matrix>::Sparsity> {
         Some(self.0.sparsity.clone())
@@ -528,13 +540,15 @@ pub struct Integrator {
 }
 
 impl Integrator {
-    /// Builds the problem: the pattern of `rhs`'s own tree, its colouring
-    /// and the diffsol problem around them (tolerances are set per run).
+    /// Builds the problem: the pattern of `rhs`'s own tree, where the
+    /// analytic Jacobian's values go in it, and the diffsol problem around
+    /// them (tolerances are set per run).
     pub fn new(rhs: MultiRhs) -> Result<Self, CoreError> {
         let nstates = 7 * rhs.n();
         let (parent, child) = rhs.edges();
         let (rows, cols) = tree_jac_sparsity(rhs.n(), parent, child);
         let pairs: Vec<(usize, usize)> = rows.into_iter().zip(cols).collect();
+        let nnz = pairs.len();
         let ctx = C::default();
         let sparsity = <<M as Matrix>::Sparsity as MatrixSparsity<M>>::try_from_indices(
             nstates,
@@ -542,14 +556,25 @@ impl Integrator {
             pairs.clone(),
         )
         .map_err(err)?;
-        let coloring = JacobianColoring::new(&sparsity, &pairs, ctx);
+        let jac_dst = MatrixSparsity::<M>::get_index(&sparsity, &pairs, ctx);
+        let jac_src = <V as Vector>::Index::from_vec((0..nnz).collect(), ctx);
+        // get_index skips a pair it cannot find, and a short map would
+        // shift every later value one slot
+        if jac_dst.len() != nnz {
+            return Err(CoreError(format!(
+                "the pattern indexes {} of its {nnz} entries",
+                jac_dst.len()
+            )));
+        }
         let eqn = Eqn {
             rhs,
             events: Events::default(),
             nstates,
             y0: V::zeros(nstates, ctx),
             sparsity,
-            coloring,
+            jac_dst,
+            jac_src,
+            jac: RefCell::new(V::zeros(nnz, ctx)),
             ctx,
             scratch: RefCell::new([vec![0.0; nstates], vec![0.0; nstates]]),
         };
@@ -906,6 +931,153 @@ mod tests {
         assert!(!r.stopped);
         assert_eq!(r.t, free.t);
         assert!(r.t.windows(2).all(|w| w[1] - w[0] <= cap * (1.0 + 1e-9)));
+    }
+
+    /// The analytic Jacobian of `rhs` at (t, x), and the forward-difference
+    /// one this file used before it (diffsol's colouring over `jv`), as
+    /// (row, column, analytic, forward difference) per pattern entry.
+    fn both_jacobians(rhs: MultiRhs, x: &[f64], t: f64) -> Vec<(usize, usize, f64, f64)> {
+        let it = Integrator::new(rhs).unwrap();
+        let eqn = &it.problem.eqn;
+        let ctx = eqn.ctx;
+        let new = || M::new_from_sparsity(N, N, Some(eqn.sparsity.clone()), ctx);
+        let (mut exact, mut fd) = (new(), new());
+        let xv = V::from_slice(x, ctx);
+        Rhs(eqn).jacobian_inplace(&xv, t, &mut exact);
+        let pairs = MatrixSparsity::<M>::indices(&eqn.sparsity);
+        diffsol::JacobianColoring::new(&eqn.sparsity, &pairs, ctx).jacobian_inplace(
+            &Rhs(eqn),
+            &xv,
+            t,
+            &mut fd,
+        );
+        let (idx, a) = exact.triplet_iter();
+        let b: Vec<f64> = fd.triplet_iter().1.collect();
+        idx.zip(a)
+            .zip(b)
+            .map(|(((r, c), a), b)| (r, c, a, b))
+            .collect()
+    }
+
+    /// States off real trajectories: the chain relaxed for 4.9 ms, the
+    /// fastest-rising step of a spike under a depolarising soma step, and
+    /// the hyperpolarised soma 5 ms into a negative step.
+    fn trajectory_states() -> Vec<(&'static str, Vec<f64>)> {
+        let last = |r: &Run| row(r, r.t.len() - 1).to_vec();
+        let rest = run(
+            &mut Integrator::new(model()).unwrap(),
+            &state(),
+            4.9,
+            0.5,
+            &Events::default(),
+        );
+        let rise = run(
+            &mut Integrator::new(step_model(5e4)).unwrap(),
+            &state(),
+            10.0,
+            0.5,
+            &Events::default(),
+        );
+        let rhs = step_model(5e4);
+        let mut dx = vec![0.0; N];
+        let (mut fastest, mut upstroke) = (f64::MIN, Vec::new());
+        for i in 0..rise.t.len() {
+            rhs.eval(rise.t[i], row(&rise, i), &mut dx);
+            let slope = dx[..45].iter().copied().fold(f64::MIN, f64::max);
+            if slope > fastest {
+                (fastest, upstroke) = (slope, row(&rise, i).to_vec());
+            }
+        }
+        // an upstroke rather than the step's own charging (~6 mV/ms)
+        assert!(
+            fastest > 100.0,
+            "no spike to take a state from: {fastest} mV/ms"
+        );
+        let low = run(
+            &mut Integrator::new(step_model(-5000.0)).unwrap(),
+            &state(),
+            5.0,
+            0.5,
+            &Events::default(),
+        );
+        vec![
+            ("rest", last(&rest)),
+            ("mid-upstroke", upstroke),
+            ("hyperpolarised soma", last(&low)),
+        ]
+    }
+
+    #[test]
+    fn the_analytic_jacobian_matches_the_forward_differences_it_replaced() {
+        // The colouring's entry (r, c) is (f_r(x + h e_c) - f_r(x)) / h with
+        // h = 1e-7 (1 + max |x|) (~1e-5 here; f_r sees no other column of a
+        // colour), which is the mean of J_rc over [x, x + h e_c]: J_rc(x)
+        // plus a truncation h f'' / 2. That term is not small everywhere:
+        // for dV/dm ~ m^4 it is 3h / (2m), ~1e-4 at a resting m ~ 0.1. So
+        // the check is against the trapezoid (J(x) + J(x + h e_c)) / 2 of
+        // the analytic Jacobian, which a forward difference matches to
+        // O(h^2) (h^2 f''' / 12, ~(h / m)^2 ~ 1e-8 at worst) plus round-off
+        // ~eps |f_r| / h (~1e-8 at 500 mV/ms). Every entry is scaled by its
+        // row's largest analytic entry, so exact zeros (internodes without
+        // Na) and entries near an equilibrium do not fail on round-off.
+        let (mut worst_plain, mut worst) = (0.0_f64, (0.0_f64, "", "", (0, 0)));
+        for (label, x) in trajectory_states() {
+            let h = 1e-7 * (1.0 + x.iter().fold(0.0_f64, |a, b| a.max(b.abs())));
+            for (name, rhs, t) in crate::core::tests::stim_models() {
+                let (parent, child) = rhs.edges();
+                let (rows, cols) = tree_jac_sparsity(45, parent, child);
+                // the analytic Jacobian at x + h e_c, for every column c
+                let mut moved = vec![0.0; rows.len()];
+                let mut at_end = vec![0.0; rows.len()];
+                for c in 0..N {
+                    let mut y = x.clone();
+                    y[c] += h;
+                    rhs.jacobian(t, &y, &mut moved);
+                    for e in (0..rows.len()).filter(|&e| cols[e] == c) {
+                        at_end[e] = moved[e];
+                    }
+                }
+                let entries = both_jacobians(rhs, &x, t);
+                let mut scale = vec![0.0_f64; N];
+                for &(r, _, a, _) in &entries {
+                    scale[r] = scale[r].max(a.abs());
+                }
+                for (e, (r, c, a, fd)) in entries.into_iter().enumerate() {
+                    let s = scale[r].max(f64::MIN_POSITIVE);
+                    worst_plain = worst_plain.max((a - fd).abs() / s);
+                    let err = (0.5 * (a + at_end[e]) - fd).abs() / s;
+                    if err > worst.0 {
+                        worst = (err, name, label, (r, c));
+                    }
+                    assert!(
+                        err < 1e-7,
+                        "{name}, {label}: ({r}, {c}) {a} vs {fd} ({err:e})"
+                    );
+                }
+            }
+        }
+        eprintln!(
+            "forward differences: worst {worst_plain:e} against J(x), {:e} against \
+             the trapezoid ({}, {}, entry {:?})",
+            worst.0, worst.1, worst.2, worst.3
+        );
+    }
+
+    #[test]
+    fn the_analytic_jacobian_fills_exactly_the_tree_pattern() {
+        // diffsol's matrix has tree_jac_sparsity's entries, in its order,
+        // and the analytic values reach every one of them
+        let rhs = model();
+        let (parent, child) = rhs.edges();
+        let (rows, cols) = tree_jac_sparsity(45, parent, child);
+        let mut values = vec![0.0; rows.len()];
+        rhs.jacobian(5.1, &state(), &mut values);
+        let entries = both_jacobians(rhs, &state(), 5.1);
+        let got: Vec<(usize, usize)> = entries.iter().map(|&(r, c, ..)| (r, c)).collect();
+        let want: Vec<(usize, usize)> = rows.into_iter().zip(cols).collect();
+        assert_eq!(got, want);
+        let filled: Vec<f64> = entries.iter().map(|e| e.2).collect();
+        assert_eq!(filled, values);
     }
 
     /// A fixed matrix as the linear operator a solver is handed.

@@ -24,9 +24,11 @@ PROBE = (
     [
         "dendrites.py",
         "coincidence_window.py",
+        "event_protocols.py",
         "making_threshold_graphs.py",
         "somatic_spike.py",
         "resonance.py",
+        "na_availability.py",
         "phase0_harness.py",
     ],
 )
