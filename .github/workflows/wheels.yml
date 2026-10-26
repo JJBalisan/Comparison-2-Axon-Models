@@ -39,6 +39,16 @@ jobs:
           - {name: windows-x86_64, os: windows-2025-vs2026, target: x64}
     steps:
       - uses: actions/checkout@v5
+      # diffsol makes a clean build ~100 s (#109). rust-cache hashes
+      # rust/Cargo.lock into its key; the explicit key repeats it so a lock
+      # bump visibly misses, and the wheel name keeps the five targets apart.
+      # On Linux maturin builds in a manylinux container: only rust/target
+      # (mounted from the checkout) is reused there.
+      - uses: Swatinem/rust-cache@v2.9.3
+        with:
+          workspaces: rust
+          key: ${{ matrix.name }}-${{ hashFiles('rust/Cargo.lock') }}
+          cache-on-failure: true
       # rust/Cargo.toml builds pyo3 with abi3-py311 (a stable-ABI wheel,
       # tagged cp311-abi3), so one wheel per platform covers Python 3.11
       # and later (3.14 too): the smoke test below installs it on 3.11 and 3.13.

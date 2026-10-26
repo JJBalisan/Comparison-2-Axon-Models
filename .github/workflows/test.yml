@@ -79,13 +79,22 @@ jobs:
   # the Rust right-hand side (rust/, the `fast` extra): lint the crate, build
   # it, and run the suite with mode="fast" as the default. The jobs above
   # never install it, so they keep testing the pure-Python fallback.
+  # Windows and linux-aarch64 are here so native mode has run on every wheel
+  # target (#106). fmt and clippy do not depend on the platform, so only the
+  # first two entries run them; the diffsol-real prototype crate is built
+  # once, on ubuntu-24.04.
   pytest-fast:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-26]
+        include:
+          - {os: ubuntu-24.04, timeout: 15, lint: true, pytest-args: ""}
+          - {os: macos-26, timeout: 15, lint: true, pytest-args: ""}
+          # the slow script tests are OS-independent (see pytest-windows)
+          - {os: windows-2025-vs2026, timeout: 25, lint: false, pytest-args: '-m "not slow"'}
+          - {os: ubuntu-24.04-arm, timeout: 15, lint: false, pytest-args: ""}
     steps:
       - uses: actions/checkout@v5
       # the toolchain is pinned (rust/rust-toolchain.toml says why); the
@@ -94,22 +103,51 @@ jobs:
         with:
           toolchain: 1.99.1
           components: rustfmt, clippy
+      # diffsol makes a clean build ~100 s (#109). rust-cache hashes each
+      # workspace's Cargo.lock into its key (the explicit key repeats them
+      # so a lock bump visibly misses); uv sync below builds the extension
+      # in rust/target too. cache-on-failure keeps a red first run's build.
+      - uses: Swatinem/rust-cache@v2.9.3
+        with:
+          workspaces: |
+            rust
+            prototype/diffsol-real
+          key: ${{ hashFiles('rust/Cargo.lock', 'prototype/diffsol-real/Cargo.lock') }}
+          cache-on-failure: true
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - run: cargo fmt --check
+      - if: matrix.lint
+        run: cargo fmt --check
         working-directory: rust
-      - run: cargo clippy -- -D warnings
+      - if: matrix.lint
+        run: cargo clippy -- -D warnings
         working-directory: rust
       # the crate's own tests (the pyo3 extension-module feature is off in
       # Cargo.toml, so the test binary links; maturin turns it on for wheels)
       - run: cargo test
         working-directory: rust
+      # prototype/diffsol-real includes rust/src/core.rs by #[path]: build it
+      # here so a change to core.rs cannot silently break it (#113). Its
+      # dump_cases.py and compare.py stay run by hand (its README).
+      - name: prototype/diffsol-real fmt
+        if: matrix.os == 'ubuntu-24.04'
+        run: cargo fmt --check
+        working-directory: prototype/diffsol-real
+      - name: prototype/diffsol-real clippy
+        if: matrix.os == 'ubuntu-24.04'
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: prototype/diffsol-real
+      - name: prototype/diffsol-real test
+        if: matrix.os == 'ubuntu-24.04'
+        run: cargo test --release
+        working-directory: prototype/diffsol-real
       - run: uv sync --locked --extra fast
       # bit-identical to the numpy reference on this runner? The self-check
       # (differing states, states compared, largest relative difference),
       # then one threshold search in both modes
       - name: Self-check
+        shell: bash  # Windows defaults to pwsh
         run: |
           uv run python -W ignore -c "$SCRIPT" | tee self_check.txt
           echo "Rust RHS on ${{ matrix.os }}: $(cat self_check.txt)" >> "$GITHUB_STEP_SUMMARY"
@@ -119,6 +157,6 @@ jobs:
             assert _fast.available()
             th = {m: coincidence.threshold("multi", 0.1, model_kw={"mode": m}) for m in _fast.MODES}
             print(f"self_check {_fast.self_check(64)}; threshold(delay 0.1) {th}")
-      - run: uv run pytest -q
+      - run: uv run pytest -q ${{ matrix.pytest-args }}
         env:
           MPLBACKEND: Agg

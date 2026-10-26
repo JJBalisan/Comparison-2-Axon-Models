@@ -318,7 +318,13 @@ def assert_interp_same(got, want):
         # np.interp's fused multiply-add on arm64 is reproduced in Rust
         assert np.float64(got).tobytes() == np.float64(want).tobytes()
     else:
-        np.testing.assert_allclose(got, want, rtol=1e-15)
+        # Rust fuses slope * dx + y on every aarch64 target; numpy's build
+        # need not (linux-aarch64 differs): one rounding against two, so
+        # they can be an ulp of the operands apart. A relative tolerance
+        # alone fails when the sum cancels (got -0.04247429203836899, want
+        # -0.042474292038368944); the largest gap over these tables is
+        # 4.4e-16 absolute.
+        np.testing.assert_allclose(got, want, rtol=1e-15, atol=1e-15)
 
 
 @needs_ext
