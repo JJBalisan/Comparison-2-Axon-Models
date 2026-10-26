@@ -119,7 +119,7 @@ def test_somatic_spike_script(tmp_path):
 
 
 def test_resonance_script(tmp_path):
-    run_script("resonance.py", "--quick", "--out-dir", tmp_path, "--workers", 4)
+    run_script("resonance.py", "--quick", "--out-dir", tmp_path)
     res = json.loads((tmp_path / "resonance.json").read_text())
     assert (tmp_path / "resonance.png").stat().st_size > 0
 

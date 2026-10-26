@@ -169,7 +169,9 @@ class Membrane:
 
     Attributes:
         key: Every setting membrane() was built from, part of the
-            pre-stimulus cache key.
+            pre-stimulus cache key. Not klt_to_leak: that replaces the
+            morphology (morph.key, which morph_key also carries and every
+            cache that holds `key` holds too), so the keys stay distinct.
         morph_key: The morphology's key.
         morph: The morphology these arrays are for.
         g_na: Na density per compartment [nS/um^2].
@@ -603,6 +605,10 @@ def _klt_to_leak(
     Returns:
         (zero gKLT, a copy of morph with the larger leak and its own key,
         the new leak reversal).
+
+    Raises:
+        ValueError: For "slope", if the slope conductance of KLT at v0 is
+            not positive (v0 well below E_K).
     """
     V = np.full(morph.n, v0)
 
@@ -615,6 +621,11 @@ def _klt_to_leak(
     else:
         h = 1e-3  # central difference [mV]
         g_eff = (current(V + h) - current(V - h)) / (2 * h)
+        if ((g_klt > 0) & (g_eff <= 0)).any():
+            raise ValueError(
+                f"klt_to_leak='slope' needs a positive KLT slope conductance "
+                f"at v0={v0} mV, which it lacks below about E_K ({V_K} mV)"
+            )
         # compartments without KLT have nothing to move (g_eff == 0)
         e = v0 - current(V) / np.where(g_eff > 0, g_eff, 1.0)
     g_lk = morph.g_lk + g_eff
@@ -682,8 +693,9 @@ def membrane(
 
     Raises:
         ValueError: If dendrite_klt_scale is set for a morphology
-            without dendrites, or klt_to_leak is not None, "chord" or
-            "slope".
+            without dendrites, klt_to_leak is not None, "chord" or
+            "slope", or "slope" at a v0 where KLT has no positive slope
+            conductance.
     """
     morph = morph or LUMPED
     if klt_to_leak not in (None, "chord", "slope"):

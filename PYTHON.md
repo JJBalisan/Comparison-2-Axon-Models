@@ -550,7 +550,7 @@ Values are for the Python port.
 | Somatic spike, from inflection (100 ms step) | 7.4 / 13.3 / 18.2 mV at 1.5× / 2× / 3× rheobase | 17 ± 2 mV mature, 5–15 mV near threshold, graded |
 | Subthreshold resonance: peak of the soma impedance, small rectified sine (`resonance.py`, #83) | 363 Hz, Q 2.79 (2-compartment: 354 Hz, Q 2.75) | 242 Hz, Q 1.88 (Mikiel-Hunter et al. 2016, [doi](https://doi.org/10.1371/journal.pcbi.1005166); their model at 35 °C, Q over the input resistance) |
 | Spike resonance: sine frequency with the lowest firing threshold | 428 Hz (2-compartment: 429 Hz) | 285 Hz (same model) |
-| EPSG-train threshold minimum: rate with the lowest threshold | 426 Hz (2-compartment: 420 Hz) | 317 Hz (same model, EPSC train) |
+| EPSG-train threshold minimum: rate with the lowest threshold | 430 Hz (2-compartment: 420 Hz) | 317 Hz (same model, EPSC train) |
 
 The initiation site is read from a finished run by `msoaxon.initiation`. It
 cannot use a fraction of each compartment's own peak: the input enters at the
@@ -717,12 +717,16 @@ width against a resonance, a mismatch of measure.
   half-wave sine is I/π + (I/2) sin ωt plus even harmonics, so over whole cycles
   the response at the fundamental, divided by the stimulus's own, is the
   impedance (within about 1% from 5 to 80 pA, and from 30 to 100 ms of settling
-  and 4 to 20 cycles). Q is the peak over |Z| at 20 Hz, not over the DC
-  resistance the paper uses.
+  and 4 to 20 cycles). Q is the peak over |Z| at 20 Hz, not over the input
+  resistance the paper uses; |Z| at 20 Hz is 3% below the step resistance
+  in the table for the 45-compartment model (2.41 against 2.48 MΩ, which raises
+  Q by 3%) and 3% above it for the 2-compartment one, so the choice does not
+  explain 2.79 against the paper's 1.88.
 - **Spike:** the smallest sine train (50 ms, peak current) that makes node 3 rise
   10 mV above the soma, over frequency.
 - **EPSG train:** the smallest peak conductance of a train of EPSGs at the soma
-  (an `Events` list, 50 ms) at each rate.
+  (an `Events` list: every event that starts within 50 ms, so the train lasts up
+  to 50 ms) at each rate.
 - **Resonance** means an interior peak (|Z|) or dip (threshold) more than 5%
   from the value at the lowest frequency (`resonance.MIN_RATIO`); the minimum is
   a parabola through the five points around the best, after a second, finer
@@ -731,8 +735,8 @@ width against a resonance, a mismatch of measure.
 | | R_in (steady) | Subthreshold resonance, Q | Spike resonance | EPSG-train minimum |
 |---|---|---|---|---|
 | Mikiel-Hunter 2016 (model, 35 °C) | | 242 Hz, 1.88 | 285 Hz | 317 Hz |
-| 45-compartment (`msoAxon.m`) | 2.5 MΩ | 363 Hz, 2.79 | 428 Hz | 426 Hz |
-| 45-compartment, rest rebalanced | 2.4 MΩ | 367 Hz, 2.82 | 439 Hz | 451 Hz |
+| 45-compartment (`msoAxon.m`) | 2.5 MΩ | 363 Hz, 2.79 | 428 Hz | 430 Hz |
+| 45-compartment, rest rebalanced | 2.4 MΩ | 367 Hz, 2.82 | 439 Hz | 446 Hz |
 | 45-compartment, KLT frozen at its resting conductance (`klt_to_leak="chord"`) | 9.1 MΩ | none (low-pass) | none (rises with frequency) | none (falls to 800 Hz) |
 | 45-compartment, KLT replaced by its slope conductance (`klt_to_leak="slope"`) | 2.6 MΩ | none (Q 1.00) | none (2% dip at 154 Hz) | none (flat) |
 | 2-compartment (`TwoCpt.m`) | 2.4 MΩ | 354 Hz, 2.75 | 429 Hz | 420 Hz |
@@ -749,23 +753,23 @@ What it shows:
   conductance, which keeps the steady resistance (2.6 MΩ) but is not a
   conductance the channel ever has at rest. The result is the same for both.
 - **The frequencies are not.** The model resonates 1.3–1.5× higher than the
-  paper's: 363 against 242 Hz, 428 against 285 Hz, 426 against 317 Hz. The
+  paper's: 363 against 242 Hz, 428 against 285 Hz, 430 against 317 Hz. The
   spacing differs too: the paper's three rise from 242 to 317 Hz, here the spike
-  and EPSG minima coincide near 427 Hz. The old row's 400–500 Hz was closer to
+  and EPSG minima coincide near 430 Hz. The old row's 400–500 Hz was closer to
   the sine-train number only by coincidence of measures.
 - **The two models agree within 3%** on all three, so the resonance is the
   somatic KLT, not the axon's structure.
 - **The minima are broad:** the threshold stays within 1% of its minimum over
-  420–450 Hz (sine) and 410–445 Hz (EPSG), so the arms' differences of 10–25 Hz
+  420–450 Hz (sine) and 430–450 Hz (EPSG), so the arms' differences of 11–16 Hz
   (default against rebalanced) are inside the flat bottom.
 - **The EPSG-train minimum is shallow:** 12–14% below the threshold at 100 Hz
   (which is the single-event one), against the paper's 41.5%; the sine
   threshold at 100 Hz is 2.8× its minimum. Away from the dip a
   train needs the single-event threshold, so the membrane does not sum EPSGs at
   rates that do not match its ring.
-- **Train length:** from 50 to 500 ms (the paper's) thresholds fall 2–6%; the
-  minima move from 428 to 424 Hz (sine) and 427 to 424 Hz (EPSG), measured in
-  native mode.
+- **Train length:** from 50 to 500 ms (the paper's) the 45-compartment thresholds
+  fall 2–6% (the 2-compartment ones do not move) and its minima move from 428 to
+  424 Hz (sine) and 430 to 424 Hz (EPSG), measured in native mode.
 - **Not done:** `two_cpt` takes no membrane (#79), so the substitution is only
   for the 45-compartment model, and the paper's dV/dt criterion, hyperpolarising
   half-cycle scaling (0.5) and 0.3 ms EPSC are not reproduced; the repo's

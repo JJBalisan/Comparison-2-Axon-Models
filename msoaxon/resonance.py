@@ -32,6 +32,7 @@ EPSG train has the repo's EPSG (rise and decay 0.1 and 0.18 ms), not the
 paper's 0.3 ms alpha.
 """
 
+import math
 from collections.abc import Callable
 from concurrent import futures
 from typing import Any
@@ -95,6 +96,27 @@ def _fundamental(phase: np.ndarray, y: np.ndarray, detrend: int = 2) -> complex:
     return complex(a, b)
 
 
+def sample_times(
+    f: float, settle: float = SETTLE, cycles: int = CYCLES
+) -> np.ndarray:
+    """Returns the times of impedance()'s analysed samples [ms].
+
+    STEPS_PER_CYCLE per cycle for `cycles` whole cycles from START +
+    settle, exactly cycles * STEPS_PER_CYCLE of them (np.arange over a
+    float step can return one more).
+
+    Args:
+        f: Frequency [Hz].
+        settle: Time from the onset to the window [ms].
+        cycles: Whole cycles in the window.
+
+    Returns:
+        The sample times, cycles * STEPS_PER_CYCLE of them.
+    """
+    step = 1000.0 / f / STEPS_PER_CYCLE
+    return START + settle + np.arange(cycles * STEPS_PER_CYCLE) * step
+
+
 def impedance(
     model: str,
     f: float,
@@ -156,7 +178,7 @@ def impedance(
         synaptic.SynParams(t_end=t_end, f=f),
         **kw,
     )
-    g = np.arange(t0, t_end, period / STEPS_PER_CYCLE)
+    g = sample_times(f, settle, cycles)
     phase = 2 * np.pi * f * (g - START) / 1000.0
     current = amp * np.maximum(np.sin(phase), 0.0)
     # mV / pA = GOhm
@@ -233,15 +255,17 @@ def epsg_train(rate: float, dur: float = DUR, node: int = 1) -> tuple:
 
     Args:
         rate: Events per second.
-        dur: Train length [ms]; the train has round(rate * dur / 1000)
-            events, at least one.
+        dur: Train length [ms]: the train has every event that starts
+            before it, ceil(rate * dur / 1000) of them, at least one, so
+            it lasts up to dur (not rounded to the nearest count, which
+            would make the length jump with the rate).
         node: The compartment every event enters, 1-indexed.
 
     Returns:
         A tuple of synaptic.Event, each of peak 1 nS (the `I` of the
         run scales them).
     """
-    n = max(1, round(rate * dur / 1000.0))
+    n = max(1, math.ceil(rate * dur / 1000.0 - 1e-9))
     return tuple(
         synaptic.Event(START + k * 1000.0 / rate, node, 1.0) for k in range(n)
     )
@@ -367,14 +391,16 @@ def scan(
         executor: An existing process pool to use instead.
         key: Maps fn's result to the number being extremised (abs for
             the impedance).
-        n_fine: Points of the second pass (at least 3).
+        n_fine: Points of the second pass, between the extremum's
+            neighbours; the middle one is already known, so 1 skips it.
 
     Returns:
         dict(f_best, value, at_edge, freqs, values): the extremum's
         frequency (the vertex) and value there (the best run's), whether
         it sits at an end of `freqs` (then f_best is that end and no
         second pass ran), and every run, sorted by frequency (values
-        are fn's results).
+        are fn's results). If no run has a finite key (nothing fired
+        at any frequency), f_best is nan and at_edge True.
     """
     kw = kw or {}
     freqs = np.asarray(freqs, dtype=float)
@@ -389,6 +415,14 @@ def scan(
 
     vals = run(freqs)
     y = numbers(vals)
+    if np.isnan(y).all():  # nothing fired anywhere, say
+        return {
+            "f_best": float("nan"),
+            "value": vals[0],
+            "at_edge": True,
+            "freqs": [float(f) for f in freqs],
+            "values": vals,
+        }
     pick = np.nanargmax if maximum else np.nanargmin
     i = int(pick(y))
     at_edge = i in (0, len(freqs) - 1)
@@ -419,11 +453,14 @@ def _dip(r: dict[str, Any]) -> dict[str, Any]:
     """Returns scan's result for a threshold curve, with its dip."""
     th = [float(v) for v in r["values"]]
     dip = th[0] / float(r["value"])
+    # a lowest-frequency threshold that is inf (nothing fired up to the
+    # ceiling) is no reference to measure a dip against
+    ok = math.isfinite(dip) and not r["at_edge"]
     return {
         "f_best": r["f_best"],
         "threshold": float(r["value"]),
         "dip": dip,
-        "resonant": not r["at_edge"] and dip > MIN_RATIO,
+        "resonant": ok and dip > MIN_RATIO,
         "at_edge": r["at_edge"],
         "freqs": r["freqs"],
         "thresholds": th,
@@ -515,7 +552,7 @@ def spike_resonance(
         thresholds): the frequency of the lowest threshold (a parabola's
         vertex), that threshold [pA], the threshold at the lowest
         frequency over it (the dip), whether the minimum is interior
-        with a dip above MIN_RATIO, and the curve.
+        with a finite dip above MIN_RATIO, and the curve.
     """
     r = scan(
         sine_threshold,
@@ -555,7 +592,7 @@ def epsg_resonance(
         thresholds): the rate of the lowest threshold (a parabola's
         vertex), that threshold [nS per event], the threshold at the
         lowest rate over it (the dip), whether the minimum is interior
-        with a dip above MIN_RATIO, and the curve.
+        with a finite dip above MIN_RATIO, and the curve.
     """
     r = scan(
         epsg_train_threshold,

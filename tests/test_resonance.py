@@ -13,8 +13,21 @@ COARSE = (20.0, 200.0, 350.0, 500.0, 700.0)
 # --- the measurement ---------------------------------------------------------
 
 
+def _production_phase(f=350.0):
+    g = R.sample_times(f)
+    return 2 * np.pi * f * (g - R.START) / 1000.0
+
+
+def test_sample_times_hold_whole_cycles_at_every_frequency():
+    for f in (*R.IMPEDANCE_FREQS, *np.arange(20.0, 800.0, 3.7)):
+        g = R.sample_times(f)
+        assert len(g) == R.CYCLES * R.STEPS_PER_CYCLE  # not one more
+        assert g[0] == R.START + R.SETTLE
+        assert g[-1] < g[0] + R.CYCLES * 1000.0 / f
+
+
 def test_fundamental_recovers_amplitude_and_phase_through_a_drift():
-    phase = np.linspace(0, 2 * np.pi * 10, 640, endpoint=False)
+    phase = _production_phase()
     x = np.linspace(-1, 1, len(phase))
     y = 3 * np.sin(phase + 0.4) + 1.5 + 0.7 * x - 0.4 * x**2
     c = R._fundamental(phase, y)
@@ -23,9 +36,10 @@ def test_fundamental_recovers_amplitude_and_phase_through_a_drift():
 
 
 def test_half_wave_sine_has_a_fundamental_of_half_its_peak():
-    phase = np.linspace(0, 2 * np.pi * 10, 640, endpoint=False)
-    c = R._fundamental(phase, 20 * np.maximum(np.sin(phase), 0))
-    assert c == pytest.approx(10.0, abs=0.02)  # the detrend leaks a little
+    for f in (20.0, 350.0, 799.0):
+        phase = _production_phase(f)
+        c = R._fundamental(phase, 20 * np.maximum(np.sin(phase), 0))
+        assert c == pytest.approx(10.0, abs=0.02)  # the detrend leaks a little
 
 
 def test_vertex_of_a_parabola():
@@ -90,6 +104,15 @@ def test_epsg_train_has_one_event_per_period():
     assert {e.node for e in R.epsg_train(100.0, node=2)} == {2}
 
 
+def test_epsg_train_lasts_up_to_dur_whatever_the_rate():
+    for rate in np.arange(100.0, 801.0, 12.5):
+        ev = R.epsg_train(rate)
+        last = ev[-1].t - R.START
+        assert last < R.DUR  # every event that starts before dur is in
+        assert last + 1000.0 / rate >= R.DUR  # and no later one would be
+    assert len(R.epsg_train(450.0)) == 23  # 22.5 events: not rounded down
+
+
 def test_sine_threshold_is_a_minimum_in_the_middle_of_the_range():
     kw = {"rel_tol": 1e-2, "dur": 40.0}
     th = [R.sine_threshold("two", f, **kw) for f in (100.0, 350.0, 800.0)]
@@ -112,6 +135,21 @@ def test_threshold_functions_check_their_arguments():
         R.sine_threshold("two", 300.0, dur=0.0)
     with pytest.raises(ValueError, match="rate"):
         R.epsg_train_threshold("two", -1.0)
+
+
+def test_a_curve_that_never_fires_is_not_resonant():
+    freqs = (1.0, 2.0, 3.0)
+    never = R.scan(
+        lambda model, f: float("inf"), "two", freqs, False, workers=1
+    )
+    assert never["at_edge"]
+    assert np.isnan(never["f_best"])
+    assert not R._dip(never)["resonant"]
+    # nothing fires at the lowest frequency up to the ceiling: no reference
+    th = [float("inf"), 5.0, 9.0]
+    r = R.scan(lambda model, f: th[int(f) - 1], "two", freqs, False, workers=1)
+    assert r["f_best"] == 2.0
+    assert not R._dip(r)["resonant"]
 
 
 def test_scan_reports_an_extremum_at_the_edge():
@@ -222,6 +260,13 @@ def test_klt_to_leak_with_dendrites():
     assert m.morph.n == d.n
     assert not m.g_klt.any()
     assert (m.morph.g_lk[multi.N :] > d.g_lk[multi.N :]).all()
+
+
+def test_the_slope_leak_needs_a_positive_slope_conductance():
+    multi.membrane(-90.0, klt_to_leak="slope")  # at E_K: still positive
+    with pytest.raises(ValueError, match="slope conductance"):
+        multi.membrane(-100.0, klt_to_leak="slope")
+    multi.membrane(-100.0, klt_to_leak="chord")  # the chord has no such limit
 
 
 def test_klt_to_leak_rejects_unknown_kinds():

@@ -43,9 +43,9 @@ QUICK_ARMS = (
 )
 QUICK: dict[str, dict[str, Any]] = {
     "zap": {"freqs": (20.0, 200.0, 350.0, 500.0), "n_fine": 3},
-    "sine": {"freqs": (250.0, 450.0, 650.0), "n_fine": 3},
-    "epsg": {"rates": (300.0, 400.0, 500.0), "n_fine": 3},
-    "thresholds": {"dur": 20.0, "rel_tol": 2e-2},
+    "sine": {"freqs": (250.0, 450.0, 650.0), "n_fine": 1},
+    "epsg": {"rates": (300.0, 400.0, 500.0), "n_fine": 1},
+    "thresholds": {"dur": 20.0, "rel_tol": 3e-2},
 }
 
 
@@ -208,7 +208,7 @@ def main() -> None:
     ap.add_argument(
         "--quick",
         action="store_true",
-        help="coarse grids, 20 ms trains and 2%% tolerance, three models: "
+        help="coarse grids, 20 ms trains and 3%% tolerance, three models: "
         "a smoke test, not results",
     )
     a = ap.parse_args()
