@@ -2,8 +2,8 @@
 //!
 //! No pyo3 here: `lib.rs` is the thin Python binding. A Rust integrator
 //! builds a [`MultiRhs`] from [`Params`] and a [`StimSpec`], calls
-//! [`MultiRhs::eval`] and asks [`chain_jac_sparsity`] for the Jacobian
-//! pattern.
+//! [`MultiRhs::eval`], asks [`tree_jac_sparsity`] for the Jacobian pattern
+//! and [`MultiRhs::jacobian`] for its values.
 //!
 //! A port of `msoaxon.multi._rhs` (with `external_current`,
 //! `bilateral_current`, `events_current`, `axial_current` and the gating
@@ -391,6 +391,92 @@ impl Stim {
             }
         };
         total[k] += iext;
+    }
+
+    /// Calls `f(k, d)` with d the derivative, with respect to V[k], of the
+    /// current density [`add_to`](Self::add_to) adds to compartment k, under
+    /// the same on/off conditions; once per conductance input (so twice for
+    /// a compartment two inputs share), never for a current that does not
+    /// depend on V (ramp, ramp2, step, sine).
+    fn slopes(&self, t: f64, sa: &[f64], mut f: impl FnMut(usize, f64)) {
+        match *self {
+            Stim::None
+            | Stim::Ramp { .. }
+            | Stim::Ramp2 { .. }
+            | Stim::Step { .. }
+            | Stim::Sine { .. } => {}
+            Stim::Synaptic {
+                start,
+                stop,
+                k,
+                ref table,
+                diff,
+                ..
+            } => {
+                if start < t && t <= stop {
+                    let g = match diff {
+                        None => table.interp(t),
+                        Some(d) => table.interp(t) + table.interp(t + d),
+                    };
+                    // g (V - vsyn) / sa[0]
+                    f(k, g / sa[0]);
+                }
+            }
+            Stim::Epsg {
+                start,
+                stop,
+                amp,
+                k,
+                w,
+            } => {
+                let te = t - start;
+                if start < t && t <= stop {
+                    let on = if te >= 0.0 { 1.0 } else { 0.0 };
+                    // amp (0 - V) on g(te) / -sa[k]
+                    f(k, amp * on * w.unitary(te) / sa[k]);
+                }
+            }
+            Stim::EpsgPair {
+                start,
+                td,
+                amp,
+                k,
+                w,
+            } => {
+                let te = t - start;
+                let on0 = if te >= 0.0 { 1.0 } else { 0.0 };
+                let on1 = if te >= td { 1.0 } else { 0.0 };
+                let wave = on0 * w.unitary(te) + on1 * w.unitary(te - td);
+                f(k, amp * wave / sa[k]);
+            }
+            Stim::Bilateral {
+                start,
+                td,
+                amp,
+                a,
+                b,
+                w,
+            } => {
+                let te = t - start;
+                let on0 = if te >= 0.0 { 1.0 } else { 0.0 };
+                let on1 = if te >= td { 1.0 } else { 0.0 };
+                f(a, amp * on0 * w.unitary(te) / sa[a]);
+                f(b, amp * on1 * w.unitary(te - td) / sa[b]);
+            }
+            Stim::Events {
+                ref onset,
+                ref k,
+                ref scale_g,
+                ref w,
+                ..
+            } => {
+                // -(scale g (e_rev - V) g(t - onset)) / sa[k], per event
+                for e in 0..onset.len() {
+                    let ke = k[e];
+                    f(ke, scale_g[e] * w[e].unitary(t - onset[e]) / sa[ke]);
+                }
+            }
+        }
     }
 }
 
@@ -854,6 +940,145 @@ impl MultiRhs {
             };
         }
     }
+
+    /// Writes the exact Jacobian of [`eval`](Self::eval) at (t, x) into
+    /// `out`: one value per entry of [`tree_jac_sparsity`] of this model's
+    /// edges, in that order (so `out` has that pattern's length).
+    ///
+    /// dV_i = (-I_i + axial_i 1e9 / sa_i) / cap_i, so dV_i/dV_i holds every
+    /// conductance (leak, the channels' g times open fraction, the
+    /// stimulus's dI/dV) and the axial diagonal, dV_i/dV_j of an edge its
+    /// g_ax (scaled by row i's sa and cap), and dV_i/d(gate) the open
+    /// fraction's derivative times the driving force. A gate row is
+    /// (x_inf'(V) - (x_inf - x) tau'(V) / tau) / tau and -1 / tau, or zero
+    /// where that gate is frozen. The values are those of `eval`'s
+    /// expressions, not its float order: only `eval` is bit-pinned.
+    pub fn jacobian(&self, t: f64, x: &[f64], out: &mut [f64]) {
+        let n = self.n;
+        let c = &self.gating;
+        let (v, rest) = x.split_at(n);
+        let (m, rest) = rest.split_at(n);
+        let (h, rest) = rest.split_at(n);
+        let (p, rest) = rest.split_at(n);
+        let (w, rest) = rest.split_at(n);
+        let (z, a) = rest.split_at(n);
+
+        // where tree_jac_sparsity puts each entry: V column j starts at
+        // start[j] with its V rows (nbrs[j]) then its six gate rows; gate
+        // g's column of compartment j is the pair (dV_j, gate) at
+        // gates + 2 (g n + j), g counted from 0
+        let nbrs = tree_neighbours(n, &self.parent, &self.child);
+        let mut start = Vec::with_capacity(n);
+        let mut gates = 0;
+        for nb in &nbrs {
+            start.push(gates);
+            gates += nb.len() + 6;
+        }
+        assert_eq!(out.len(), gates + 12 * n, "out is not the pattern's length");
+        let at = |r: usize, j: usize| start[j] + nbrs[j].binary_search(&r).unwrap();
+        out.fill(0.0);
+
+        let [act_m, act_h, act_p, act_w, act_z, act_a] = self.active;
+        for i in 0..n {
+            let (vi, cap) = (v[i], self.cap[i]);
+            let m3 = m[i] * m[i] * m[i];
+            let w3 = w[i] * w[i] * w[i];
+            let na_h = c.na_open_h * h[i] + c.na_open_floor;
+            let g_na = self.g_na[i] * m3 * m[i] * na_h;
+            let g_klt = self.g_klt[i] * w3 * w[i] * z[i];
+            let g = g_na + self.g_kht[i] * p[i] + g_klt + self.g_h[i] * a[i] + self.g_lk[i];
+            out[at(i, i)] -= g / cap;
+
+            // d I_i / d(gate), and d(gate)/dV, d(gate)/d(gate) of the
+            // gate's relaxation, gate by gate in state order
+            let (e_na, e_k, e_h) = (vi - c.v_na, vi - c.v_k, vi - c.v_h);
+            let di = [
+                self.g_na[i] * 4.0 * m3 * na_h * e_na,
+                self.g_na[i] * m3 * m[i] * c.na_open_h * e_na,
+                self.g_kht[i] * e_k,
+                self.g_klt[i] * 4.0 * w3 * z[i] * e_k,
+                self.g_klt[i] * w3 * w[i] * e_k,
+                self.g_h[i] * e_h,
+            ];
+            let rows = [
+                act_m.then(|| {
+                    let (inf, ds) = logistic((vi + c.minf_v) / c.minf_k);
+                    let (q, dq) = logistic((c.taum_v - vi) / c.taum_k);
+                    let tau = (c.taum_a + c.taum_b * q) / c.taum_div;
+                    let d_tau = c.taum_b * (-dq / c.taum_k) / c.taum_div;
+                    relax(inf, ds / c.minf_k, m[i], tau, d_tau)
+                }),
+                act_h.then(|| {
+                    let (inf, ds) = logistic((vi + self.na_vhalf[i]) / c.hinf_k);
+                    let (q, dq) = logistic((c.tauh_v - vi) / c.tauh_k);
+                    let tau = (c.tauh_a + c.tauh_b * q) / c.tauh_div;
+                    let d_tau = c.tauh_b * (-dq / c.tauh_k) / c.tauh_div;
+                    relax(inf, ds / c.hinf_k, h[i], tau, d_tau)
+                }),
+                act_p.then(|| {
+                    let (inf, ds) = logistic(-(vi + c.pinf_v) / c.pinf_k);
+                    let s = vi + c.taup_v;
+                    let (e1, e2) = ((s / c.taup_ka).exp(), (-s / c.taup_kb).exp());
+                    let d = c.taup_a * e1 + c.taup_b * e2;
+                    let d_d = c.taup_a * e1 / c.taup_ka - c.taup_b * e2 / c.taup_kb;
+                    let tau = c.taup_temp * (c.taup_num / d + c.taup_c);
+                    let d_tau = -c.taup_temp * c.taup_num * d_d / (d * d);
+                    relax(inf, -ds / c.pinf_k, p[i], tau, d_tau)
+                }),
+                act_w.then(|| {
+                    let (inf, ds) = logistic((vi + c.winf_v) / c.winf_k);
+                    let s = vi + c.tauw_v;
+                    let (e1, e2) = ((s / c.tauw_ka).exp(), (-s / c.tauw_kb).exp());
+                    let d = c.tauw_a * e1 + c.tauw_b * e2;
+                    let d_d = c.tauw_a * e1 / c.tauw_ka - c.tauw_b * e2 / c.tauw_kb;
+                    let tau = c.tauw_num / d + c.tauw_c;
+                    relax(inf, ds / c.winf_k, w[i], tau, -c.tauw_num * d_d / (d * d))
+                }),
+                act_z.then(|| {
+                    let (s, ds) = logistic((vi + c.zinf_v) / c.zinf_k);
+                    let inf = (1.0 - c.zinf_floor) * s + c.zinf_floor;
+                    let d_inf = (1.0 - c.zinf_floor) * ds / c.zinf_k;
+                    let e1 = ((vi + c.tauz_va) / c.tauz_ka).exp();
+                    let e2 = (-(vi + c.tauz_vb) / c.tauz_kb).exp();
+                    let d = c.tauz_a * e1 + e2;
+                    let d_d = c.tauz_a * e1 / c.tauz_ka - e2 / c.tauz_kb;
+                    let tau = c.tauz_num / d + c.tauz_c;
+                    relax(inf, d_inf, z[i], tau, -c.tauz_num * d_d / (d * d))
+                }),
+                act_a.then(|| {
+                    let (inf, ds) = logistic(c.ainf_k * (vi + c.ainf_v));
+                    let s = vi + c.taua_v;
+                    let bump = c.taua_a * (-(s * s) / c.taua_k).exp();
+                    let tau = c.taua_temp * (c.taua_c + bump);
+                    let d_tau = c.taua_temp * bump * (-2.0 * s / c.taua_k);
+                    relax(inf, ds * c.ainf_k, a[i], tau, d_tau)
+                }),
+            ];
+            let gate_rows = start[i] + nbrs[i].len();
+            for (g, (di, row)) in di.into_iter().zip(rows).enumerate() {
+                let col = gates + 2 * (g * n + i);
+                out[col] = -di / cap;
+                if let Some((dv, dx)) = row {
+                    out[gate_rows + g] = dv;
+                    out[col + 1] = dx;
+                }
+            }
+        }
+        self.stim
+            .slopes(t, &self.sa, |k, s| out[at(k, k)] -= s / self.cap[k]);
+
+        // axial_i = sum over i's edges of +-g_ax (V_parent - V_child): an
+        // edge adds -g_ax to d axial_r / dV_r and +g_ax to d axial_r / dV_o
+        // at both its ends r (o the other end)
+        for (e, (&pa, &ch)) in self.parent.iter().zip(&self.child).enumerate() {
+            let g = self.g_ax[e] * 1e9;
+            for (r, o) in [(pa, ch), (ch, pa)] {
+                let gr = g / self.sa[r] / self.cap[r];
+                out[at(r, r)] -= gr;
+                out[at(r, o)] += gr;
+            }
+        }
+    }
 }
 
 /// The Jacobian pattern of an unbranched chain of `n` compartments, as
@@ -872,15 +1097,8 @@ pub fn chain_jac_sparsity(n: usize) -> (Vec<usize>, Vec<usize>) {
 /// column-major (CSC) order: columns ascending, rows ascending within a
 /// column, each entry once.
 pub fn tree_jac_sparsity(n: usize, parent: &[usize], child: &[usize]) -> (Vec<usize>, Vec<usize>) {
-    let mut nbrs: Vec<Vec<usize>> = (0..n).map(|i| vec![i]).collect();
-    for (&p, &c) in parent.iter().zip(child) {
-        nbrs[p].push(c);
-        nbrs[c].push(p);
-    }
     let (mut rows, mut cols) = (Vec::new(), Vec::new());
-    for (j, nb) in nbrs.iter_mut().enumerate() {
-        nb.sort_unstable();
-        nb.dedup();
+    for (j, nb) in tree_neighbours(n, parent, child).iter().enumerate() {
         // column j of V: the V rows it couples to, then its six gates
         for &r in nb.iter() {
             rows.push(r);
@@ -899,6 +1117,40 @@ pub fn tree_jac_sparsity(n: usize, parent: &[usize], child: &[usize]) -> (Vec<us
         }
     }
     (rows, cols)
+}
+
+/// Per compartment, itself and every compartment it shares an edge with,
+/// ascending and each once: the V rows of its V column in
+/// [`tree_jac_sparsity`].
+fn tree_neighbours(n: usize, parent: &[usize], child: &[usize]) -> Vec<Vec<usize>> {
+    let mut nbrs: Vec<Vec<usize>> = (0..n).map(|i| vec![i]).collect();
+    for (&p, &c) in parent.iter().zip(child) {
+        nbrs[p].push(c);
+        nbrs[c].push(p);
+    }
+    for nb in &mut nbrs {
+        nb.sort_unstable();
+        nb.dedup();
+    }
+    nbrs
+}
+
+/// A logistic 1 / (1 + exp(u)) and its derivative with respect to u.
+///
+/// The derivative is -1 / (2 + e + 1 / e) with e = exp(u): no 1 - s to
+/// cancel and no inf * 0, so it is accurate (and -0.0, not NaN) at both
+/// saturated ends.
+#[inline]
+fn logistic(u: f64) -> (f64, f64) {
+    let e = u.exp();
+    (1.0 / (1.0 + e), -1.0 / (2.0 + e + 1.0 / e))
+}
+
+/// d/dV and d/dx of a gate's (x_inf(V) - x) / tau(V), from x_inf, tau and
+/// their derivatives with respect to V.
+#[inline]
+fn relax(inf: f64, d_inf: f64, x: f64, tau: f64, d_tau: f64) -> (f64, f64) {
+    ((d_inf - (inf - x) / tau * d_tau) / tau, -1.0 / tau)
 }
 
 #[cfg(test)]
@@ -1132,7 +1384,7 @@ pub(crate) mod tests {
     }
 
     /// The `Params` of [`model`], to build a model through `MultiRhs::new`.
-    fn model_params() -> Params {
+    pub(crate) fn model_params() -> Params {
         let base = model();
         Params {
             g_na: base.g_na,
@@ -1189,6 +1441,197 @@ pub(crate) mod tests {
                 }
             })
             .collect()
+    }
+
+    /// One model per stimulus type (two for the bilateral input, the second
+    /// on one compartment), and an EPSG pair with three gates frozen, each
+    /// with a time inside its stimulus and away from its switches.
+    pub(crate) fn stim_models() -> Vec<(&'static str, MultiRhs, f64)> {
+        let spec = |stim_type: &str, start: f64, stop: f64, amp: f64, k: i64, k2: i64| StimSpec {
+            stim_type: stim_type.to_string(),
+            start,
+            stop,
+            amp,
+            k,
+            k2,
+            f: 100.0,
+            epsg: (1.0 / 0.21317, 0.18, 0.1),
+            t_syn: Some(vec![0.0, 1.0, 50.0]),
+            g_syn: Some(vec![0.0, 5.0, 0.0]),
+            vsyn: 0.0,
+            diff: Some(0.4),
+            events: Some(events_table()),
+        };
+        let build = |s: StimSpec| MultiRhs::new(model_params(), &s).unwrap();
+        let mut frozen = model_params();
+        frozen.active = [true, false, true, false, true, false];
+        vec![
+            ("none", build(spec("none", 0.0, 0.0, 0.0, 0, 0)), 1.0),
+            ("ramp", build(spec("ramp", 1.0, 20.0, 500.0, 0, 0)), 10.0),
+            ("ramp2", build(spec("ramp2", 1.0, 20.0, 500.0, 0, 0)), 10.0),
+            ("step", build(spec("step", 0.0, 50.0, 1000.0, 0, 0)), 10.0),
+            ("sine", build(spec("sine", 0.0, 50.0, 1000.0, 0, 0)), 10.3),
+            (
+                "Synaptic",
+                build(spec("Synaptic", 0.0, 50.0, 0.0, 2, 0)),
+                10.3,
+            ),
+            (
+                "SynapticPair",
+                build(spec("SynapticPair", 0.0, 50.0, 0.0, 2, 0)),
+                10.3,
+            ),
+            ("EPSG", build(spec("EPSG", 5.0, 25.0, 100.0, 0, 0)), 5.13),
+            (
+                "EPSGpair",
+                build(spec("EPSGpair", 5.0, 5.2, 100.0, 3, 0)),
+                5.27,
+            ),
+            (
+                "EPSGbilateral",
+                build(spec("EPSGbilateral", 5.0, 5.1, 100.0, 0, 3)),
+                5.17,
+            ),
+            (
+                "EPSGbilateral, one compartment",
+                build(spec("EPSGbilateral", 5.0, 5.1, 100.0, 2, 2)),
+                5.17,
+            ),
+            ("Events", build(spec("Events", 0.0, 0.0, 1.5, 0, 0)), 5.25),
+            (
+                "frozen gates",
+                MultiRhs::new(frozen, &spec("EPSGpair", 5.0, 5.2, 100.0, 0, 0)).unwrap(),
+                5.27,
+            ),
+        ]
+    }
+
+    /// Three states in the regimes the Jacobian must cover: every V near
+    /// rest, an action potential part-way up the axon, and the soma far
+    /// below rest; the gates as in [`state`].
+    fn jac_states() -> Vec<(&'static str, Vec<f64>)> {
+        let with_v = |v: &dyn Fn(usize) -> f64| -> Vec<f64> {
+            let mut x = state();
+            x[..45].iter_mut().enumerate().for_each(|(i, x)| *x = v(i));
+            x
+        };
+        vec![
+            ("rest", with_v(&|i| -68.0 + 0.01 * i as f64)),
+            ("upstroke", with_v(&|i| -60.0 + 1.5 * i as f64)),
+            (
+                "hyperpolarised soma",
+                with_v(&|i| if i == 0 { -120.0 } else { -66.0 }),
+            ),
+        ]
+    }
+
+    #[test]
+    fn logistic_is_finite_and_exact_at_both_saturated_ends() {
+        for u in [-800.0, -40.0, 0.0, 40.0, 800.0] {
+            let (s, ds) = logistic(u);
+            assert!(
+                s.is_finite() && ds.is_finite() && ds <= 0.0,
+                "u={u}: {s} {ds}"
+            );
+            // ds/du = -s (1 - s), by its own formula where neither saturates
+            if u.abs() < 100.0 {
+                assert!((ds + s * (1.0 - s)).abs() <= 1e-15, "u={u}");
+            }
+        }
+        assert_eq!(logistic(0.0), (0.5, -0.25));
+    }
+
+    #[test]
+    fn the_jacobian_is_the_tree_pattern_and_central_differences_of_eval() {
+        // every V column perturbed by a central difference: rows off the
+        // pattern must not move at all (bit for bit), rows on it must agree
+        // with the analytic value. h = 1e-5 (1 + |x|): the truncation error
+        // h^2 f''' / 6 is ~1e-9 of an entry for the steepest kinetics (a
+        // 5 mV slope factor), the round-off ~1e-11 of the row's scale.
+        let mut worst = (0.0_f64, "", "");
+        for (name, rhs, t) in stim_models() {
+            let n = rhs.n();
+            let ns = 7 * n;
+            let (rows, cols) = tree_jac_sparsity(n, &rhs.parent, &rhs.child);
+            let mut slot = vec![None; ns * ns];
+            for (e, (&r, &c)) in rows.iter().zip(&cols).enumerate() {
+                slot[r * ns + c] = Some(e);
+            }
+            for (label, x) in jac_states() {
+                let mut jac = vec![f64::NAN; rows.len()];
+                rhs.jacobian(t, &x, &mut jac);
+                assert!(jac.iter().all(|v| v.is_finite()), "{name}, {label}");
+                // each row's scale: its largest analytic entry
+                let mut scale = vec![0.0_f64; ns];
+                for (e, &r) in rows.iter().enumerate() {
+                    scale[r] = scale[r].max(jac[e].abs());
+                }
+                let (mut fp, mut fm) = (vec![0.0; ns], vec![0.0; ns]);
+                for c in 0..ns {
+                    let h = 1e-5 * (1.0 + x[c].abs());
+                    let mut y = x.clone();
+                    y[c] = x[c] + h;
+                    rhs.eval(t, &y, &mut fp);
+                    y[c] = x[c] - h;
+                    rhs.eval(t, &y, &mut fm);
+                    for r in 0..ns {
+                        match slot[r * ns + c] {
+                            None => assert_eq!(
+                                fp[r], fm[r],
+                                "{name}, {label}: ({r}, {c}) is off the pattern"
+                            ),
+                            Some(e) => {
+                                let fd = (fp[r] - fm[r]) / (2.0 * h);
+                                let err = (jac[e] - fd).abs() / scale[r].max(f64::MIN_POSITIVE);
+                                if err > worst.0 {
+                                    worst = (err, name, label);
+                                }
+                                assert!(
+                                    err < 1e-7,
+                                    "{name}, {label}: ({r}, {c}) {} vs {fd} ({err:e})",
+                                    jac[e]
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "central differences: worst {:e} ({}, {})",
+            worst.0, worst.1, worst.2
+        );
+    }
+
+    #[test]
+    fn the_jacobian_of_a_branched_tree_sums_its_edges() {
+        // compartment 2 also feeds 44 (the chain's 43 -> 44 edge moved), and
+        // a doubled edge 0 -> 1 couples twice
+        let mut rhs = model();
+        rhs.parent = vec![0, 0];
+        rhs.child = vec![1, 1];
+        rhs.parent.extend(1..43);
+        rhs.child.extend(2..44);
+        rhs.parent.push(2);
+        rhs.child.push(44);
+        rhs.g_ax = (0..rhs.parent.len())
+            .map(|e| 1e-8 * (1.0 + 0.1 * e as f64))
+            .collect();
+        let (rows, cols) = tree_jac_sparsity(45, &rhs.parent, &rhs.child);
+        let x = state();
+        let mut jac = vec![0.0; rows.len()];
+        rhs.jacobian(5.1, &x, &mut jac);
+        let entry = |r: usize, c: usize| {
+            let e = (0..rows.len())
+                .find(|&e| (rows[e], cols[e]) == (r, c))
+                .unwrap();
+            jac[e]
+        };
+        let coupling = |r: usize, g: f64| g * 1e9 / rhs.sa[r] / rhs.cap[r];
+        let (g01, g244) = (rhs.g_ax[0] + rhs.g_ax[1], rhs.g_ax[44]);
+        assert!((entry(0, 1) - coupling(0, g01)).abs() <= 1e-12 * coupling(0, g01));
+        assert!((entry(44, 2) - coupling(44, g244)).abs() <= 1e-12 * coupling(44, g244));
+        assert!((entry(2, 44) - coupling(2, g244)).abs() <= 1e-12 * coupling(2, g244));
     }
 
     #[test]
