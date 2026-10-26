@@ -662,6 +662,7 @@ name = "msoaxon-fast"
 version = "1.5.0"
 dependencies = [
  "diffsol",
+ "diffsol-la",
  "numpy",
  "pyo3",
 ]
