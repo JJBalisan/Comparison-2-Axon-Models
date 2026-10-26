@@ -458,7 +458,8 @@ Findings:
 - Goldwyn's faster membrane narrows it by about 17%.
 - An earlier estimate here (half-way point of the threshold curve, ~340 µs)
   measured a different quantity.
-- Inhibition is not modelled (#77). The targets once it is: Myoga et al. 2014
+- Inhibition is modelled as an event (see "Inhibition: the IPSG and `dt_inh`"
+  below); the results are proposals until approved (#77). The targets: Myoga et al. 2014
   found an AP half-width of 208 µs with inhibition 0.2 ms before the pair,
   and the optimum moved by −73 µs with inhibition leading by 0.1 ms and by
   +41 µs with it lagging by 0.6 ms. Roberts et al. 2013
@@ -594,9 +595,9 @@ experiments (next section), the spike matches mature cells.
 
 Each item has an issue (label `literature-2026-10`):
 
-- glycinergic inhibition as a protocol: an inhibitory event is one `Event`
-  with a reversal below rest (below), but no `dt_inh` axis on the window yet
-  (#77)
+- glycinergic inhibition as a protocol: an IPSG event and a `dt_inh` axis on
+  the window and the noisy trials exist; the results are proposals until
+  approved (#77)
 - protocols on the event-list input (below): fibre counts, Poisson arrivals,
   pre-pulses, EPSC trains and a trial-based ITD sweep are built and reachable
   from the searches; the results are proposals until approved (#78)
@@ -790,6 +791,34 @@ Protocols on top, in `msoaxon.coincidence` and `msoaxon.measure`:
   same call with `itds` and `n_trials` set.
 
 `scripts/event_protocols.py` runs all four and prints the tables.
+
+### Inhibition: the IPSG and `dt_inh` (#77)
+
+`synaptic.ipsg(t, g=40, node=1, tau=(0.28, 1.5), e_rev=-80)` is one glycinergic
+event: rise 0.28 ms (Roberts 2013), decay 1.5 ms (Myoga 2014 report 1.5 to
+1.85), 30 to 60 nS, reversal -80 mV. **These are slice kinetics: in vivo IPSG
+kinetics are not in the literature**, so every `dt_inh` result inherits that
+assumption (inhibition in vivo may be faster or slower). `synaptic.Inhibition(dt,
+g, tau, e_rev, node)` times one against the first EPSG of a
+`PairSource(inh=...)`, with its own fixed peak: the search varies the
+excitation only.
+
+`dt_inh=` (the IPSG's onset relative to the pair's first EPSG, negative
+leading) and `inh=` (its other settings) are arguments of `coincidence.window`
+and `probability_trials`, and so of every search that takes `events=`; they
+build the `PairSource`. Because the IPSG is timed against one EPSG the
+window is no longer symmetric in the delay, so `window(dt_inh=...)` measures
+it by `window_edges` (width `hi - lo`, centre `(hi + lo) / 2`, which is the
+optimum Myoga et al. report shifting), with the excitation 3% above the lowest
+threshold over delay. `probability_trials` jitters the IPSG by `inh_jitter`
+(default none) and the other events by `jitter`.
+
+`scripts/inhibition_window.py` prints width and centre against `dt_inh` for the
+45-compartment model with KLT present, with the rest balanced, and with KLT
+replaced by an equal leak at rest (built in the script as a `Morphology` with
+each compartment's KLT conductance at rest added to its leak: there is no
+`membrane()` knob for it yet), and for the two-compartment model with KLT
+present (it has no knob for taking KLT out).
 
 ## Dendrites
 
