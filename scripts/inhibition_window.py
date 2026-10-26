@@ -12,13 +12,15 @@ optimum Myoga et al found shifting), for
 - the 45-compartment model with KLT present (the default membrane);
 - the same with the rest balanced (membrane(rebalance_rest=True)), the
   control for the next column;
-- the same with KLT replaced by an equal leak at rest (the KLT conductance at
-  the resting potential, with its gating at steady state, added to the leak),
-  which removes the Kv1 history effect Roberts et al 2013 invoke while
-  keeping the chord conductance at rest (the slope conductance, KLT's
-  voltage dependence, is what goes);
-- the two-compartment model of TwoCpt.m, KLT present (it has no knob for
-  taking KLT out).
+- the same with KLT replaced by an equal leak at rest
+  (membrane(klt_to_leak="chord"): the KLT conductance at the resting
+  potential, with its gating at steady state, added to the leak), which
+  removes the Kv1 history effect Roberts et al 2013 invoke while keeping
+  the chord conductance at rest (the slope conductance, KLT's voltage
+  dependence, is what goes);
+- the two-compartment model of TwoCpt.m, KLT present;
+- the same with KLT replaced by an equal leak (two_cpt(klt_to_leak=
+  "chord"), the same substitution in both compartments).
 
 The second block holds the excitation at 3% above the threshold *without*
 inhibition, as a fixed-size input would be: where the IPSG stops that input
@@ -33,7 +35,6 @@ kinetics here are slice values.
 """
 
 import argparse
-import dataclasses
 import json
 import pathlib
 from concurrent import futures
@@ -42,40 +43,16 @@ from typing import Any
 import numpy as np
 
 import msoaxon
-from msoaxon import _fast, coincidence, constants, measure, multi, synaptic
+from msoaxon import _fast, coincidence, measure, multi, synaptic
 
 EPSG = (0.1, 0.3)  # Myoga et al 2014
 MARGIN = 0.03
 DT_INH = (-0.6, -0.4, -0.2, -0.1, 0.0, 0.1, 0.2, 0.4, 0.6)
-QUICK_CONFIGS = ("2-cpt, TwoCpt.m, KLT present",)
+QUICK_CONFIGS = (
+    "2-cpt, TwoCpt.m, KLT present",
+    "2-cpt, KLT replaced by equal leak",
+)
 SIGNED = "the second EPSG's delay after the first"
-
-
-def klt_as_leak(v0: float = -68.0) -> multi.Morphology:
-    """Returns LUMPED with each compartment's KLT moved into its leak.
-
-    The leak density gains g_klt * w^4 * z at v0 (w and z at their steady
-    state there), so each compartment's chord conductance at v0 is
-    unchanged and the voltage-dependent KLT is gone. Rest holds only if
-    the membrane is built with rebalance_rest=True, which resets the leak
-    reversals (configs() does). The slope conductance falls by KLT's
-    voltage-dependent part, which is part of what the table measures.
-
-    Args:
-        v0: The resting potential the conductance is evaluated at [mV].
-
-    Returns:
-        A Morphology like multi.LUMPED with no KLT, and its own key.
-    """
-    base = multi.LUMPED
-    v = np.full(base.n, float(v0))
-    at_rest = base.g_klt * constants.winf(v) ** 4 * constants.zinf(v)
-    return dataclasses.replace(
-        base,
-        key=f"lumped, KLT replaced by an equal leak at {v0:g} mV",
-        g_klt=np.zeros(base.n),
-        g_lk=base.g_lk + at_rest,
-    )
 
 
 def configs(v0: float) -> dict[str, tuple[str, float, dict[str, Any]]]:
@@ -85,9 +62,8 @@ def configs(v0: float) -> dict[str, tuple[str, float, dict[str, Any]]]:
         v0: The resting potential [mV].
 
     Returns:
-        name -> (model, v0, model_kw) for the four configurations.
+        name -> (model, v0, model_kw) for the five configurations.
     """
-    leak = klt_as_leak(v0)
     return {
         "45-compartment, KLT present": ("multi", v0, {}),
         "45-compartment, KLT present, rest balanced": (
@@ -99,11 +75,17 @@ def configs(v0: float) -> dict[str, tuple[str, float, dict[str, Any]]]:
             "multi",
             v0,
             {
-                "morph": leak,
-                "mem": multi.membrane(v0, rebalance_rest=True, morph=leak),
+                "mem": multi.membrane(
+                    v0, rebalance_rest=True, klt_to_leak="chord"
+                )
             },
         ),
         "2-cpt, TwoCpt.m, KLT present": ("two", v0, {}),
+        "2-cpt, KLT replaced by equal leak": (
+            "two",
+            v0,
+            {"klt_to_leak": "chord"},
+        ),
     }
 
 

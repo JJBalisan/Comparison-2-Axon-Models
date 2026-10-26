@@ -267,3 +267,97 @@ def test_the_inactivated_fractions_of_the_issue_table():
     }
     for k, v in want.items():
         assert got[k] == pytest.approx(v, abs=0.005)
+
+
+# --- klt_to_leak (issue #129) ---
+
+STEP = ("step", 5, 6, 0.0, 3, "active-full", 40, -68.0, 1)
+
+
+def test_klt_to_leak_none_is_the_same_bits():
+    assert same(run(), run(klt_to_leak=None))
+    P = two.get_params(-68.0, 3, 1, "active-full")
+    Q = two.get_params(-68.0, 3, 1, "active-full", klt_to_leak=None)
+    assert dataclasses.astuple(P) == dataclasses.astuple(Q)
+
+
+@pytest.mark.parametrize("kind", ["chord", "slope"])
+def test_klt_to_leak_takes_klt_out_and_keeps_everything_else(kind):
+    P = two.get_params(-68.0, 3, 1, "active-full")
+    Q = two.get_params(-68.0, 3, 1, "active-full", klt_to_leak=kind)
+    assert (Q.gKLT1, Q.gKLT2, Q.IKLT0_1, Q.IKLT0_2) == (0.0,) * 4
+    assert Q.glk1 > P.glk1 and Q.glk2 > P.glk2
+    other = {"gKLT1", "gKLT2", "IKLT0_1", "IKLT0_2", "glk1", "glk2"}
+    for f in dataclasses.fields(P):
+        if f.name not in other:
+            assert getattr(Q, f.name) == getattr(P, f.name), f.name
+
+
+def test_the_chord_adds_the_klt_conductance_at_rest():
+    P = two.get_params(-68.0, 3, 1, "active-full")
+    Q = two.get_params(-68.0, 3, 1, "active-full", klt_to_leak="chord")
+    chord = C.winf(-68.0) ** 4 * C.zinf(-68.0)
+    assert Q.glk1 - P.glk1 == pytest.approx(P.gKLT1 * chord, rel=1e-12)
+    assert Q.glk2 - P.glk2 == pytest.approx(P.gKLT2 * chord, rel=1e-12)
+    # which is the KLT share of the resting conductance, klt * gTot
+    assert Q.glk1 - P.glk1 == pytest.approx(C.KLT_FRAC[0] * P.gTot1, rel=1e-9)
+    assert Q.glk2 - P.glk2 == pytest.approx(C.KLT_FRAC[2] * P.gTot2, rel=1e-9)
+
+
+def test_the_slope_is_the_tangent_of_the_models_own_klt_current():
+    v0, h = -68.0, 1e-4
+    P = two.get_params(v0, 3, 1, "active-full")
+    Q = two.get_params(v0, 3, 1, "active-full", klt_to_leak="slope")
+    chord = two.get_params(v0, 3, 1, "active-full", klt_to_leak="chord")
+
+    def current(v):  # z stays at its value at rest, as in this model
+        return P.gKLT1 * C.winf(v) ** 4 * P.z_rest * (v - P.EK)
+
+    tangent = (current(v0 + h) - current(v0 - h)) / (2 * h)
+    assert Q.glk1 - P.glk1 == pytest.approx(tangent, rel=1e-5)
+    # KLT is steeply voltage dependent at rest: slope far above chord
+    assert Q.glk1 - P.glk1 > 3 * (chord.glk1 - P.glk1)
+
+
+@pytest.mark.parametrize("kind", ["chord", "slope"])
+@pytest.mark.parametrize("v0", [-68.0, -58.0])
+def test_klt_to_leak_holds_rest_at_v0(kind, v0):
+    args = STEP[:7] + (v0, 1)
+    t, x = run(*args, klt_to_leak=kind)
+    assert np.abs(x[:, :2] - v0).max() < 1e-4
+
+
+def test_klt_to_leak_has_nothing_to_move_without_klt():
+    for kw in ({"klt1": 0.0, "klt2": 0.0}, {}):
+        model = "passive" if not kw else "active-full"
+        args = STEP[:5] + (model,) + STEP[6:]
+        for kind in ("chord", "slope"):
+            assert same(run(*args, **kw), run(*args, klt_to_leak=kind, **kw))
+
+
+def test_klt_to_leak_moves_what_the_fractions_give():
+    P = two.get_params(-68.0, 3, 1, "active-full", klt1=0.1, klt2=0.0)
+    Q = two.get_params(
+        -68.0, 3, 1, "active-full", klt1=0.1, klt2=0.0, klt_to_leak="chord"
+    )
+    assert Q.glk1 - P.glk1 == pytest.approx(0.1 * P.gTot1, rel=1e-9)
+    assert Q.glk2 == P.glk2  # the axon has none to move
+
+
+def test_klt_to_leak_changes_the_result_not_just_the_params():
+    args = ("EPSG", 5, 5, 1.0, 3, "active-full", 20, -68.0, 1)
+    assert not same(run(*args), run(*args, klt_to_leak="chord"))
+
+
+@pytest.mark.parametrize("bad", ["Chord", "tangent", True, 1])
+def test_a_bad_klt_to_leak_raises_before_any_run(no_run, bad):
+    with pytest.raises(ValueError, match="klt_to_leak must be"):
+        run(klt_to_leak=bad)
+    with pytest.raises(ValueError, match="klt_to_leak must be"):
+        two.get_params(-68.0, 3, 1, "active-full", klt_to_leak=bad)
+
+
+def test_the_slope_below_the_klt_reversal_raises_before_any_run(no_run):
+    args = STEP[:7] + (-100.0, 1)
+    with pytest.raises(ValueError, match="slope conductance"):
+        run(*args, klt_to_leak="slope")

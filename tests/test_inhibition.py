@@ -1,7 +1,5 @@
 """The IPSG event and the dt_inh axis of the coincidence window (issue #77)."""
 
-import importlib.util
-import pathlib
 from typing import Any
 
 import numpy as np
@@ -214,33 +212,37 @@ def test_inh_jitter_moves_only_the_inhibitory_onsets(monkeypatch):
 # --- the equal-leak membrane of scripts/inhibition_window.py ---------------
 
 
-def _script():
-    path = (
-        pathlib.Path(__file__).parents[1] / "scripts" / "inhibition_window.py"
-    )
-    spec = importlib.util.spec_from_file_location("inhibition_window", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_klt_as_leak_keeps_the_chord_conductance_at_rest():
-    leak = _script().klt_as_leak(-68.0)
-    base = multi.LUMPED
-    assert not leak.g_klt.any() and leak.key != base.key
+def test_the_equal_leak_columns_come_from_the_klt_to_leak_knobs(load_script):
+    cfgs = load_script("inhibition_window").configs(-68.0)
+    model, v0, kw = cfgs["45-compartment, KLT replaced by equal leak"]
+    mem, base = kw["mem"], multi.LUMPED
+    assert (model, v0, set(kw)) == ("multi", -68.0, {"mem"})
+    assert not mem.g_klt.any() and mem.morph.key != base.key
     v = np.full(base.n, -68.0)
     chord = base.g_klt * constants.winf(v) ** 4 * constants.zinf(v)
-    np.testing.assert_allclose(leak.g_lk, base.g_lk + chord, rtol=1e-12)
-    assert leak.key != _script().klt_as_leak(-60.0).key  # v0 is in the key
+    np.testing.assert_allclose(mem.morph.g_lk, base.g_lk + chord, rtol=1e-12)
+    assert mem.y0_gates is not None  # rest rebalanced, as the control's
+    assert cfgs["2-cpt, KLT replaced by equal leak"] == (
+        "two",
+        -68.0,
+        {"klt_to_leak": "chord"},
+    )
 
 
-def test_taking_klt_out_halves_the_pair_threshold():
-    script = _script()
-    leak = script.klt_as_leak(-68.0)
-    kw = {
-        "morph": leak,
-        "mem": multi.membrane(-68.0, rebalance_rest=True, morph=leak),
-    }
+def test_taking_klt_out_halves_the_pair_threshold(load_script):
+    kw = load_script("inhibition_window").configs(-68.0)[
+        "45-compartment, KLT replaced by equal leak"
+    ][2]
     keep = coincidence.threshold("multi", 0.0, rel_tol=1e-2)
     out = coincidence.threshold("multi", 0.0, model_kw=kw, rel_tol=1e-2)
     assert out < 0.7 * keep  # 22 against 48 nS: the Kv1 history is gone
+
+
+def test_taking_klt_out_of_the_two_compartment_model_lowers_its_threshold(
+    load_script,
+):
+    cfgs = load_script("inhibition_window").configs(-68.0)
+    kw = cfgs["2-cpt, KLT replaced by equal leak"][2]
+    keep = coincidence.threshold("two", 0.0, rel_tol=1e-2)
+    out = coincidence.threshold("two", 0.0, model_kw=kw, rel_tol=1e-2)
+    assert out < 0.8 * keep  # 29 against 48 nS

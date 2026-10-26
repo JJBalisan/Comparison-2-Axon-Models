@@ -438,6 +438,7 @@ same bits as before.
 | `klt1`, `klt2`, `h1`, `h2`, `na1` | fraction of the compartment's resting conductance that is KLT, h and (soma) Na; a compartment's fractions sum to at most 1 | [0, 1] |
 | `gNa2` | axonal Na conductance [nS] | ≥ 0 |
 | `soma_na_vhalf`, `axon_na_vhalf` | Na inactivation midpoint [mV] (default −62.5); see "Somatic spike" | finite |
+| `klt_to_leak` | replace the soma's and the axon's KLT by a leak that keeps rest: `"chord"` adds the KLT conductance at rest, `"slope"` the slope of the model's own steady-state KLT current (z frozen at rest); `None` keeps KLT. Scaled by `klt1`, `klt2`. See "Resonance" and "Inhibition" | `None`, `"chord"`, `"slope"` |
 
 They are validated before any run. The coupling plane of Goldwyn et al. 2019 is
 a sweep of `couple12` and `couple21`; searches take them in `model_kw`
@@ -875,10 +876,13 @@ What it shows:
 - **Train length:** from 50 to 500 ms (the paper's) the 45-compartment thresholds
   fall 2–6% (the 2-compartment ones do not move) and its minima move from 428 to
   424 Hz (sine) and 430 to 424 Hz (EPSG), measured in native mode.
-- **Not done:** `two_cpt` takes no membrane (#79), so the substitution is only
-  for the 45-compartment model, and the paper's dV/dt criterion, hyperpolarising
-  half-cycle scaling (0.5) and 0.3 ms EPSC are not reproduced; the repo's
-  criterion, a rectified sine and the repo's EPSG are used.
+- **Not done:** the paper's dV/dt criterion, hyperpolarising half-cycle scaling
+  (0.5) and 0.3 ms EPSC are not reproduced; the repo's criterion, a rectified
+  sine and the repo's EPSG are used. The two-compartment model has the same
+  substitution (`two_cpt(klt_to_leak=...)`: the soma's and the axon's KLT
+  become leak, rest kept because the model subtracts each current's resting
+  value). `scripts/resonance.py` has an arm for each, outside `--quick` (they
+  take minutes there), but their results are not in the table above.
 
 With `klt_to_leak` the leak lives in the morphology, so the `Membrane` carries
 its own copy of it: pass `mem` alone to `mso_axon`, or `morph=mem.morph`.
@@ -1007,10 +1011,10 @@ ones by `inh_jitter` instead when that is given (0.0 holds them fixed).
 
 `scripts/inhibition_window.py` prints width and centre against `dt_inh` for the
 45-compartment model with KLT present, with the rest balanced, and with KLT
-replaced by an equal leak at rest (built in the script as a `Morphology` with
-each compartment's KLT conductance at rest added to its leak: there is no
-`membrane()` knob for it yet), and for the two-compartment model with KLT
-present (it has no knob for taking KLT out).
+replaced by an equal leak at rest (`membrane(klt_to_leak="chord")`: each
+compartment's KLT conductance at rest added to its leak), and for the
+two-compartment model with KLT present and with the same substitution
+(`two_cpt(klt_to_leak="chord")`).
 
 ## Dendrites
 

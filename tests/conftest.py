@@ -1,5 +1,7 @@
 """Fixtures shared by the test modules."""
 
+import importlib.util
+import pathlib
 import sys
 
 import pytest
@@ -31,3 +33,17 @@ def fresh_quiet_cache():
     _solve._QUIET_CACHE.clear()
     yield
     _solve._QUIET_CACHE.clear()
+
+
+@pytest.fixture
+def load_script():
+    """Returns a function that imports scripts/<name>.py as a module."""
+
+    def load(name):
+        path = pathlib.Path(__file__).parents[1] / "scripts" / f"{name}.py"
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    return load
