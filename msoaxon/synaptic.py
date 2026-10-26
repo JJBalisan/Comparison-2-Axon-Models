@@ -47,12 +47,41 @@ class Event:
     e_rev: float = 0.0
 
 
+# The unitary inhibitory waveform of the in vitro MSO papers: rise 0.28 ms
+# (Roberts et al 2013) and decay 1.5 ms (Myoga et al 2014 report 1.5 to 1.85
+# ms), glycinergic, reversing below rest. In vivo IPSG kinetics are not in the
+# literature: these are slice values, and the dt_inh results inherit that.
+IPSG_TAU = (0.28, 1.5)
+IPSG_E_REV = -80.0  # [mV]
+IPSG_G = 40.0  # [nS]; the papers span 30 to 60
 # A conductance event driven from this far away is a current source to within
 # 1e-4 of its driving force: current_event uses it for EPSC-shaped currents.
 CURRENT_E_REV = 1e5  # [mV]
 # The default onset [ms] of the protocol builders (_common.START, which this
 # module cannot import).
 T0 = 5.0
+
+
+def ipsg(
+    t: float,
+    g: float = IPSG_G,
+    node: int = 1,
+    tau: tuple[float, float] = IPSG_TAU,
+    e_rev: float = IPSG_E_REV,
+) -> Event:
+    """Returns one inhibitory conductance event.
+
+    Args:
+        t: Onset [ms].
+        g: Peak conductance [nS].
+        node: The compartment it enters, 1-indexed.
+        tau: The (rise, decay) time constants [ms].
+        e_rev: Reversal potential [mV].
+
+    Returns:
+        An Event with the glycinergic defaults.
+    """
+    return Event(t, node, g, tuple(tau), e_rev)
 
 
 def current_event(
@@ -107,6 +136,26 @@ def epsc_train(
 
 
 @dataclasses.dataclass(frozen=True)
+class Inhibition:
+    """An inhibitory event timed against the first EPSG of a pair.
+
+    Attributes:
+        dt: Onset relative to the pair's first EPSG [ms]; negative leads.
+        g: Peak conductance [nS]. It does not scale with the searched
+            amplitude: the search varies the excitation only.
+        tau: The (rise, decay) time constants [ms].
+        e_rev: Reversal potential [mV].
+        node: The compartment it enters, 1-indexed.
+    """
+
+    dt: float = 0.0
+    g: float = IPSG_G
+    tau: tuple[float, float] = IPSG_TAU
+    e_rev: float = IPSG_E_REV
+    node: int = 1
+
+
+@dataclasses.dataclass(frozen=True)
 class Fixed:
     """A fixed event list whose peaks scale with the searched amplitude.
 
@@ -127,12 +176,12 @@ class Fixed:
 
 @dataclasses.dataclass(frozen=True)
 class PairSource:
-    """Two EPSGs `delay` apart, with optional pre-pulses.
+    """Two EPSGs `delay` apart, with optional pre-pulses and inhibition.
 
     The first EPSG is at `start` and the second at start + delay, so a
     negative delay puts the second first; both have the searched amplitude.
-    Pre-pulses are timed against the first EPSG and keep their own
-    peaks. With a node2 the two EPSGs enter different
+    Pre-pulses and the IPSG are timed against the first EPSG and keep
+    their own peaks. With a node2 the two EPSGs enter different
     compartments, as EPSGbilateral does.
 
     Attributes:
@@ -142,6 +191,7 @@ class PairSource:
         node2: Where the second enters, or None for node.
         pre: (dt, g) pairs: an EPSG of peak g [nS] at start + dt, with
             the pair's kinetics and node.
+        inh: An Inhibition, or None.
     """
 
     start: float = T0
@@ -149,11 +199,17 @@ class PairSource:
     node: int = 1
     node2: int | None = None
     pre: tuple[tuple[float, float], ...] = ()
+    inh: Inhibition | None = None
 
     def __call__(self, delay: float, amp: float) -> tuple[Event, ...]:
         """Returns the events of one trial at this delay and amplitude."""
         tau = tuple(self.tau)
         out = [Event(self.start + dt, self.node, g, tau) for dt, g in self.pre]
+        if self.inh is not None:
+            i = self.inh
+            out.append(
+                ipsg(self.start + i.dt, i.g, i.node, i.tau, i.e_rev),
+            )
         out.append(Event(self.start, self.node, amp, tau))
         node2 = self.node if self.node2 is None else self.node2
         out.append(Event(self.start + delay, node2, amp, tau))
