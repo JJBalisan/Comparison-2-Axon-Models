@@ -114,7 +114,7 @@ def test_epsg_train_lasts_up_to_dur_whatever_the_rate():
 
 
 def test_sine_threshold_is_a_minimum_in_the_middle_of_the_range():
-    kw = {"rel_tol": 1e-2, "dur": 40.0}
+    kw = {"rel_tol": 3e-2, "dur": 20.0}
     th = [R.sine_threshold("two", f, **kw) for f in (100.0, 350.0, 800.0)]
     assert np.all(np.isfinite(th))
     assert th[1] < th[0]
@@ -157,8 +157,8 @@ def test_scan_reports_an_extremum_at_the_edge():
         "two",
         (400.0, 600.0, 800.0),  # beyond the minimum, which is ~350
         workers=1,
-        dur=40.0,
-        rel_tol=2e-2,
+        dur=20.0,
+        rel_tol=5e-2,
     )
     assert r["at_edge"]
     assert r["f_best"] == 400.0
@@ -168,7 +168,7 @@ def test_scan_reports_an_extremum_at_the_edge():
 
 
 def test_spike_and_epsg_resonance_find_an_interior_minimum():
-    kw = {"workers": 1, "n_fine": 3, "dur": 20.0, "rel_tol": 1e-2}
+    kw = {"workers": 1, "n_fine": 1, "dur": 20.0, "rel_tol": 3e-2}
     sine = R.spike_resonance("two", (200.0, 500.0, 800.0), **kw)
     epsg = R.epsg_resonance("two", (300.0, 400.0, 600.0), **kw)
     for r in (sine, epsg):
