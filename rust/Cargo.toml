@@ -17,6 +17,9 @@ numpy = "0.25"
 # diffsol-la/-nl, which diffsol already enables unconditionally, so the empty
 # set still gives FaerSparseMat + FaerSparseLU + OdeBuilder + bdf.
 diffsol = { version = "=0.18.0", default-features = false }
+# diffsol 0.18 does not re-export the linear-solver trait integrate.rs's
+# structured solver implements (diffsol-la is already its dependency)
+diffsol-la = { version = "=0.3.0", default-features = false }
 
 [profile.release]
 opt-level = 3

@@ -11,7 +11,9 @@
 //! (every stimulus couples a compartment only to itself), handed to diffsol
 //! through a hand-written `OdeEquations` (diffsol's builder can only detect
 //! one, by NaN probes); the Jacobian is filled by
-//! forward-difference `Jv` products, one per colour of that pattern.
+//! forward-difference `Jv` products, one per colour of that pattern, and
+//! the Newton matrix I - cJ is solved directly on that pattern's structure
+//! ([`TreeLu`]), with faer's sparse LU as the fall-back.
 //! `max_step` is not a diffsol option: it is emulated by narrowing the
 //! controller's growth bounds before every step, so that no step is
 //! proposed past it, with a stop-time hop as the fallback when a step
@@ -21,21 +23,23 @@
 //! pitfalls, the costs); this file is the source of truth.
 
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use diffsol::matrix::sparsity::MatrixSparsity;
 use diffsol::{
-    BdfState, ConstantOp, DiffsolError, FaerContext, FaerSparseLU, FaerSparseMat, FaerVec,
-    JacobianColoring, Matrix, NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations,
-    OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op,
-    ParameterisedOp, UnitCallable, Vector,
+    BdfState, ConstantOp, Context, DiffsolError, FaerContext, FaerSparseLU, FaerSparseMat, FaerVec,
+    JacobianColoring, LaError, Matrix, MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeBuilder,
+    OdeEquations, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+    OdeSolverStopReason, Op, ParameterisedOp, UnitCallable, Vector,
 };
+use diffsol_la::{LinearOp, LinearSolver as LaLinearSolver};
 
 use crate::core::{tree_jac_sparsity, CoreError, MultiRhs};
 
 type M = FaerSparseMat<f64>;
 type V = FaerVec<f64>;
 type C = FaerContext;
-type LS = FaerSparseLU<f64>;
+type LS = TreeLu;
 
 /// The initial step of every segment [ms] (diffsol's own guess would
 /// differ from scipy's; a small fixed one lets the error control grow it).
@@ -242,6 +246,279 @@ impl OdeEquations for Eqn {
     }
     fn set_params(&mut self, _p: &V) {}
     fn get_params(&self, _p: &mut V) {}
+}
+
+/// No parent: a root of the V tree.
+const ROOT: usize = usize::MAX;
+
+/// The smallest tree pivot [`TreeLu`] takes, as a fraction of the V
+/// diagonal entry it came from; a smaller one hands that linearisation to
+/// faer.
+///
+/// The tree is eliminated without pivoting, and an elimination with pivot
+/// p multiplies the entries it updates by at most |a / p|. Here the V
+/// diagonal of I - cJ is 1 + c * (conductances + axial) / C, never below
+/// the sum of its off-diagonals, so a pivot down to 1e-3 of it bounds that
+/// growth near 1e3: at most 3 of 16 digits lost in a Newton correction
+/// that only needs a few. A pivot gets that small only where the Na
+/// current's own feedback (eliminated from the gates into the V diagonal)
+/// nearly cancels it, on a long step through an upstroke; there faer's
+/// partial pivoting is the better solve.
+const PIVOT_FLOOR: f64 = 1e-3;
+
+/// Linearisations [`TreeLu`] has handed to faer, over the process.
+static FALLBACKS: AtomicUsize = AtomicUsize::new(0);
+
+/// The number of linearisations solved by faer's LU rather than the tree
+/// elimination since the process started (0 on every model `core.rs`
+/// builds; a log line per fallback goes to stderr when
+/// `MSOAXON_NATIVE_LOG_FALLBACK` is set).
+pub fn tree_lu_fallbacks() -> usize {
+    FALLBACKS.load(Ordering::Relaxed)
+}
+
+/// The structure of I - cJ read off its pattern, and one factorisation.
+struct Tree {
+    n: usize,
+    /// The V tree: every node's parent (ROOT for a root) and a
+    /// breadth-first order (every parent before its children).
+    parent: Vec<usize>,
+    order: Vec<usize>,
+    /// For every stored entry, in CSC order, where its value goes in `m`.
+    slot: Vec<usize>,
+    /// The entries: diag (n), d (6n), e (6n), f (6n), up (n), down (n),
+    /// with d = A[g, g], e = A[g, V_i] and f = A[V_i, g] for gate g of
+    /// compartment i, and up[i] = A[V_p, V_i], down[i] = A[V_i, V_p] for
+    /// i's parent p (both 0 at a root).
+    m: Vec<f64>,
+    /// 1 / d per gate, and the tree pivots.
+    rd: Vec<f64>,
+    piv: Vec<f64>,
+    /// The matrix diffsol fills.
+    a: M,
+}
+
+impl Tree {
+    /// Reads the structure off `a`'s pattern: None unless it is exactly
+    /// msoaxon's (`core::tree_jac_sparsity` of a forest, with every
+    /// diagonal stored), every stored entry accounted for once.
+    fn new(a: M) -> Option<Self> {
+        let nstates = a.nrows();
+        if nstates == 0 || !nstates.is_multiple_of(7) || a.ncols() != nstates {
+            return None;
+        }
+        let n = nstates / 7;
+        let entries: Vec<(usize, usize)> = a.triplet_iter().0.collect();
+        let mut nbrs = vec![Vec::new(); n];
+        for &(r, c) in &entries {
+            if r < n && c < n && r != c {
+                nbrs[c].push(r);
+            }
+        }
+        // breadth-first from every unvisited node; a neighbour seen before
+        // that is not the parent closes a cycle
+        let mut parent = vec![ROOT; n];
+        let mut seen = vec![false; n];
+        let mut order = Vec::with_capacity(n);
+        for root in 0..n {
+            if seen[root] {
+                continue;
+            }
+            seen[root] = true;
+            let mut head = order.len();
+            order.push(root);
+            while head < order.len() {
+                let i = order[head];
+                head += 1;
+                for &j in &nbrs[i] {
+                    if !seen[j] {
+                        seen[j] = true;
+                        parent[j] = i;
+                        order.push(j);
+                    } else if parent[i] != j {
+                        return None;
+                    }
+                }
+            }
+        }
+        let (dg, eg, fg, up, down) = (n, 7 * n, 13 * n, 19 * n, 20 * n);
+        let mut slot = Vec::with_capacity(entries.len());
+        let mut hit = vec![false; 21 * n];
+        for &(r, c) in &entries {
+            let s = match (r < n, c < n) {
+                (true, true) if r == c => r,
+                (true, true) if parent[c] == r => up + c,
+                (true, true) if parent[r] == c => down + r,
+                (false, true) if r % n == c => eg + r - n,
+                (true, false) if c % n == r => fg + c - n,
+                (false, false) if r == c => dg + r - n,
+                _ => return None,
+            };
+            if std::mem::replace(&mut hit[s], true) {
+                return None;
+            }
+            slot.push(s);
+        }
+        // a coupling may be absent (a zero), a diagonal may not
+        if !(0..n).all(|i| hit[i]) || !hit[dg..eg].iter().all(|h| *h) {
+            return None;
+        }
+        Some(Self {
+            n,
+            parent,
+            order,
+            slot,
+            m: vec![0.0; 21 * n],
+            rd: vec![0.0; 6 * n],
+            piv: vec![0.0; n],
+            a,
+        })
+    }
+
+    /// Factorises the values in `self.a`: false if a gate or tree pivot is
+    /// zero, not finite or under the floor.
+    fn factor(&mut self) -> bool {
+        let n = self.n;
+        self.m.fill(0.0);
+        for (&s, v) in self.slot.iter().zip(self.a.triplet_iter().1) {
+            self.m[s] = v;
+        }
+        let (diag, rest) = self.m.split_at(n);
+        let (d, rest) = rest.split_at(6 * n);
+        let (e, rest) = rest.split_at(6 * n);
+        let (f, rest) = rest.split_at(6 * n);
+        let (up, down) = rest.split_at(n);
+        let s = &mut self.piv;
+        s.copy_from_slice(diag);
+        // each gate's row eliminates on its own, into its V's diagonal
+        for g in 0..6 * n {
+            if !(d[g] != 0.0 && d[g].is_finite()) {
+                return false;
+            }
+            self.rd[g] = 1.0 / d[g];
+            s[g % n] -= f[g] * e[g] * self.rd[g];
+        }
+        // then the tree, leaves first, each node into its parent
+        for &i in self.order.iter().rev() {
+            if !(s[i].abs() >= PIVOT_FLOOR * diag[i].abs() && s[i].is_finite()) {
+                return false;
+            }
+            let p = self.parent[i];
+            if p != ROOT {
+                s[p] -= up[i] / s[i] * down[i];
+            }
+        }
+        true
+    }
+
+    /// Solves A x = b, or A^T x = b, in place.
+    fn solve(&self, b: &mut [f64], transpose: bool) {
+        let n = self.n;
+        let (_, rest) = self.m.split_at(7 * n);
+        let (e, rest) = rest.split_at(6 * n);
+        let (f, rest) = rest.split_at(6 * n);
+        let (up, down) = rest.split_at(n);
+        // A^T swaps e with f and up with down, with the same pivots
+        let (e, f, up, down) = if transpose {
+            (f, e, down, up)
+        } else {
+            (e, f, up, down)
+        };
+        let (bv, bg) = b.split_at_mut(n);
+        for g in 0..6 * n {
+            bv[g % n] -= f[g] * self.rd[g] * bg[g];
+        }
+        for &i in self.order.iter().rev() {
+            let p = self.parent[i];
+            if p != ROOT {
+                bv[p] -= up[i] / self.piv[i] * bv[i];
+            }
+        }
+        for &i in &self.order {
+            let p = self.parent[i];
+            let coupled = if p == ROOT { 0.0 } else { down[i] * bv[p] };
+            bv[i] = (bv[i] - coupled) / self.piv[i];
+        }
+        for g in 0..6 * n {
+            bg[g] = self.rd[g] * (bg[g] - e[g] * bv[g % n]);
+        }
+    }
+}
+
+/// The linear solver of the Newton iteration: I - cJ solved directly on
+/// its structure, every gate on its own and then the V tree leaves to root
+/// (O(n), no ordering, no symbolic step per segment), where the pattern is
+/// msoaxon's and every pivot clears [`PIVOT_FLOOR`]; faer's sparse LU
+/// otherwise. On EPSGpair faer's general LU was ~37% of the run.
+#[derive(Default)]
+struct TreeLu {
+    tree: Option<Tree>,
+    faer: Option<FaerSparseLU<f64>>,
+    /// Whether the current linearisation is faer's.
+    use_faer: bool,
+}
+
+impl LaLinearSolver<M> for TreeLu {
+    fn set_sparsity<O: LinearOp<T = f64, V = V, M = M, C = C>>(&mut self, op: &O) {
+        let (nrows, ncols) = (op.nrows(), op.ncols());
+        self.tree = match op.sparsity() {
+            Some(s) if op.context().nbatch() == 1 => {
+                Tree::new(M::new_from_sparsity(nrows, ncols, Some(s), *op.context()))
+            }
+            _ => None,
+        };
+        self.faer = None;
+        self.use_faer = false;
+    }
+
+    fn set_linearisation<O: LinearOp<T = f64, V = V, M = M, C = C>>(&mut self, op: &O) {
+        if let Some(t) = self.tree.as_mut() {
+            op.matrix_inplace(&mut t.a);
+            if t.factor() {
+                self.use_faer = false;
+                return;
+            }
+        }
+        FALLBACKS.fetch_add(1, Ordering::Relaxed);
+        if std::env::var_os("MSOAXON_NATIVE_LOG_FALLBACK").is_some() {
+            let why = if self.tree.is_some() {
+                "a small pivot"
+            } else {
+                "the pattern"
+            };
+            eprintln!("msoaxon native: faer LU for this linearisation ({why})");
+        }
+        let lu = self.faer.get_or_insert_with(|| {
+            let mut lu = FaerSparseLU::default();
+            lu.set_sparsity(op);
+            lu
+        });
+        lu.set_linearisation(op);
+        self.use_faer = true;
+    }
+
+    fn solve_in_place(&self, x: &mut V) -> Result<(), LaError> {
+        self.solve_impl(x, false)
+    }
+
+    fn solve_transpose_in_place(&self, x: &mut V) -> Result<(), LaError> {
+        self.solve_impl(x, true)
+    }
+}
+
+impl TreeLu {
+    fn solve_impl(&self, x: &mut V, transpose: bool) -> Result<(), LaError> {
+        match (&self.tree, &self.faer) {
+            (Some(t), _) if !self.use_faer => {
+                x.for_each_batch_host([], |b, [], _| t.solve(b, transpose));
+                Ok(())
+            }
+            (_, Some(lu)) if transpose => lu.solve_transpose_in_place(x),
+            (_, Some(lu)) => lu.solve_in_place(x),
+            // diffsol always linearises before it solves
+            _ => panic!("TreeLu: solve before set_linearisation"),
+        }
+    }
 }
 
 /// diffsol's BDF over one right-hand side, built once and reused for every
@@ -629,5 +906,158 @@ mod tests {
         assert!(!r.stopped);
         assert_eq!(r.t, free.t);
         assert!(r.t.windows(2).all(|w| w[1] - w[0] <= cap * (1.0 + 1e-9)));
+    }
+
+    /// A fixed matrix as the linear operator a solver is handed.
+    struct Fixed(M, <M as Matrix>::Sparsity, C);
+
+    impl LinearOp for Fixed {
+        type T = f64;
+        type V = V;
+        type M = M;
+        type C = C;
+        fn nrows(&self) -> usize {
+            self.0.nrows()
+        }
+        fn ncols(&self) -> usize {
+            self.0.ncols()
+        }
+        fn context(&self) -> &C {
+            &self.2
+        }
+        fn matrix_inplace(&self, y: &mut M) {
+            y.copy_from(&self.0);
+        }
+        fn sparsity(&self) -> Option<<M as Matrix>::Sparsity> {
+            Some(self.1.clone())
+        }
+    }
+
+    /// I - cJ of `rhs` at (t, x), on the pattern's entries plus `extra`
+    /// (each 0.25), as the operator diffsol hands over.
+    fn newton_matrix(rhs: MultiRhs, x: &[f64], t: f64, c: f64, extra: &[(usize, usize)]) -> Fixed {
+        let it = Integrator::new(rhs).unwrap();
+        let eqn = &it.problem.eqn;
+        let ctx = eqn.ctx;
+        let mut jac = M::new_from_sparsity(N, N, Some(eqn.sparsity.clone()), ctx);
+        Rhs(eqn).jacobian_inplace(&V::from_slice(x, ctx), t, &mut jac);
+        let (idx, vals) = jac.triplet_iter();
+        let mut pairs: Vec<(usize, usize)> = idx.collect();
+        let mut values: Vec<f64> = pairs
+            .iter()
+            .zip(vals)
+            .map(|(&(r, k), v)| f64::from(r == k) - c * v)
+            .collect();
+        for &p in extra {
+            pairs.push(p);
+            values.push(0.25);
+        }
+        let a = M::try_from_triplets(N, N, pairs.clone(), values, ctx).unwrap();
+        let sparsity =
+            <<M as Matrix>::Sparsity as MatrixSparsity<M>>::try_from_indices(N, N, pairs).unwrap();
+        Fixed(a, sparsity, ctx)
+    }
+
+    /// The solutions of A x = b by `TreeLu` and by faer, for a fixed b,
+    /// and A^T x = b by both; and whether `TreeLu` used faer.
+    fn both_solves(op: &Fixed) -> ([Vec<f64>; 4], bool) {
+        let mut tree = TreeLu::default();
+        tree.set_sparsity(op);
+        tree.set_linearisation(op);
+        let mut faer = FaerSparseLU::<f64>::default();
+        faer.set_sparsity(op);
+        faer.set_linearisation(op);
+        // a fixed b with entries of both signs and several magnitudes
+        let b: Vec<f64> = (0..N)
+            .map(|k| ((k * 7919) % 101) as f64 / 7.0 - 7.0)
+            .collect();
+        let solve = |transpose: bool, by_tree: bool| {
+            let mut x = V::from_slice(&b, op.2);
+            match (by_tree, transpose) {
+                (true, false) => tree.solve_in_place(&mut x),
+                (true, true) => tree.solve_transpose_in_place(&mut x),
+                (false, false) => faer.solve_in_place(&mut x),
+                (false, true) => faer.solve_transpose_in_place(&mut x),
+            }
+            .unwrap();
+            x.clone_as_vec()
+        };
+        let xs = [
+            solve(false, true),
+            solve(false, false),
+            solve(true, true),
+            solve(true, false),
+        ];
+        (xs, tree.use_faer)
+    }
+
+    /// max |a - b| / max |b|.
+    fn rel_diff(a: &[f64], b: &[f64]) -> f64 {
+        let scale = b.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+        a.iter()
+            .zip(b)
+            .fold(0.0_f64, |m, (x, y)| m.max((x - y).abs()))
+            / scale
+    }
+
+    #[test]
+    fn the_tree_solve_matches_faer_on_real_newton_matrices() {
+        // the resting chain, and the hyperpolarised-soma one mid-step, from
+        // a short step's c to a long one's
+        let mut active = state();
+        active[..45]
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, v)| *v = -40.0 + i as f64);
+        for (rhs, x, t) in [(model(), state(), 1.0), (step_model(-5000.0), active, 6.0)] {
+            for c in [1e-4, 1e-2, 0.3] {
+                let op = newton_matrix(rhs.clone(), &x, t, c, &[]);
+                let ([tree, faer, tree_t, faer_t], used_faer) = both_solves(&op);
+                assert!(!used_faer, "fell back at c = {c}");
+                assert!(
+                    rel_diff(&tree, &faer) < 1e-12,
+                    "c = {c}: {}",
+                    rel_diff(&tree, &faer)
+                );
+                assert!(rel_diff(&tree_t, &faer_t) < 1e-12, "c = {c}: transposed");
+            }
+        }
+    }
+
+    #[test]
+    fn an_off_pattern_matrix_goes_to_faer() {
+        // a gate coupled to another compartment's V, and a V cycle
+        for extra in [(45, 1), (0, 2)] {
+            let op = newton_matrix(model(), &state(), 1.0, 1e-2, &[extra, (extra.1, extra.0)]);
+            let before = tree_lu_fallbacks();
+            let ([tree, faer, tree_t, faer_t], used_faer) = both_solves(&op);
+            assert!(used_faer, "{extra:?} was taken as the pattern");
+            assert!(tree_lu_fallbacks() > before);
+            assert_eq!((tree, tree_t), (faer, faer_t));
+        }
+    }
+
+    #[test]
+    fn a_vanishing_tree_pivot_goes_to_faer() {
+        // the leaf compartment 44: no V diagonal and no gate feedback, so
+        // its pivot is 0 while faer's pivoting still solves
+        let mut op = newton_matrix(model(), &state(), 1.0, 1e-2, &[]);
+        let (idx, vals) = op.0.triplet_iter();
+        let pairs: Vec<(usize, usize)> = idx.collect();
+        let values: Vec<f64> = pairs
+            .iter()
+            .zip(vals)
+            .map(|(&(r, c), v)| {
+                if r == 44 && (c == 44 || c >= 45) {
+                    0.0
+                } else {
+                    v
+                }
+            })
+            .collect();
+        op.0 = M::try_from_triplets(N, N, pairs, values, op.2).unwrap();
+        let ([tree, faer, ..], used_faer) = both_solves(&op);
+        assert!(used_faer);
+        assert_eq!(tree, faer);
     }
 }
