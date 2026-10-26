@@ -1,8 +1,5 @@
 """Resonance protocol (#83) and the KLT-to-leak substitution of membrane()."""
 
-import importlib.util
-import pathlib
-
 import numpy as np
 import pytest
 
@@ -302,16 +299,10 @@ def test_the_leak_substitution_removes_the_two_compartment_resonance_too():
     assert r["z"][-1] < 0.8 * r["z"][0]
 
 
-def _script():
-    path = pathlib.Path(__file__).parents[1] / "scripts" / "resonance.py"
-    spec = importlib.util.spec_from_file_location("resonance_script", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_the_script_has_both_substitutions_for_both_models_not_in_quick():
-    script = _script()
+def test_the_script_has_both_substitutions_for_both_models_not_in_quick(
+    load_script,
+):
+    script = load_script("resonance")
     arms = {
         (model, knobs["klt_to_leak"]): name
         for name, (model, knobs) in script.ARMS.items()
@@ -331,9 +322,9 @@ def test_the_script_has_both_substitutions_for_both_models_not_in_quick():
 
 
 def test_the_script_hands_two_compartment_knobs_to_the_model_not_membrane(
-    monkeypatch,
+    monkeypatch, load_script
 ):
-    script = _script()
+    script = load_script("resonance")
     seen = []
 
     def spy(name):

@@ -412,9 +412,9 @@ def get_params(
     IKLT0_1 = gKLT1 * klt_rest
     IKLT0_2 = gKLT2 * klt_rest
     if klt_to_leak:
-        z_rest = C.zinf(Vr)
-        glk1 += _klt_to_leak(klt_to_leak, gKLT1, Vr, z_rest, EK)
-        glk2 += _klt_to_leak(klt_to_leak, gKLT2, Vr, z_rest, EK)
+        z = C.zinf(Vr)
+        glk1 += _klt_to_leak(klt_to_leak, gKLT1, Vr, z, EK)
+        glk2 += _klt_to_leak(klt_to_leak, gKLT2, Vr, z, EK)
         gKLT1 = gKLT2 = IKLT0_1 = IKLT0_2 = 0.0
     return TwoCptParams(
         couple12=couple12,
