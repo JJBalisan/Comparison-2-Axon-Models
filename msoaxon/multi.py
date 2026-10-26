@@ -120,7 +120,8 @@ class Morphology:
             override it.
         g_h: h density per compartment [nS/um^2].
         g_lk: Leak density per compartment [nS/um^2]; membrane() may
-            override the leak reversal.
+            override the leak reversal, and with klt_to_leak builds a
+            copy of the morphology with a larger leak.
         parent: The axial edges, 0-based: current flows along
             parent[k] -> child[k].
         child: See parent.
@@ -168,7 +169,9 @@ class Membrane:
 
     Attributes:
         key: Every setting membrane() was built from, part of the
-            pre-stimulus cache key.
+            pre-stimulus cache key. Not klt_to_leak: that replaces the
+            morphology (morph.key, which morph_key also carries and every
+            cache that holds `key` holds too), so the keys stay distinct.
         morph_key: The morphology's key.
         morph: The morphology these arrays are for.
         g_na: Na density per compartment [nS/um^2].
@@ -580,6 +583,60 @@ def events_current(
     return np.bincount(k, weights=-i / sa[k], minlength=len(sa))
 
 
+def _klt_to_leak(
+    kind: str,
+    g_klt: np.ndarray,
+    morph: Morphology,
+    vlk: np.ndarray,
+    v0: float,
+    key: tuple[float, ...],
+) -> tuple[np.ndarray, Morphology, np.ndarray]:
+    """Moves KLT into the leak (membrane's klt_to_leak).
+
+    Args:
+        kind: "chord" or "slope".
+        g_klt: gKLT per compartment, scale factors applied [nS/um^2].
+        morph: The morphology whose leak grows.
+        vlk: The leak reversal before the substitution [mV].
+        v0: The resting potential [mV].
+        key: The scale factors g_klt was built with, for the new
+            morphology's key (the leak depends on all of them).
+
+    Returns:
+        (zero gKLT, a copy of morph with the larger leak and its own key,
+        the new leak reversal).
+
+    Raises:
+        ValueError: For "slope", if the slope conductance of KLT at v0 is
+            not positive (v0 well below E_K).
+    """
+    V = np.full(morph.n, v0)
+
+    def current(v: np.ndarray) -> np.ndarray:
+        """Steady-state KLT current density at v [pA/um^2]."""
+        return g_klt * C.winf(v) ** 4 * C.zinf(v) * (v - V_K)
+
+    if kind == "chord":
+        g_eff, e = g_klt * C.winf(V) ** 4 * C.zinf(V), V_K
+    else:
+        h = 1e-3  # central difference [mV]
+        g_eff = (current(V + h) - current(V - h)) / (2 * h)
+        if ((g_klt > 0) & (g_eff <= 0)).any():
+            raise ValueError(
+                f"klt_to_leak='slope' needs a positive KLT slope conductance "
+                f"at v0={v0} mV, which it lacks below about E_K ({V_K} mV)"
+            )
+        # compartments without KLT have nothing to move (g_eff == 0)
+        e = v0 - current(V) / np.where(g_eff > 0, g_eff, 1.0)
+    g_lk = morph.g_lk + g_eff
+    # one linear leak standing for the old leak plus g_eff * (V - e)
+    vlk = (morph.g_lk * vlk + g_eff * e) / g_lk
+    morph = dataclasses.replace(
+        morph, key=("klt_to_leak", kind, morph.key, v0, *key), g_lk=g_lk
+    )
+    return np.zeros(morph.n), morph, vlk
+
+
 def membrane(
     v0: float,
     soma_klt_scale: float = 1.0,
@@ -588,6 +645,7 @@ def membrane(
     rebalance_rest: bool = False,
     morph: Morphology | None = None,
     dendrite_klt_scale: float = 1.0,
+    klt_to_leak: str | None = None,
 ) -> Membrane:
     """Builds per-compartment channel overrides for the multi model.
 
@@ -613,6 +671,21 @@ def membrane(
         dendrite_klt_scale: Multiplies gKLT in the dendrite compartments
             (with_dendrites only). Mathews et al 2010 found dendritic Kv1
             sharpens EPSPs.
+        klt_to_leak: Replace KLT in every compartment by a leak, as the
+            dynamic-clamp control of Mikiel-Hunter et al 2016: gKLT is
+            set to zero and the compartment's leak conductance grows by
+            the conductance g_eff of a linear current g_eff * (V - e)
+            with the KLT current at v0 (after the scale factors above),
+            so the rest potential is unchanged (exactly, with
+            rebalance_rest). None (default) keeps KLT. "chord": the
+            KLT conductance at v0 with e = E_K, KLT frozen at rest; its
+            steep growth with depolarisation is lost, so the steady
+            input resistance rises (2.4 to 9.1 MOhm). "slope": the
+            slope of the steady-state KLT current at v0 (the tangent),
+            which keeps the steady input resistance. The leak lives in
+            the morphology, so the returned Membrane carries a copy
+            of it with its own key (pass mem alone, or
+            morph=mem.morph).
 
     Returns:
         A Membrane with key, morph_key, morph, g_na, g_klt, na_vhalf,
@@ -620,9 +693,15 @@ def membrane(
 
     Raises:
         ValueError: If dendrite_klt_scale is set for a morphology
-            without dendrites.
+            without dendrites, klt_to_leak is not None, "chord" or
+            "slope", or "slope" at a v0 where KLT has no positive slope
+            conductance.
     """
     morph = morph or LUMPED
+    if klt_to_leak not in (None, "chord", "slope"):
+        raise ValueError(
+            f'klt_to_leak must be None, "chord" or "slope", got {klt_to_leak!r}'
+        )
     if dendrite_klt_scale != 1.0 and morph.n == N:
         raise ValueError(
             "dendrite_klt_scale needs a morphology with dendrites "
@@ -656,6 +735,19 @@ def membrane(
         )
         vlk = V + I_ion / morph.g_lk
         y0_gates = gates
+    if klt_to_leak:
+        g_klt, morph, vlk = _klt_to_leak(
+            klt_to_leak,
+            g_klt,
+            morph,
+            vlk,
+            float(v0),
+            key=(
+                float(soma_klt_scale),
+                float(ais_klt_scale),
+                float(dendrite_klt_scale),
+            ),
+        )
     return Membrane(
         # v0 is in the key because the leak reversals (vlk) are built from
         # it: without it, membrane(-60) and membrane(-68) would share a

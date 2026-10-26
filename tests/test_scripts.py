@@ -120,6 +120,39 @@ def test_somatic_spike_script(tmp_path):
     assert dtx["spikes"][0]["amplitude"] > control["spikes"][0]["amplitude"]
 
 
+def test_resonance_script(tmp_path):
+    run_script("resonance.py", "--quick", "--out-dir", tmp_path)
+    res = json.loads((tmp_path / "resonance.json").read_text())
+    assert (tmp_path / "resonance.png").stat().st_size > 0
+
+    assert res["quick"]
+    assert res["targets_hz"] == {
+        "subthreshold": 242.0,
+        "spike": 285.0,
+        "epsg": 317.0,
+    }
+    arms = res["results"]
+    assert len(arms) == 3
+    klt = arms["45-compartment (msoAxon.m)"]
+    leak = arms["45-compartment, KLT replaced by its slope conductance"]
+    two = arms["2-compartment (TwoCpt.m)"]
+    for arm in (klt, two):  # resonant, in the same range as the paper's
+        assert arm["subthreshold"]["resonant"]
+        assert 200 < arm["subthreshold"]["f_res"] < 500
+        assert arm["subthreshold"]["q"] > 1.5
+        assert arm["epsg"]["resonant"]
+    assert klt["spike"]["resonant"]
+    # KLT replaced by a leak: low-pass, and no threshold minimum
+    assert not leak["subthreshold"]["resonant"]
+    assert leak["subthreshold"]["q"] < 1.05
+    assert not leak["spike"]["resonant"]
+    assert not leak["epsg"]["resonant"]
+    # the slope leak keeps the steady input resistance (to ~10%)
+    assert leak["rin"]["rin_steady"] == pytest.approx(
+        klt["rin"]["rin_steady"], rel=0.15
+    )
+
+
 def test_na_availability_script(tmp_path):
     run_script("na_availability.py", "--quick", "--out-dir", tmp_path)
     res = json.loads((tmp_path / "na_availability.json").read_text())
