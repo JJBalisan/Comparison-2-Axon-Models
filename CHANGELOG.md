@@ -52,6 +52,9 @@ darwin-arm64, the golden traces, the 28 pinned thresholds and the benchmark's
 - Native mode: a non-terminal root crossed in the step before a stop time no
   longer panics inside diffsol (`StopTimeBeforeCurrentTime`); the stop time is
   re-armed after every root (#106).
+- `prototype/diffsol-real` builds against the merged `core.rs` again
+  (its stimulus spec lacked the new `events` field), which is what its
+  new CI step exists to catch (#113).
 
 ## 1.5.0 (26 Oct 2026)
 
