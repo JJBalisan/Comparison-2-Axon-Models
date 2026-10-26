@@ -1,8 +1,9 @@
 //! The BDF integrator of `mode="native"`: diffsol 0.18 over [`MultiRhs`].
 //!
 //! Plain Rust, no pyo3. [`Integrator`] is built once per right-hand side
-//! (the Jacobian pattern, its colouring and the diffsol problem) and
-//! [`Integrator::run`] then solves one segment of `_solve.integrate`, the
+//! (the Jacobian pattern, where its analytic values go, and the diffsol
+//! problem) and [`Integrator::run`] then solves one segment of
+//! `_solve.integrate`, the
 //! job `_solve._segment` gives scipy's BDF in the other modes: from a fresh
 //! state at the segment start, every accepted step recorded, stopped by the
 //! two terminal events of `_solve` (`spike_event`, `settled_event`).
@@ -557,6 +558,14 @@ impl Integrator {
         .map_err(err)?;
         let jac_dst = MatrixSparsity::<M>::get_index(&sparsity, &pairs, ctx);
         let jac_src = <V as Vector>::Index::from_vec((0..nnz).collect(), ctx);
+        // get_index skips a pair it cannot find, and a short map would
+        // shift every later value one slot
+        if jac_dst.len() != nnz {
+            return Err(CoreError(format!(
+                "the pattern indexes {} of its {nnz} entries",
+                jac_dst.len()
+            )));
+        }
         let eqn = Eqn {
             rhs,
             events: Events::default(),

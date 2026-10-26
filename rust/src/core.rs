@@ -1022,7 +1022,7 @@ impl MultiRhs {
                     let d = c.taup_a * e1 + c.taup_b * e2;
                     let d_d = c.taup_a * e1 / c.taup_ka - c.taup_b * e2 / c.taup_kb;
                     let tau = c.taup_temp * (c.taup_num / d + c.taup_c);
-                    let d_tau = -c.taup_temp * c.taup_num * d_d / (d * d);
+                    let d_tau = finite_over(-c.taup_temp * c.taup_num * d_d, d);
                     relax(inf, -ds / c.pinf_k, p[i], tau, d_tau)
                 }),
                 act_w.then(|| {
@@ -1032,7 +1032,13 @@ impl MultiRhs {
                     let d = c.tauw_a * e1 + c.tauw_b * e2;
                     let d_d = c.tauw_a * e1 / c.tauw_ka - c.tauw_b * e2 / c.tauw_kb;
                     let tau = c.tauw_num / d + c.tauw_c;
-                    relax(inf, ds / c.winf_k, w[i], tau, -c.tauw_num * d_d / (d * d))
+                    relax(
+                        inf,
+                        ds / c.winf_k,
+                        w[i],
+                        tau,
+                        finite_over(-c.tauw_num * d_d, d),
+                    )
                 }),
                 act_z.then(|| {
                     let (s, ds) = logistic((vi + c.zinf_v) / c.zinf_k);
@@ -1043,7 +1049,7 @@ impl MultiRhs {
                     let d = c.tauz_a * e1 + e2;
                     let d_d = c.tauz_a * e1 / c.tauz_ka - e2 / c.tauz_kb;
                     let tau = c.tauz_num / d + c.tauz_c;
-                    relax(inf, d_inf, z[i], tau, -c.tauz_num * d_d / (d * d))
+                    relax(inf, d_inf, z[i], tau, finite_over(-c.tauz_num * d_d, d))
                 }),
                 act_a.then(|| {
                     let (inf, ds) = logistic(c.ainf_k * (vi + c.ainf_v));
@@ -1144,6 +1150,18 @@ fn tree_neighbours(n: usize, parent: &[usize], child: &[usize]) -> Vec<Vec<usize
 fn logistic(u: f64) -> (f64, f64) {
     let e = u.exp();
     (1.0 / (1.0 + e), -1.0 / (2.0 + e + 1.0 / e))
+}
+
+/// `num / d^2`, the form of d tau / dV for a tau = k / d(V) + c (num being
+/// -k d'), or 0 where d has overflowed: `eval`'s tau is then flat at c,
+/// while the quotient would be inf / inf = NaN.
+#[inline]
+fn finite_over(num: f64, d: f64) -> f64 {
+    if d.is_finite() {
+        num / (d * d)
+    } else {
+        0.0
+    }
 }
 
 /// d/dV and d/dx of a gate's (x_inf(V) - x) / tau(V), from x_inf, tau and
@@ -1539,6 +1557,22 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(logistic(0.0), (0.5, -0.25));
+    }
+
+    #[test]
+    fn the_jacobian_stays_finite_where_a_time_constant_overflows() {
+        // a diverging Newton predictor can reach any V; the denominators of
+        // tau_p, tau_w and tau_z overflow to inf beyond ~|V| 5 V while eval
+        // stays finite, and so must the Jacobian
+        for v in [-1e4, -6e3, 8e3, 3e4] {
+            let mut x = state();
+            x[..45].iter_mut().for_each(|x| *x = v);
+            let (mut f, mut jac) = (vec![0.0; 315], vec![0.0; 943]);
+            model().eval(5.1, &x, &mut f);
+            assert!(f.iter().all(|y| y.is_finite()), "eval at V = {v}");
+            model().jacobian(5.1, &x, &mut jac);
+            assert!(jac.iter().all(|y| y.is_finite()), "jacobian at V = {v}");
+        }
     }
 
     #[test]
