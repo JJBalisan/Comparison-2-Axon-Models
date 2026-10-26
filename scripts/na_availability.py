@@ -20,11 +20,11 @@ import json
 import math
 import os
 import pathlib
-from concurrent import futures
 from typing import Any
 
 import numpy as np
 
+import msoaxon
 from msoaxon import (
     _dispatch,
     coincidence,
@@ -40,8 +40,9 @@ VHALFS = (-62.5, -77.0)
 MULTS = (1.5, 2.0, 3.0)
 MODELS = {"45-compartment": "multi", "2-compartment": "two"}
 CELLS = len(MODELS) * len(RESTS) * len(VHALFS)
-# a rest this unsteady (peak deviation from v0 after 50 ms [mV]) has no
-# input resistance to measure: a 2 pA step moves a steady cell by 5 uV
+# a rest this unsteady (largest deviation from v0 between 100 and 200 ms after
+# a kick, [mV]) has no input resistance to measure: a 2 pA step moves a steady
+# cell by 5 uV
 RIPPLE_MAX = 0.01
 
 # a single EPSG this fraction of the coincident threshold: deeply
@@ -63,7 +64,7 @@ def inactivated(rest: float, vhalf: float) -> float:
 
 
 def model_kw(
-    model: str, rest: float, vhalf: float, mode: str
+    model: str, rest: float, vhalf: float, mode: str | None
 ) -> dict[str, Any]:
     """Returns the model keywords of one cell of the table.
 
@@ -71,7 +72,8 @@ def model_kw(
         model: "multi" or "two".
         rest: The resting potential [mV].
         vhalf: The somatic Na inactivation midpoint [mV].
-        mode: The 45-compartment model's solver mode.
+        mode: The 45-compartment model's solver mode; None for
+            MSOAXON_MODE or the default.
 
     Returns:
         The keywords for run_model; the two-compartment model ignores
@@ -157,21 +159,39 @@ def epsp(
     }
 
 
-def measure_cell(task: tuple[str, float, float, str, bool]) -> dict:
-    """Runs the five measurements of one cell of the table.
+def measure_cell(
+    task: tuple[str, float, float, str | None, bool],
+) -> dict[str, Any]:
+    """Runs the measurements of one cell of the table.
+
+    With quick, a rest that is not steady gets only its ripple: the
+    searches cost minutes there (the 45-compartment model at -58 mV
+    takes tiny steps through its oscillation), and none of them means
+    much without a steady rest.
 
     Args:
         task: (model, rest, vhalf, mode, quick): "multi" or "two"; the
             resting potential and the somatic Na inactivation midpoint
-            [mV]; the 45-compartment model's solver mode; and whether
-            to use coarse tolerances and two multiples (a smoke test).
-            One tuple so a process pool can map it.
+            [mV]; the 45-compartment model's solver mode (None:
+            MSOAXON_MODE or the default); and whether to use coarse
+            tolerances and two multiples (a smoke test). One tuple so a
+            process pool can map it.
 
     Returns:
         A dict of the cell's numbers.
     """
     model, rest, vhalf, mode, quick = task
     kw = model_kw(model, rest, vhalf, mode)
+    rip = ripple(model, rest, kw)
+    if quick and rip >= RIPPLE_MAX:
+        return {
+            "rest_mV": rest,
+            "vhalf_mV": vhalf,
+            "inactivated": inactivated(rest, vhalf),
+            "rest_ripple_mV": rip,
+            "rheobase_pA": None,
+            "rin_steady_MOhm": None,
+        }
     tol = 1e-2 if quick else 1e-4
     rb = somatic.rheobase(model, v0=rest, rel_tol=tol, model_kw=kw)
     amps, peaks = {}, {}
@@ -182,7 +202,6 @@ def measure_cell(task: tuple[str, float, float, str, bool]) -> dict:
             r["amplitude"] if r is not None and r["distinct"] else None
         )
         peaks[str(k)] = None if r is None else float(r["peak_above_rest"])
-    rip = ripple(model, rest, kw)
     rin = (
         measure.passive_step(model, v0=rest, **kw) if rip < RIPPLE_MAX else None
     )
@@ -234,7 +253,7 @@ def table(results: dict) -> str:
             for c in cells:
                 lines.append(
                     f"| {name} | {c['rest_mV']:.0f} | {c['vhalf_mV']:g} "
-                    f"| {fmt(c[key], digits)} |"
+                    f"| {fmt(c.get(key), digits)} |"
                 )
         lines.append("")
     lines += [
@@ -244,8 +263,8 @@ def table(results: dict) -> str:
     ]
     for name, cells in results.items():
         for c in cells:
-            a = c["spike_amplitude_mV"]
-            p = c["spike_peak_above_rest_mV"]
+            a = c.get("spike_amplitude_mV", {})
+            p = c.get("spike_peak_above_rest_mV", {})
             lines.append(
                 f"| {name} | {c['rest_mV']:.0f} | {c['vhalf_mV']:g} | "
                 + " | ".join(
@@ -272,24 +291,23 @@ def main() -> None:
     ap.add_argument("--out-dir", default="figures/na_availability")
     ap.add_argument(
         "--mode",
-        default="exact",
+        default=None,
         choices=("exact", "fast", "native"),
-        help="the 45-compartment model's solver mode (the 2-compartment "
-        "model runs scipy whatever this is)",
+        help="the 45-compartment model's solver mode (default: "
+        "MSOAXON_MODE, else fast when the extension is built; the "
+        "2-compartment model runs scipy whatever this is)",
     )
     ap.add_argument(
         "--quick",
         action="store_true",
-        help="1%% tolerances and two multiples of rheobase: a smoke test, "
-        "not results",
+        help="1%% tolerances, two multiples of rheobase, and no searches "
+        "where the rest is not steady: a smoke test, not results",
     )
     ap.add_argument(
         "--workers",
         type=int,
-        default=min(
-            len(MODELS) * len(RESTS) * len(VHALFS), os.cpu_count() or 1
-        ),
-        help="processes (default: the 8 cells, or the cores if fewer)",
+        default=min(CELLS, os.cpu_count() or 1),
+        help="processes (default: one per cell, or the cores if fewer)",
     )
     a = ap.parse_args()
     out = pathlib.Path(a.out_dir)
@@ -301,8 +319,7 @@ def main() -> None:
         for rest in RESTS
         for vhalf in VHALFS
     ]
-    with futures.ProcessPoolExecutor(a.workers) as pool:
-        cells = list(pool.map(measure_cell, tasks))
+    cells = msoaxon.map_tasks(measure_cell, tasks, a.workers)
     results = {
         name: [c for c, t in zip(cells, tasks, strict=True) if t[0] == model]
         for name, model in MODELS.items()
@@ -311,12 +328,12 @@ def main() -> None:
         for c in rows:
             print(
                 f"{name}, rest {c['rest_mV']:.0f}, V-half {c['vhalf_mV']:g}: "
-                f"rheobase {c['rheobase_pA']:.0f} pA"
+                f"rheobase {fmt(c['rheobase_pA'], 0)} pA"
             )
     print()
     print(table(results))
     (out / "na_availability.json").write_text(json.dumps(results, indent=1))
-    print(f"\nsaved {out}/na_availability.json (mode={a.mode})")
+    print(f"\nsaved {out}/na_availability.json (mode={a.mode or 'default'})")
 
 
 if __name__ == "__main__":

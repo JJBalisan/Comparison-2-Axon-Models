@@ -434,9 +434,9 @@ They are validated before any run. The coupling plane of Goldwyn et al. 2019 is
 a sweep of `couple12` and `couple21`; searches take them in `model_kw`
 (`coincidence.threshold("two", 0.1, model_kw={"couple12": 0.5})`). Jing et al.
 2025 give their soma-axon coupling as gax = 56.4 nS; read as `gC`, on node 3's
-constants, that is `two_cpt(..., 3, "active-full", ..., gC=56.4)`. That figure comes from
-issue #84; the paper was not read here, so whether their gax is this `gC` is
-unconfirmed.
+constants, that is `two_cpt(..., 3, "active-full", ..., gC=56.4)`. That figure
+comes from issue #84; the paper was not read here, so whether their gax is this
+`gC` is unconfirmed.
 
 ### Coincidence window
 
@@ -753,11 +753,18 @@ than the spike.
     1.4 ms period that does not decay, whatever the kick, solver mode or step
     size (the same at −60 mV, steady at −63 mV). The two-compartment model is
     steady there. Rin is only reported where the rest is steady.
-  - **The models disagree at −58 mV:** rheobase rises 39% in the
-    45-compartment model and falls 49% in the 2-compartment one, and the window
-    narrows (137 against 218 µs). The two hold rest at `v0` differently (subtracted
-    resting currents against a rebalanced leak reversal), which may be part
-    of it; this was not isolated.
+  - **The models disagree at −58 mV, because they change different things:**
+    rheobase rises 39% in the 45-compartment model and falls 49% in the
+    2-compartment one; the window narrows from 200 to 137 µs in the first and
+    widens from 199 to 218 µs in the second. `two.get_params` recalibrates every
+    conductance to the lookup's resting fractions at `v0` (node 3,
+    `active-full`, −58 against −68 mV: `gNa1` 154 against 1645 nS, 0.09×;
+    `gKLT1` 0.20×; `gh1` 2.33×), so its −58 mV cell is a different cell, with
+    far less Na and KLT and more h. `membrane(rebalance_rest=True)` keeps the
+    maximal conductances and moves only the leak reversal, so the 45-compartment
+    cell is the same cell at another operating point. The rest axis is not the
+    same experiment in the two columns. (That calibration is the model's, from
+    TwoCpt.m, and is unchanged here.)
   - **A preset is proposed, not added:** a named Scott-consistent membrane
     (like `GOLDWYN_2019`: rest −58 mV, `soma_na_vhalf=-77`) would give the
     rows above as one option. It needs the 45-compartment instability at −58

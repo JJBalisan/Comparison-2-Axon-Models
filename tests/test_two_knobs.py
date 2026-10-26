@@ -148,7 +148,7 @@ def test_gna2_may_be_zero():
 
 
 @pytest.mark.parametrize("name", ["soma_na_vhalf", "axon_na_vhalf"])
-@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), None])
 @pytest.mark.usefixtures("no_run")
 def test_vhalf_must_be_finite(name, bad):
     with pytest.raises(ValueError, match=rf"{name} must be finite"):

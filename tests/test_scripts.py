@@ -17,9 +17,11 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
-# about 60 s locally, ~4 min on a CI runner; the scripts don't depend on the
-# Python version, so CI runs these on 3.12 only (deselect locally with -m "not
-# slow")
+# The scripts don't depend on the Python version, so CI runs these on 3.12
+# only (deselect locally with -m "not slow"), in exact mode (no Rust
+# extension). na_availability's --quick (pooled; no searches where the 45-
+# compartment rest is unsteady, which cost minutes) took 47-56 s wall on 4
+# workers, 90 CPU-s, with this machine at a load average of ~215.
 pytestmark = pytest.mark.slow
 
 
@@ -133,23 +135,26 @@ def test_na_availability_script(tmp_path):
         # the issue's table: 1 - hinf at rest with the model's own slope
         got = [round(c["inactivated"], 2) for c in cells]
         assert got == [0.33, 0.76, 0.64, 0.92]
-        # less available Na at rest takes more current to fire
-        assert cells[1]["rheobase_pA"] > cells[0]["rheobase_pA"]
-        assert cells[3]["rheobase_pA"] > cells[2]["rheobase_pA"]
         for c in cells:
+            # Rin is read from a step only where the rest is steady
+            # (RIPPLE_MAX = 0.01 mV in the script)
+            assert (c["rin_steady_MOhm"] is None) == (
+                c["rest_ripple_mV"] >= 0.01
+            )
+            if c["rheobase_pA"] is None:
+                continue  # --quick skips the searches at an unsteady rest
             assert 50 < c["window_3pct_us"] < 400
             assert 100 < c["epsp_half_width_us"] < 2000
-    # the default cell is the published one (PYTHON.md: 3.8 nA, 2.4 MOhm)
+        # less available Na at rest takes more current to fire
+        for lo, hi in ((0, 1), (2, 3)):
+            if cells[lo]["rheobase_pA"] and cells[hi]["rheobase_pA"]:
+                assert cells[hi]["rheobase_pA"] > cells[lo]["rheobase_pA"]
+    # the default cells are the published ones (PYTHON.md: 3.8 nA, 2.4 MOhm)
     for model in res.values():
         assert math.isclose(model[0]["rheobase_pA"], 3800, rel_tol=0.03)
         assert math.isclose(model[0]["rin_steady_MOhm"], 2.4, rel_tol=0.05)
-    # the 45-compartment model has no stable rest at -58 mV: it rings, and
-    # an input resistance read from a step would be noise
-    multi = res["45-compartment"]
-    assert multi[2]["rest_ripple_mV"] > 0.1
-    assert multi[2]["rin_steady_MOhm"] is None
-    assert multi[0]["rest_ripple_mV"] < 0.01
-    assert multi[0]["rin_steady_MOhm"] > 0
+    # the 2-compartment model is steady at both rests
+    assert all(c["rin_steady_MOhm"] for c in res["2-compartment"])
 
 
 def test_making_threshold_graphs_script(tmp_path):

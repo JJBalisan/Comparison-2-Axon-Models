@@ -17,6 +17,9 @@ from msoaxon import _common, _solve, constants as C, synaptic
 # replaced them with.
 GOLDWYN_2019 = {"r1": 8.5, "tau_est": 0.34, "v0": -58.0}
 
+# Soma input resistance of TwoCpt.m [MOhm]: the default of r1 below.
+R1_DEFAULT = 10.0
+
 # Negated Na inactivation midpoint of constants.hinf's default (-62.5 mV).
 NA_VHALF_NEG = 62.5
 NA_VHALF = -NA_VHALF_NEG
@@ -146,7 +149,7 @@ def _check_knobs(
     for name, v in zip(
         ("soma_na_vhalf", "axon_na_vhalf"), na_vhalf, strict=True
     ):
-        if not np.isfinite(v):
+        if v is None or not np.isfinite(v):
             raise ValueError(f"{name} must be finite, got {v}")
 
 
@@ -224,7 +227,7 @@ def get_params(
     node: int,
     input_node: int,
     model_type: str,
-    r1: float = 10.0,
+    r1: float = R1_DEFAULT,
     tau_est: float = 0.71,
     *,
     gC: float | None = None,
@@ -297,7 +300,7 @@ def get_params(
         gNa2,
         (soma_na_vhalf, axon_na_vhalf),
     )
-    if gC is not None and r1 != 10.0:
+    if gC is not None and r1 != R1_DEFAULT:
         raise ValueError(
             "pass gC or r1, not both: gC fixes the input resistance"
         )
@@ -625,7 +628,7 @@ def two_cpt(
     input_node: int,
     syn: synaptic.SynParams | None = None,
     stop_on_spike: float | None = None,
-    r1: float = 10.0,
+    r1: float = R1_DEFAULT,
     tau_est: float = 0.71,
     max_step: float = MAX_STEP,
     stop_when_settled: bool = False,
