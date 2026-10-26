@@ -705,8 +705,9 @@ def window_edges(
 
     Returns:
         The WindowEdges; its edges are nan where the input still spikes
-        at max_delay from the best delay, and all of lo, hi and best are
-        nan if nothing fires.
+        at max_delay from the best delay, both are nan if it does not
+        spike at the best delay (a reference threshold too low), and
+        all of lo, hi and best are nan if nothing fires.
 
     Raises:
         ValueError: If delay_tol or rel_tol is not > 0.
@@ -732,20 +733,26 @@ def window_edges(
     amp = (1 + margin) * th0
     site = ("EPSGpair", 1, None)
 
+    def run(delay: float) -> tuple[bool, float]:
+        return _respond(
+            model,
+            amp,
+            delay,
+            node,
+            v0,
+            epsg_tau,
+            site,
+            model_kw,
+            factor=factor,
+            source=source,
+        )
+
+    if not run(best)[0]:  # a given reference may be too low to spike at all
+        return WindowEdges(nan, nan, best, th0)
+
     def edge(sign: float) -> float:
         def respond(away: float) -> tuple[bool, float]:
-            return _respond(
-                model,
-                amp,
-                best + sign * away,
-                node,
-                v0,
-                epsg_tau,
-                site,
-                model_kw,
-                factor=factor,
-                source=source,
-            )
+            return run(best + sign * away)
 
         spiked, peak = respond(max_delay)
         if spiked:

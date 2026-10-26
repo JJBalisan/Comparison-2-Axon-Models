@@ -150,3 +150,30 @@ def test_phase0_harness_script(tmp_path):
     assert res["threshold_s"] > 0 < res["window_s"]
     assert res["steps_epsgpair_20ms"] > 100
     assert res["steps_step_110ms"] > 100
+
+
+def test_event_protocols_script(tmp_path):
+    out = run_script("event_protocols.py", "--quick", "--out-dir", tmp_path)
+    res = json.loads((tmp_path / "event_protocols.json").read_text())
+    for heading in (
+        "1. Fibre drive",
+        "2. Pre-pulse",
+        "3. EPSC trains",
+        "4. ITD",
+    ):
+        assert heading in out
+    assert res["mode"] in ("fast", "exact", "native")
+
+    # Franken et al 2015: a preceding EPSG raises the pair threshold
+    for model in ("multi", "two"):
+        pre = res["prepulse"][f"{model}_37"]
+        assert math.isclose(pre["th0"], 48.0, rel_tol=0.02)
+        assert all(r > 0 for r in pre["rise"])
+        assert pre["rise"][0] > pre["rise"][2]  # -1.0 ms beats -0.5 ms
+        # the faster the train, the more KLT is open and the lower Rin
+        assert (
+            res["trains"][f"{model}_400"]["change"]
+            < (res["trains"][f"{model}_200"]["change"])
+        )
+        assert res["itd"][model]["peak"] > 0.5
+        assert len(res["fibres"][f"{model}_2"]["half_widths_us"]) == 2
