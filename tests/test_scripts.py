@@ -118,6 +118,40 @@ def test_somatic_spike_script(tmp_path):
     assert dtx["spikes"][0]["amplitude"] > control["spikes"][0]["amplitude"]
 
 
+def test_na_availability_script(tmp_path):
+    run_script("na_availability.py", "--quick", "--out-dir", tmp_path)
+    res = json.loads((tmp_path / "na_availability.json").read_text())
+
+    assert set(res) == {"45-compartment", "2-compartment"}
+    for cells in res.values():
+        assert [(c["rest_mV"], c["vhalf_mV"]) for c in cells] == [
+            (-68.0, -62.5),
+            (-68.0, -77.0),
+            (-58.0, -62.5),
+            (-58.0, -77.0),
+        ]
+        # the issue's table: 1 - hinf at rest with the model's own slope
+        got = [round(c["inactivated"], 2) for c in cells]
+        assert got == [0.33, 0.76, 0.64, 0.92]
+        # less available Na at rest takes more current to fire
+        assert cells[1]["rheobase_pA"] > cells[0]["rheobase_pA"]
+        assert cells[3]["rheobase_pA"] > cells[2]["rheobase_pA"]
+        for c in cells:
+            assert 50 < c["window_3pct_us"] < 400
+            assert 100 < c["epsp_half_width_us"] < 2000
+    # the default cell is the published one (PYTHON.md: 3.8 nA, 2.4 MOhm)
+    for model in res.values():
+        assert math.isclose(model[0]["rheobase_pA"], 3800, rel_tol=0.03)
+        assert math.isclose(model[0]["rin_steady_MOhm"], 2.4, rel_tol=0.05)
+    # the 45-compartment model has no stable rest at -58 mV: it rings, and
+    # an input resistance read from a step would be noise
+    multi = res["45-compartment"]
+    assert multi[2]["rest_ripple_mV"] > 0.1
+    assert multi[2]["rin_steady_MOhm"] is None
+    assert multi[0]["rest_ripple_mV"] < 0.01
+    assert multi[0]["rin_steady_MOhm"] > 0
+
+
 def test_making_threshold_graphs_script(tmp_path):
     out = run_script(
         "making_threshold_graphs.py",

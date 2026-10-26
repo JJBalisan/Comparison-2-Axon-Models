@@ -26,6 +26,7 @@ PROBE = (
         "coincidence_window.py",
         "making_threshold_graphs.py",
         "somatic_spike.py",
+        "na_availability.py",
         "phase0_harness.py",
     ],
 )
