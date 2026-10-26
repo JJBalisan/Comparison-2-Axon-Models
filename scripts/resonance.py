@@ -7,8 +7,8 @@ the soma's impedance), 285 Hz for spikes (the sine frequency with the lowest
 threshold) and 317 Hz for EPSC trains (the rate with the lowest threshold), all
 KLT dependent. This measures the same three in the 45-compartment model, with
 KLT replaced by a leak (multi.membrane's klt_to_leak) and in the two-compartment
-model (which has no membrane(), so no replacement). See msoaxon/resonance.py for
-the protocols and how they differ from the paper's.
+model, with and without the same replacement (two_cpt's klt_to_leak). See
+msoaxon/resonance.py for the protocols and how they differ from the paper's.
 """
 
 import argparse
@@ -34,6 +34,14 @@ ARMS = {
         {**REBALANCED, "klt_to_leak": "slope"},
     ),
     "2-compartment (TwoCpt.m)": ("two", None),
+    "2-compartment, KLT frozen at its resting conductance": (
+        "two",
+        {"klt_to_leak": "chord"},
+    ),
+    "2-compartment, KLT replaced by its slope conductance": (
+        "two",
+        {"klt_to_leak": "slope"},
+    ),
 }
 # --quick: a smoke test with coarse grids, short trains and loose tolerances
 QUICK_ARMS = (
@@ -83,7 +91,8 @@ def measure_arm(
 
     Args:
         model: "multi" or "two".
-        knobs: multi.membrane keywords, or None for the default membrane.
+        knobs: multi.membrane keywords ("multi") or two_cpt keywords
+            ("two"), or None for the default membrane.
         mode: The model mode (None: the default).
         quick: Use QUICK's grids and tolerances.
         pool: A process pool.
@@ -94,8 +103,10 @@ def measure_arm(
         msoaxon.resonance.
     """
     kw: dict[str, Any] = {"mode": mode}
-    if knobs:
+    if knobs and model == "multi":
         kw["mem"] = multi.membrane(-68.0, **knobs)
+    elif knobs:
+        kw.update(knobs)
     q: dict[str, dict[str, Any]] = (
         QUICK
         if quick

@@ -153,6 +153,50 @@ def _check_knobs(
             raise ValueError(f"{name} must be finite, got {v}")
 
 
+def _klt_to_leak(
+    kind: str, gKLT: float, Vr: float, z: float, EK: float
+) -> float:
+    """Returns the conductance that replaces one compartment's KLT.
+
+    This model subtracts each current's value at rest and has Elk = Vrest,
+    so a linear current g * (V - e) minus its own resting value is
+    g * (V - Elk) whatever e is: the replacement is a bigger leak
+    conductance and nothing else.
+
+    Args:
+        kind: "chord" or "slope".
+        gKLT: The compartment's KLT conductance [nS].
+        Vr: The resting potential [mV].
+        z: The frozen KLT inactivation (the model holds it at rest).
+        EK: The KLT reversal potential [mV].
+
+    Returns:
+        The added leak conductance [nS]: for "chord" the KLT conductance
+        at rest, gKLT * w^4 * z; for "slope" the slope of this model's own
+        steady-state KLT current gKLT * winf(V)^4 * z * (V - EK) at Vr
+        (z frozen, unlike multi's, which follows zinf(V)).
+
+    Raises:
+        ValueError: For "slope", if the slope conductance is not
+            positive (Vr well below EK).
+    """
+    if kind == "chord":
+        return gKLT * C.winf(Vr) ** 4 * z
+
+    def current(v: float) -> float:
+        """Steady-state KLT current at v [pA]."""
+        return gKLT * C.winf(v) ** 4 * z * (v - EK)
+
+    h = 1e-3  # central difference [mV], as multi's
+    g_eff = (current(Vr + h) - current(Vr - h)) / (2 * h)
+    if gKLT > 0 and g_eff <= 0:
+        raise ValueError(
+            f"klt_to_leak='slope' needs a positive KLT slope conductance "
+            f"at v0={Vr} mV, which it lacks below about E_K ({EK} mV)"
+        )
+    return g_eff
+
+
 def _channels(
     node: int,
     model_type: str,
@@ -242,6 +286,7 @@ def get_params(
     gNa2: float | None = None,
     soma_na_vhalf: float = NA_VHALF,
     axon_na_vhalf: float = NA_VHALF,
+    klt_to_leak: str | None = None,
 ) -> TwoCptParams:
     """Ports getParam: the two-compartment parameters.
 
@@ -283,6 +328,10 @@ def get_params(
             at rest, not how many there are, and the resting Na current
             is subtracted at the shifted value as at any other.
         axon_na_vhalf: The same for the axon compartment.
+        klt_to_leak: Replace the soma's and the axon's KLT by a leak
+            that keeps the rest potential (see two_cpt): gKLT1 and gKLT2
+            become 0 and glk1 and glk2 grow by the added conductance.
+            None (default) keeps KLT; "chord" or "slope".
 
     Returns:
         A TwoCptParams with TwoCpt.m's field names.
@@ -290,8 +339,14 @@ def get_params(
     Raises:
         ValueError: For a value outside its range (see two_cpt), for
             fractions that leave a compartment no leak conductance,
-            or for gC together with a non-default r1.
+            for gC together with a non-default r1, for klt_to_leak not
+            None, "chord" or "slope", or "slope" at a v0 where KLT has
+            no positive slope conductance.
     """
+    if klt_to_leak not in (None, "chord", "slope"):
+        raise ValueError(
+            f'klt_to_leak must be None, "chord" or "slope", got {klt_to_leak!r}'
+        )
     _check_knobs(
         gC,
         couple12,
@@ -354,6 +409,13 @@ def get_params(
     na_rest2 = C.na_open(C.minf(Vr), C.hinf(Vr, na_vhalf2)) * (Vr - ENa)
     klt_rest = C.winf(Vr) ** 4 * C.zinf(Vr) * (Vr - EK)
     h_rest = C.ainf(Vr) * (Vr - Vh)
+    IKLT0_1 = gKLT1 * klt_rest
+    IKLT0_2 = gKLT2 * klt_rest
+    if klt_to_leak:
+        z_rest = C.zinf(Vr)
+        glk1 += _klt_to_leak(klt_to_leak, gKLT1, Vr, z_rest, EK)
+        glk2 += _klt_to_leak(klt_to_leak, gKLT2, Vr, z_rest, EK)
+        gKLT1 = gKLT2 = IKLT0_1 = IKLT0_2 = 0.0
     return TwoCptParams(
         couple12=couple12,
         couple21=couple21,
@@ -382,8 +444,8 @@ def get_params(
         IappLoc=1 if input_node == 1 else 2,
         INa0_1=gNa1 * na_rest1,
         INa0_2=gNa2 * na_rest2,
-        IKLT0_1=gKLT1 * klt_rest,
-        IKLT0_2=gKLT2 * klt_rest,
+        IKLT0_1=IKLT0_1,
+        IKLT0_2=IKLT0_2,
         Ih0_1=gh1 * h_rest,
         Ih0_2=gh2 * h_rest,
         z_rest=C.zinf(Vr),  # z is frozen at rest in this model
@@ -645,6 +707,7 @@ def two_cpt(
     gNa2: float | None = None,
     soma_na_vhalf: float = NA_VHALF,
     axon_na_vhalf: float = NA_VHALF,
+    klt_to_leak: str | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Runs the two-compartment model.
 
@@ -677,6 +740,18 @@ def two_cpt(
     `couple12` and `couple21` (each in (0, 1)) with `gC` or `r1` fixed.
     `soma_na_vhalf=-77` is the V-half Scott et al 2010 measured; the
     45-compartment counterpart is multi.membrane(soma_na_vhalf=-77).
+
+    `klt_to_leak` takes KLT out of both compartments, as the dynamic-clamp
+    control of Mikiel-Hunter et al 2016 does, and puts a leak in its
+    place that keeps the rest potential: this model subtracts each
+    current's value at rest, so the replacement is only a larger glk1 and
+    glk2. "chord" adds the KLT conductance at rest (the same as its
+    resting fraction of gTot, so the resting conductance is unchanged
+    and the voltage dependence goes); "slope" adds the slope of this
+    model's own steady-state KLT current at rest (z frozen), which keeps
+    the steady input resistance. The 45-compartment counterpart is
+    multi.membrane(klt_to_leak=...), whose "slope" follows zinf(V) and so
+    differs a little. klt1 and klt2 scale what is moved.
 
     Args:
         stim_type: One of _common.STIM_TYPES.
@@ -722,6 +797,8 @@ def two_cpt(
             the resting Na current is subtracted at the shifted value,
             so rest holds at v0 without a separate rebalance.
         axon_na_vhalf: The same for the axon compartment.
+        klt_to_leak: None (default) keeps KLT; "chord" or "slope"
+            replaces it by a leak, as above.
 
     Returns:
         (t, x) with x shaped (n_times, 11); see the module docstring for
@@ -729,8 +806,8 @@ def two_cpt(
 
     Raises:
         ValueError: For unknown names, out-of-range compartments, a
-            ramp with stop <= start, or a free-coupling argument
-            outside its range.
+            ramp with stop <= start, a free-coupling argument outside
+            its range, or klt_to_leak not None, "chord" or "slope".
     """
     _common.check_args(
         stim_type,
@@ -763,6 +840,7 @@ def two_cpt(
         gNa2=gNa2,
         soma_na_vhalf=soma_na_vhalf,
         axon_na_vhalf=axon_na_vhalf,
+        klt_to_leak=klt_to_leak,
     )
     s = _common.stimulus(stim_type, start, stop, I, t_end, syn)
     if stim_type == "Events":

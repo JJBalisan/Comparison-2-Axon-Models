@@ -1,5 +1,8 @@
 """Resonance protocol (#83) and the KLT-to-leak substitution of membrane()."""
 
+import importlib.util
+import pathlib
+
 import numpy as np
 import pytest
 
@@ -290,6 +293,68 @@ def test_the_leak_substitution_removes_the_subthreshold_resonance():
     assert not r["resonant"]  # flat to 1%, then falling: Q 1.001, no peak
     assert r["q"] < R.MIN_RATIO
     assert r["z"][-1] < 0.8 * r["z"][0]
+
+
+def test_the_leak_substitution_removes_the_two_compartment_resonance_too():
+    kw = {"klt_to_leak": "slope"}
+    r = R.subthreshold("two", COARSE, kw, workers=1, n_fine=3)
+    assert not r["resonant"]  # a leak is low-pass
+    assert r["z"][-1] < 0.8 * r["z"][0]
+
+
+def _script():
+    path = pathlib.Path(__file__).parents[1] / "scripts" / "resonance.py"
+    spec = importlib.util.spec_from_file_location("resonance_script", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_script_has_both_substitutions_for_both_models_not_in_quick():
+    script = _script()
+    arms = {
+        (model, knobs["klt_to_leak"]): name
+        for name, (model, knobs) in script.ARMS.items()
+        if knobs and "klt_to_leak" in knobs
+    }
+    assert set(arms) == {
+        ("multi", "chord"),
+        ("multi", "slope"),
+        ("two", "chord"),
+        ("two", "slope"),
+    }
+    # each takes minutes in --quick, so only the 45-compartment slope arm
+    # of the substitutions is in it
+    assert set(script.QUICK_ARMS) & set(arms.values()) == {
+        arms["multi", "slope"]
+    }
+
+
+def test_the_script_hands_two_compartment_knobs_to_the_model_not_membrane(
+    monkeypatch,
+):
+    script = _script()
+    seen = []
+
+    def spy(name):
+        def f(model, *args, **kw):
+            seen.append((name, model, kw.get("model_kw", kw)))
+            return {"rin_steady": 1.0, "tau": 1.0}
+
+        return f
+
+    monkeypatch.setattr(script.measure, "passive_step", spy("rin"))
+    for name in ("subthreshold", "spike_resonance", "epsg_resonance"):
+        monkeypatch.setattr(script.resonance, name, spy(name))
+    script.measure_arm("two", {"klt_to_leak": "chord"}, None, True, None)
+    script.measure_arm("multi", {"klt_to_leak": "chord"}, None, True, None)
+    two_kw = [kw for _, model, kw in seen if model == "two"]
+    multi_kw = [kw for _, model, kw in seen if model == "multi"]
+    assert len(two_kw) == len(multi_kw) == 4
+    assert all(
+        kw["klt_to_leak"] == "chord" and "mem" not in kw for kw in two_kw
+    )
+    assert all("mem" in kw and "klt_to_leak" not in kw for kw in multi_kw)
 
 
 def test_a_flat_response_is_not_called_resonant():
