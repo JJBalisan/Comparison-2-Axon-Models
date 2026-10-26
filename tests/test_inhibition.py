@@ -1,11 +1,13 @@
 """The IPSG event and the dt_inh axis of the coincidence window (issue #77)."""
 
+import importlib.util
+import pathlib
 from typing import Any
 
 import numpy as np
 import pytest
 
-from msoaxon import coincidence, synaptic
+from msoaxon import coincidence, constants, multi, synaptic
 
 TWO: dict[str, Any] = {"workers": 1}
 MYOGA = (0.1, 0.3)
@@ -170,6 +172,22 @@ def test_probability_trials_with_dt_inh():
     assert led.tolist() == [0.0] and late.tolist() == [1.0]
 
 
+def test_an_ipsg_in_an_event_list_jitters_like_the_excitation(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        coincidence,
+        "trial_spikes",
+        lambda model, trials, *a, **k: (
+            seen.extend(trials) or np.zeros(len(trials), bool)
+        ),
+    )
+    events = (synaptic.ipsg(4.8), synaptic.Event(5.0, 1, 1.0))
+    coincidence.probability_trials(
+        "two", [0.0], 50.0, n_trials=5, jitter=0.1, events=events, **TWO
+    )
+    assert len({next(e for e in tr if e.e_rev < 0).t for tr in seen}) == 5
+
+
 def test_inh_jitter_moves_only_the_inhibitory_onsets(monkeypatch):
     seen = []
 
@@ -186,3 +204,43 @@ def test_inh_jitter_moves_only_the_inhibitory_onsets(monkeypatch):
     seen.clear()
     coincidence.probability_trials("two", [0.0], 50.0, inh_jitter=0.1, **kw)
     assert len({next(e for e in tr if e.e_rev < 0).t for tr in seen}) == 6
+    # left at None, the IPSG jitters like the excitation (as for an event
+    # list that holds one before the change)
+    seen.clear()
+    coincidence.probability_trials("two", [0.0], 50.0, **kw)
+    assert len({next(e for e in tr if e.e_rev < 0).t for tr in seen}) == 6
+
+
+# --- the equal-leak membrane of scripts/inhibition_window.py ---------------
+
+
+def _script():
+    path = (
+        pathlib.Path(__file__).parents[1] / "scripts" / "inhibition_window.py"
+    )
+    spec = importlib.util.spec_from_file_location("inhibition_window", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_klt_as_leak_keeps_the_chord_conductance_at_rest():
+    leak = _script().klt_as_leak(-68.0)
+    base = multi.LUMPED
+    assert not leak.g_klt.any() and leak.key != base.key
+    v = np.full(base.n, -68.0)
+    chord = base.g_klt * constants.winf(v) ** 4 * constants.zinf(v)
+    np.testing.assert_allclose(leak.g_lk, base.g_lk + chord, rtol=1e-12)
+    assert leak.key != _script().klt_as_leak(-60.0).key  # v0 is in the key
+
+
+def test_taking_klt_out_halves_the_pair_threshold():
+    script = _script()
+    leak = script.klt_as_leak(-68.0)
+    kw = {
+        "morph": leak,
+        "mem": multi.membrane(-68.0, rebalance_rest=True, morph=leak),
+    }
+    keep = coincidence.threshold("multi", 0.0, rel_tol=1e-2)
+    out = coincidence.threshold("multi", 0.0, model_kw=kw, rel_tol=1e-2)
+    assert out < 0.7 * keep  # 22 against 48 nS: the Kv1 history is gone

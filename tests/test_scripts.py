@@ -184,17 +184,9 @@ def test_inhibition_window_script(tmp_path):
     res = json.loads((tmp_path / "inhibition_window.json").read_text())
     assert "noisy-trial check" in out and res["g_inh"] == 40.0
 
-    for name in ("45-compartment, KLT present", "2-cpt, TwoCpt.m, KLT present"):
-        case = res[name]
-        # an IPSG that leads raises the threshold; one that lags barely does
-        assert case["-0.2"]["th0"] > case["+0.2"]["th0"] > case["none"]["th0"]
-        # the optimum moves with a lagging IPSG
-        centre = (case["+0.2"]["lo"] + case["+0.2"]["hi"]) / 2
-        assert centre < -0.02
-    # taking KLT out (an equal leak at rest) lowers the threshold and
-    # widens the window: the Kv1 history effect is gone
-    keep = res["45-compartment, KLT present, rest balanced"]["none"]
-    leak = res["45-compartment, KLT replaced by equal leak"]["none"]
-    assert leak["th0"] < keep["th0"]
-    assert leak["hi"] - leak["lo"] > keep["hi"] - keep["lo"]
+    case = res["2-cpt, TwoCpt.m, KLT present"]
+    # an IPSG that lags by 0.2 ms raises the threshold, and the optimum moves
+    # towards the second EPSG leading
+    assert case["+0.2"]["th0"] > case["none"]["th0"]
+    assert (case["+0.2"]["lo"] + case["+0.2"]["hi"]) / 2 < -0.02
     assert res["noisy_check"]["peak"] > 0

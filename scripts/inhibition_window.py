@@ -1,4 +1,4 @@
-"""Inhibition and the coincidence window (issue #77): width and centre vs dt_inh.
+"""Inhibition and the coincidence window (#77): width, centre vs dt_inh.
 
     uv run scripts/inhibition_window.py --out-dir figures/inhibition
 
@@ -14,8 +14,9 @@ optimum Myoga et al found shifting), for
   control for the next column;
 - the same with KLT replaced by an equal leak at rest (the KLT conductance at
   the resting potential, with its gating at steady state, added to the leak),
-  which removes the Kv1 history effect Roberts et al 2013 invoke without
-  changing the resting conductance;
+  which removes the Kv1 history effect Roberts et al 2013 invoke while
+  keeping the chord conductance at rest (the slope conductance, KLT's
+  voltage dependence, is what goes);
 - the two-compartment model of TwoCpt.m, KLT present (it has no knob for
   taking KLT out).
 
@@ -29,7 +30,7 @@ shifted -73 us with inhibition leading by 0.1 ms and +41 us lagging by 0.6 ms.
 Roberts et al 2013, Franken et al 2015 and Casarez et al 2026: narrowing without
 a shift of the centre. In vivo IPSG kinetics are not in the literature: the
 kinetics here are slice values.
-"""  # noqa: E501 (printed verbatim as --help)
+"""
 
 import argparse
 import dataclasses
@@ -46,6 +47,7 @@ from msoaxon import _fast, coincidence, constants, measure, multi, synaptic
 EPSG = (0.1, 0.3)  # Myoga et al 2014
 MARGIN = 0.03
 DT_INH = (-0.6, -0.4, -0.2, -0.1, 0.0, 0.1, 0.2, 0.4, 0.6)
+QUICK_CONFIGS = ("2-cpt, TwoCpt.m, KLT present",)
 SIGNED = "the second EPSG's delay after the first"
 
 
@@ -53,8 +55,11 @@ def klt_as_leak(v0: float = -68.0) -> multi.Morphology:
     """Returns LUMPED with each compartment's KLT moved into its leak.
 
     The leak density gains g_klt * w^4 * z at v0 (w and z at their steady
-    state there), so the membrane's conductance at rest is unchanged and
-    the voltage-dependent KLT is gone.
+    state there), so each compartment's chord conductance at v0 is
+    unchanged and the voltage-dependent KLT is gone. Rest holds only if
+    the membrane is built with rebalance_rest=True, which resets the leak
+    reversals (configs() does). The slope conductance falls by KLT's
+    voltage-dependent part, which is part of what the table measures.
 
     Args:
         v0: The resting potential the conductance is evaluated at [mV].
@@ -67,14 +72,21 @@ def klt_as_leak(v0: float = -68.0) -> multi.Morphology:
     at_rest = base.g_klt * constants.winf(v) ** 4 * constants.zinf(v)
     return dataclasses.replace(
         base,
-        key="lumped, KLT replaced by an equal leak",
+        key=f"lumped, KLT replaced by an equal leak at {v0:g} mV",
         g_klt=np.zeros(base.n),
         g_lk=base.g_lk + at_rest,
     )
 
 
 def configs(v0: float) -> dict[str, tuple[str, float, dict[str, Any]]]:
-    """Returns the model configurations: name -> (model, v0, model_kw)."""
+    """Returns the model configurations.
+
+    Args:
+        v0: The resting potential [mV].
+
+    Returns:
+        name -> (model, v0, model_kw) for the four configurations.
+    """
     leak = klt_as_leak(v0)
     return {
         "45-compartment, KLT present": ("multi", v0, {}),
@@ -106,6 +118,18 @@ def edges(
     reference: tuple[float, float] | None = None,
 ) -> tuple[float, float, float, float]:
     """Runs window_edges for one configuration and dt_inh (a pool job).
+
+    Args:
+        model: "multi" or "two".
+        v0: Initial potential [mV].
+        model_kw: The model keywords of the configuration.
+        dt: The IPSG onset relative to the first EPSG [ms], or None for
+            no inhibition.
+        g_inh: The IPSG's peak conductance [nS].
+        tol: The relative tolerance of the thresholds.
+        delay_tol: The tolerance of each edge [ms].
+        reference: (best delay, threshold) to skip the search for the
+            lowest threshold, or None.
 
     Returns:
         The WindowEdges as a tuple (lo, hi, best, th0), delays in ms.
@@ -140,6 +164,17 @@ def noisy_check(
     scripts/coincidence_window.py), at 3% above the lowest threshold; the
     width and centre of the resulting probability curve are compared with
     window_edges'.
+
+    Args:
+        a: The parsed command-line arguments.
+        pool: The process pool the trials run on.
+        cfgs: The configurations of run().
+        jobs: run()'s window_edges jobs, keyed by (name, dt_inh).
+        dts: The dt_inh values of run(); the check uses -0.2 ms if there.
+
+    Returns:
+        dict(dt_inh, peak, width, centre, centroid, lo, hi from
+        measure.curve_summary [ms], window_width, window_lo [ms]).
     """
     name = "2-cpt, TwoCpt.m, KLT present"
     dt = -0.2 if -0.2 in dts else dts[0]
@@ -153,6 +188,7 @@ def noisy_check(
         n_trials=a.trials if not a.quick else 4,
         amp_cv=0.01,
         jitter=0.005,
+        inh_jitter=0.0,
         v0=v0,
         epsg_tau=EPSG,
         model_kw=kw,
@@ -187,7 +223,8 @@ def main() -> None:
     ap.add_argument(
         "--quick",
         action="store_true",
-        help="few dt_inh values and 1%% tolerances: a smoke test, not results",
+        help="two-compartment model, one dt_inh, 1%% tolerances, no fixed-"
+        "excitation block: a smoke test, not results",
     )
     a = ap.parse_args()
     with msoaxon.process_pool() as pool:
@@ -205,9 +242,11 @@ def run(a: argparse.Namespace, pool: futures.Executor) -> None:
     out.mkdir(parents=True, exist_ok=True)
     tol = 1e-2 if a.quick else 1e-4
     delay_tol = 2e-3 if a.quick else 1e-3  # [ms]
-    dts = (-0.2, 0.2) if a.quick else DT_INH
+    dts = (0.2,) if a.quick else DT_INH
     mode = _fast.effective(a.mode)
     cfgs = configs(-68.0)
+    if a.quick:  # the 45-compartment windows cost minutes without the extension
+        cfgs = {k: v for k, v in cfgs.items() if k in QUICK_CONFIGS}
     if a.mode:  # the mode applies to the 45-compartment model only
         for model, _, kw in cfgs.values():
             if model == "multi":
@@ -227,21 +266,25 @@ def run(a: argparse.Namespace, pool: futures.Executor) -> None:
     res: dict[str, Any] = {"mode": mode, "g_inh": a.g_inh, "margin": MARGIN}
     first = {name: jobs[name, None].result() for name in cfgs}
     # the same input held at 3% above the no-inhibition threshold
-    fixed = {
-        (name, dt): pool.submit(
-            edges,
-            model,
-            v0,
-            kw,
-            dt,
-            a.g_inh,
-            tol,
-            delay_tol,
-            (jobs[name, dt].result()[2], first[name][3]),
-        )
-        for name, (model, v0, kw) in cfgs.items()
-        for dt in dts
-    }
+    fixed = (
+        {}
+        if a.quick
+        else {
+            (name, dt): pool.submit(
+                edges,
+                model,
+                v0,
+                kw,
+                dt,
+                a.g_inh,
+                tol,
+                delay_tol,
+                (jobs[name, dt].result()[2], first[name][3]),
+            )
+            for name, (model, v0, kw) in cfgs.items()
+            for dt in dts
+        }
+    )
     print(
         "\nExcitation 3% above the lowest threshold with the IPSG present"
         "\nmodel | dt_inh [ms] | lowest threshold [nS] | width [us] | "
@@ -273,11 +316,12 @@ def run(a: argparse.Namespace, pool: futures.Executor) -> None:
                     strict=True,
                 )
             )
-    print(
-        "\nExcitation held at 3% above the threshold without inhibition"
-        "\nmodel | dt_inh [ms] | width [us] | centre [us]"
-    )
-    for name in cfgs:
+    if fixed:
+        print(
+            "\nExcitation held at 3% above the threshold without inhibition"
+            "\nmodel | dt_inh [ms] | width [us] | centre [us]"
+        )
+    for name in cfgs if fixed else ():
         for dt in dts:
             lo, hi, _, _ = fixed[name, dt].result()
             print(

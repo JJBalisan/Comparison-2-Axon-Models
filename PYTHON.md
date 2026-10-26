@@ -459,10 +459,10 @@ Findings:
 - An earlier estimate here (half-way point of the threshold curve, ~340 µs)
   measured a different quantity.
 - Inhibition is modelled as an event (see "Inhibition: the IPSG and `dt_inh`"
-  below); the results are proposals until approved (#77). The targets: Myoga et al. 2014
-  found an AP half-width of 208 µs with inhibition 0.2 ms before the pair,
-  and the optimum moved by −73 µs with inhibition leading by 0.1 ms and by
-  +41 µs with it lagging by 0.6 ms. Roberts et al. 2013
+  below); the results are proposals until approved (#77). The targets:
+  Myoga et al. 2014 found an AP half-width of 208 µs with inhibition 0.2 ms
+  before the pair, and the optimum moved by −73 µs with inhibition leading by
+  0.1 ms and by +41 µs with it lagging by 0.6 ms. Roberts et al. 2013
   ([doi](https://doi.org/10.1016/j.neuron.2013.04.022), dynamic clamp),
   Franken et al. 2015 ([doi](https://doi.org/10.1038/nn.3948), in vivo
   strychnine) and Casarez et al. 2026
@@ -757,10 +757,11 @@ either
 The search runs a source with `I = 1` and the amplitude it is looking for, so
 calls without `events` are untouched (the golden traces, the benchmark and
 `scripts/benchmark_search.py --check` do not move), and `threshold` of an
-event pair agrees with the `EPSGpair` threshold within the search tolerance. `window(events=...)`
-measures a window on a *signed* delay, `window_edges` returns both edges and
-the centre: the reference is the lowest threshold over delay (`best_delay`),
-and with a plain identical pair it reproduces `window`'s width to a few µs.
+event pair agrees with the `EPSGpair` threshold within the search tolerance.
+`window(events=...)` measures a window on a *signed* delay, `window_edges`
+returns both edges and the centre: the reference is the lowest threshold over
+delay (`best_delay`), and with a plain identical pair it reproduces `window`'s
+width to a few µs.
 
 Builders in `msoaxon.synaptic` (each returns events; the seeded generator is
 a `numpy` `Generator` or a seed):
@@ -798,20 +799,21 @@ Protocols on top, in `msoaxon.coincidence` and `msoaxon.measure`:
 event: rise 0.28 ms (Roberts 2013), decay 1.5 ms (Myoga 2014 report 1.5 to
 1.85), 30 to 60 nS, reversal -80 mV. **These are slice kinetics: in vivo IPSG
 kinetics are not in the literature**, so every `dt_inh` result inherits that
-assumption (inhibition in vivo may be faster or slower). `synaptic.Inhibition(dt,
-g, tau, e_rev, node)` times one against the first EPSG of a
-`PairSource(inh=...)`, with its own fixed peak: the search varies the
-excitation only.
+assumption (inhibition in vivo may be faster or slower).
+`synaptic.Inhibition(dt, g, tau, e_rev, node)` times one against the first
+EPSG of a `PairSource(inh=...)`, with its own fixed peak: the search varies
+the excitation only.
 
 `dt_inh=` (the IPSG's onset relative to the pair's first EPSG, negative
 leading) and `inh=` (its other settings) are arguments of `coincidence.window`
-and `probability_trials`, and so of every search that takes `events=`; they
-build the `PairSource`. Because the IPSG is timed against one EPSG the
-window is no longer symmetric in the delay, so `window(dt_inh=...)` measures
-it by `window_edges` (width `hi - lo`, centre `(hi + lo) / 2`, which is the
-optimum Myoga et al. report shifting), with the excitation 3% above the lowest
-threshold over delay. `probability_trials` jitters the IPSG by `inh_jitter`
-(default none) and the other events by `jitter`.
+and `probability_trials`; they build the `PairSource` (to time an IPSG in
+`threshold` or `somatic`, pass a `PairSource` or your own source as
+`events=`). Because the IPSG is timed against one EPSG the window is no longer
+symmetric in the delay, so `window(dt_inh=...)` measures it by `window_edges`
+(width `hi - lo`, centre `(hi + lo) / 2`, which is the optimum Myoga et al.
+report shifting), with the excitation 3% above the lowest threshold over
+delay. `probability_trials` jitters every event by `jitter`, the inhibitory
+ones by `inh_jitter` instead when that is given (0.0 holds them fixed).
 
 `scripts/inhibition_window.py` prints width and centre against `dt_inh` for the
 45-compartment model with KLT present, with the rest balanced, and with KLT

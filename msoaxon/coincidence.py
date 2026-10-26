@@ -28,10 +28,10 @@ Event lists (issue #78). The searches above drive an EPSG pair; passing
 `events=` drives them with the "Events" stimulus instead, and the protocols
 at the end of the module (fibre counts, pre-pulses, Casarez-style ITD sweeps,
 and the `dt_inh` axis of issue #77) are built on it. `events` is an event
-*source*, a callable (delay, amp) -> tuple of synaptic.Event, or a plain
-event tuple, which scales with the searched amplitude; the search runs it
-with I = 1 and varies amp, so a source can hold some events fixed (an IPSG, a
-pre-pulse) while it scales the rest. Calls without `events` are untouched.
+*source*, a callable (delay, amp) -> tuple of synaptic.Event, or a plain event
+tuple, which scales with the searched amplitude; the search runs it with
+I = 1 and varies amp, so a source can hold some events fixed (a pre-pulse, an
+IPSG) while it scales the rest. Calls without `events` are untouched.
 """
 
 import dataclasses
@@ -916,7 +916,7 @@ def probability_trials(
     events: synaptic.EventsLike | None = None,
     dt_inh: float | None = None,
     inh: synaptic.Inhibition | None = None,
-    inh_jitter: float = 0.0,
+    inh_jitter: float | None = None,
 ) -> np.ndarray:
     """Measures spike probability per delay from noisy trials.
 
@@ -928,8 +928,8 @@ def probability_trials(
     With events, dt_inh or inh the trial is the event source's events at
     that delay (see window()) and amplitude, with the same noise: every
     onset moves by N(0, jitter) ms, those of inhibitory events (a
-    reversal below 0 mV) by N(0, inh_jitter) instead. The delays are
-    signed, and onsets are kept at or after 0.
+    reversal below 0 mV) by N(0, inh_jitter) instead if that is given.
+    The delays are signed, and onsets are kept at or after 0.
 
     Args:
         model: "multi" or "two".
@@ -957,7 +957,8 @@ def probability_trials(
             (see window()).
         inh: The IPSG's settings (see window()).
         inh_jitter: The standard deviation of the inhibitory events'
-            onsets [ms], with events, dt_inh or inh.
+            onsets [ms], with events, dt_inh or inh; None jitters them
+            like the others (by `jitter`), 0.0 holds them fixed.
 
     Returns:
         An array with the fraction of trials that spiked, per delay.
@@ -1028,7 +1029,7 @@ def _probability_events(
     n_trials: int,
     amp_cv: float,
     jitter: float,
-    inh_jitter: float,
+    inh_jitter: float | None,
     node: int,
     v0: float,
     model_kw: dict[str, Any] | None,
@@ -1051,7 +1052,10 @@ def _probability_events(
                         t=max(
                             e.t
                             + rng.normal(
-                                0, inh_jitter if e.e_rev < 0 else jitter
+                                0,
+                                jitter
+                                if e.e_rev >= 0 or inh_jitter is None
+                                else inh_jitter,
                             ),
                             0.0,
                         ),
