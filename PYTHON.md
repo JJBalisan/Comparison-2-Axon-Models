@@ -548,7 +548,7 @@ Values are for the Python port.
 | Spike initiation site | AIS (compartment 3) for an EPSG pair at 1.25–3× threshold; under sustained input 0–36% of spikes start at node 1 or 2 where 50 or more spikes fired, 8% at 350 Hz and the default `gE` (`initiation.py`, #80) | AIS; 5–60% of spikes start at node 1 or 2 under sustained input (Lehnert 2014) |
 | Input resistance, active, at rest | 2.4 MΩ steady, ~4.7 MΩ peak with the leak rebalanced at −68 mV (`rebalance_rest=True`, as in the dendrites table); 2.5 / 4.8 MΩ for the default membrane, which settles at −68.13 mV where the conductances differ a little (`measure.passive_step`, #68) | 5 MΩ (Lehnert's model); ~7 MΩ measured |
 | Somatic spike, from inflection (100 ms step) | 7.4 / 13.3 / 18.2 mV at 1.5× / 2× / 3× rheobase | 17 ± 2 mV mature, 5–15 mV near threshold, graded |
-| Subthreshold resonance: peak of the soma impedance, small rectified sine (`resonance.py`, #83) | 363 Hz, Q 2.8 (2-compartment: 354 Hz, Q 2.75) | 242 Hz, Q 1.88 (Mikiel-Hunter et al. 2016, [doi](https://doi.org/10.1371/journal.pcbi.1005166); their model at 35 °C, Q over the input resistance) |
+| Subthreshold resonance: peak of the soma impedance, small rectified sine (`resonance.py`, #83) | 363 Hz, Q 2.79 (2-compartment: 354 Hz, Q 2.75) | 242 Hz, Q 1.88 (Mikiel-Hunter et al. 2016, [doi](https://doi.org/10.1371/journal.pcbi.1005166); their model at 35 °C, Q over the input resistance) |
 | Spike resonance: sine frequency with the lowest firing threshold | 428 Hz (2-compartment: 429 Hz) | 285 Hz (same model) |
 | EPSG-train threshold minimum: rate with the lowest threshold | 426 Hz (2-compartment: 420 Hz) | 317 Hz (same model, EPSC train) |
 
@@ -763,8 +763,9 @@ What it shows:
   threshold at 100 Hz is 2.8× its minimum. Away from the dip a
   train needs the single-event threshold, so the membrane does not sum EPSGs at
   rates that do not match its ring.
-- **Train length:** from 50 to 500 ms (the paper's) thresholds fall 4–9% and the
-  minima move from 428 to 424 Hz (sine) and 427 to 424 Hz (EPSG).
+- **Train length:** from 50 to 500 ms (the paper's) thresholds fall 2–6%; the
+  minima move from 428 to 424 Hz (sine) and 427 to 424 Hz (EPSG), measured in
+  native mode.
 - **Not done:** `two_cpt` takes no membrane (#79), so the substitution is only
   for the 45-compartment model, and the paper's dV/dt criterion, hyperpolarising
   half-cycle scaling (0.5) and 0.3 ms EPSC are not reproduced; the repo's

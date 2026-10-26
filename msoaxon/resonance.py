@@ -24,13 +24,12 @@ do add a mean current of I/pi, 6 pA at the default 20 pA, about 20 uV across
 the soma. The paper's sine is symmetric apart from a hyperpolarising half
 scaled by 0.5; the rectified one is the nearest the models have.
 
-Spike resonance differs from the paper's in four ways: the criterion is the
+Spike resonance differs from the paper's in three ways: the criterion is the
 repo's (an axon compartment 10 mV above the soma, not dV/dt); the train lasts
 `dur` ms (50, the paper's 500: the threshold keeps falling slowly with the
-train length, by 4 to 9% from 50 to 500 ms); the threshold is the smallest peak
-current with any spike, not the lowest amplitude that evokes spikes per cycle;
-and the sine is rectified. The EPSG train has the repo's EPSG (rise and decay
-0.1 and 0.18 ms), not the paper's 0.3 ms alpha.
+train length, by 2 to 6% from 50 to 500 ms); and the sine is rectified. The
+EPSG train has the repo's EPSG (rise and decay 0.1 and 0.18 ms), not the
+paper's 0.3 ms alpha.
 """
 
 from collections.abc import Callable
@@ -55,7 +54,7 @@ STEPS_PER_CYCLE = 64  # solver max_step = period / this
 IMPEDANCE_FREQS = (20.0, 50.0, *np.arange(100.0, 801.0, 50.0))
 
 # thresholds
-DUR = 50.0  # train length [ms]; thresholds fall 4-9% by 500 ms
+DUR = 50.0  # train length [ms]; thresholds fall 2-6% by 500 ms
 TAIL = 5.0  # run time after the last input [ms]
 SINE_FREQS = tuple(np.arange(100.0, 801.0, 50.0))
 # the EPSG-train threshold dips only near the period of the membrane's ring
