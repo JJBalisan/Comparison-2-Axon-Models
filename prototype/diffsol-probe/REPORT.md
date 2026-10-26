@@ -1,3 +1,9 @@
+> **Frozen snapshot.** Written against `cfe0ec8` (PR #100, 25 Oct 2026) with
+> diffsol 0.18.0 and rustc 1.99.1. CI does not build it and nothing promises
+> it still builds; `rust/src/integrate.rs` is the source of truth and
+> `src/pattern.rs` is a copy that will drift. New measurements belong in
+> `../diffsol-real`.
+
 # diffsol 0.18 probe for `_solve._segment` (Phase 0, lane A, issue #28)
 
 Question: can diffsol 0.18 replace scipy's BDF in `_solve._segment`?
