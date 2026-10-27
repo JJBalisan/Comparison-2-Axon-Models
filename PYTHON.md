@@ -766,6 +766,10 @@ than the spike.
   `msoAxon.m` row (rheobase 3793 against 3784 pA, spike 7.2 / 13.1 / 17.8
   against 7.4 / 13.3 / 18.2 mV). The EPSP is one somatic EPSG of a quarter of
   that cell's coincident threshold; the window is at 3% above that threshold.
+  The 45-compartment −58 mV rows were measured before #128, when the rebalance
+  moved the whole cable to −58 mV (today's `axon_rest=-58`); the script now
+  rebalances only the soma and AIS there (see the bullets below), and the
+  rows await a re-run.
 
   | 45-compartment: rest, V½ | inactivated | rheobase | Rin | EPSP half-width | 3% window | somatic spike 1.5× / 2× / 3× |
   |---|---|---|---|---|---|---|
@@ -790,11 +794,17 @@ than the spike.
     rest, the soma is a smooth hump that carries the axonal spike. The amplitude
     protocol of Scott 2005 does not apply there; the peak above rest is listed
     instead.
-  - **The 45-compartment model has no stable rest at −58 mV:** with the leak
-    rebalanced to hold −58, a 2 pA kick sets off a 0.18 mV oscillation with a
-    1.4 ms period that does not decay, whatever the kick, solver mode or step
-    size (the same at −60 mV, steady at −63 mV). The two-compartment model is
-    steady there. Rin is only reported where the rest is steady.
+  - **A whole 45-compartment cable rebalanced to −58 mV fires on its own
+    (#128):** its nodes of Ranvier fire at 461 Hz with no input (node 45
+    swings from −77 to +36 mV), which the soma sees as a 0.18 mV ripple. The
+    node membrane (Na activation against KLT activation) passes a Hopf
+    bifurcation once the cable rests above −60.54 mV. Scott 2010's −58 mV is
+    a somatic measurement, so `rebalance_rest` now moves only the soma and AIS
+    to `v0` and keeps the axon at −68 mV. That cell is steady at −58 mV
+    (node 5 rests at −60.4 mV, node 45 at −67.9 mV), with or without
+    `soma_na_vhalf=-77`. The two-compartment model is steady there too. Rin
+    is only reported where the rest is steady, and the steadiness check now
+    watches every compartment, not only the soma.
   - **The models disagree at −58 mV, because they change different things:**
     rheobase rises 39% in the 45-compartment model and falls 49% in the
     2-compartment one; the window narrows from 200 to 137 µs in the first and
@@ -803,17 +813,26 @@ than the spike.
     `active-full`, −58 against −68 mV: `gNa1` 154 against 1645 nS, 0.09×;
     `gKLT1` 0.20×; `gh1` 2.33×), so its −58 mV cell is a different cell, with
     far less Na and KLT and more h. `membrane(rebalance_rest=True)` keeps the
-    maximal conductances and moves only the leak reversal, so the 45-compartment
-    cell is the same cell at another operating point. The rest axis is not the
+    maximal conductances and moves only the leak reversals, so the
+    45-compartment cell is the same cell at another operating point. The rest axis is not the
     same experiment in the two columns. (That calibration is the model's, from
     TwoCpt.m, and is unchanged here.)
   - **A preset is proposed, not added:** a named Scott-consistent membrane
     (like `GOLDWYN_2019`: rest −58 mV, `soma_na_vhalf=-77`) would give the
-    rows above as one option. It needs the 45-compartment instability at −58
-    resolved first, and the full texts of Scott 2010 and Lehnert 2014's methods
-    to say which V½ goes where.
-- `rebalance_rest`: sets each leak reversal so rest stays at `v0`. Without it,
-  removing KLT makes the cell fire with no input.
+    rows above as one option. The 45-compartment instability at −58 is
+    resolved by the soma-only rebalance (#128); the full texts of Scott 2010
+    and Lehnert 2014's methods still have to say which V½ goes where.
+- `rebalance_rest`: sets the leak reversals so the soma rests at `v0`, with
+  every gate at steady state. Without it, removing KLT makes the cell fire
+  with no input. The soma, AIS and any dendrites are rebalanced to `v0` and the
+  axon's internodes and nodes to `axon_rest` (default −68 mV, `msoAxon.m`'s
+  rest; at `v0 = −68` the whole cable is rebalanced to `v0`, as before). When
+  the two differ, current flows along the axon at rest, so `membrane` finds
+  the steady state with a root solver (the soma's leak reversal holds it at
+  `v0` exactly) and the run starts there. It also linearises the model at that
+  rest and issues `multi.UnstableRestWarning` when the leading eigenvalue has
+  a positive real part, naming the compartments the growing mode lives in.
+  `axon_rest=v0` rebalances the whole cable, which warns above about −60.5 mV.
 - `klt_to_leak`: replaces KLT by a leak, keeping rest (see Resonance below).
 
 The defaults are `msoAxon.m`'s membrane, unchanged.

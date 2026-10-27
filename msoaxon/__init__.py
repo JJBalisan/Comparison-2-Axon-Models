@@ -3,7 +3,10 @@
 The models live in msoaxon.multi and msoaxon.two (named after the
 model="multi" / "two" switch the analysis functions use); the package
 re-exports their entry points, mso_axon and two_cpt, and DriftWarning, the
-warning mso_axon's Rust right-hand side (mode="fast") issues on first use.
+warning mso_axon's Rust right-hand side (mode="fast") issues on first use,
+and UnstableRestWarning, the warning multi.membrane(rebalance_rest=True)
+issues when the rest it builds is unstable (silence either with
+warnings.simplefilter("ignore", msoaxon.<name>)).
 It also re-exports process_pool and map_tasks, the worker-pool helpers the
 analysis scripts share, and the initiation-site readout (msoaxon.initiation):
 find_spikes, group_fractions, sustained_input and their result types.
@@ -21,7 +24,7 @@ from msoaxon.initiation import (
     group_fractions,
     sustained_input,
 )
-from msoaxon.multi import mso_axon
+from msoaxon.multi import UnstableRestWarning, mso_axon
 from msoaxon.synaptic import Event, SynParams
 from msoaxon.two import two_cpt
 
@@ -33,6 +36,7 @@ __all__ = [
     "Fractions",
     "Spike",
     "SynParams",
+    "UnstableRestWarning",
     "__version__",
     "find_spikes",
     "group_fractions",

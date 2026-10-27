@@ -91,9 +91,9 @@ def ripple(model: str, rest: float, kw: dict[str, Any]) -> float:
     The run starts at the steady state, which an unstable one never
     leaves without a nudge, so a 2 pA, 5 ms step perturbs it. A stable
     rest settles within milliseconds and what remains is the solver's
-    1e-6 mV; the 45-compartment model at -58 mV does not settle: it
-    rings with 0.18 mV at a 1.4 ms period, whatever the kick, solver
-    mode or step size.
+    1e-6 mV. Every compartment is watched, each against its own rest
+    (the 45-compartment axon rests below the soma): a node of Ranvier
+    that fires on its own shows at the soma as only 0.18 mV (#128).
 
     Args:
         model: "multi" or "two".
@@ -101,7 +101,8 @@ def ripple(model: str, rest: float, kw: dict[str, Any]) -> float:
         kw: The model keywords (model_kw).
 
     Returns:
-        The largest |V - rest| of the soma between 100 and 200 ms [mV].
+        The largest |V - rest| of any compartment between 100 and 200 ms
+        [mV].
     """
     t, x = _dispatch.run_model(
         model,
@@ -115,7 +116,13 @@ def ripple(model: str, rest: float, kw: dict[str, Any]) -> float:
         1,
         **{**kw, "max_step": 0.05},
     )
-    return float(np.abs(x[t >= 100, 0] - rest).max())
+    if model == "multi":
+        mem = kw["mem"]
+        n = mem.morph.n
+        v_rest = multi.initial_state(mem.morph, mem, rest)[:n]
+    else:
+        n, v_rest = 2, rest  # two_cpt holds both compartments at rest
+    return float(np.abs(x[t >= 100, :n] - v_rest).max())
 
 
 def epsp(
@@ -165,9 +172,9 @@ def measure_cell(
     """Runs the measurements of one cell of the table.
 
     With quick, a rest that is not steady gets only its ripple: the
-    searches cost minutes there (the 45-compartment model at -58 mV
-    takes tiny steps through its oscillation), and none of them means
-    much without a steady rest.
+    searches cost minutes there (a cell whose axon fires on its own
+    takes tiny steps through every spike), and none of them means much
+    without a steady rest.
 
     Args:
         task: (model, rest, vhalf, mode, quick): "multi" or "two"; the
