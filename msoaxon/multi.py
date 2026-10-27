@@ -624,8 +624,9 @@ def _klt_to_leak(
         morph: The morphology whose leak grows.
         vlk: The leak reversal before the substitution [mV].
         v0: The resting potential [mV].
-        key: The scale factors g_klt was built with, for the new
-            morphology's key (the leak depends on all of them).
+        key: The scale factors g_klt was built with and the axon's
+            rest, for the new morphology's key (the leak depends on all
+            of them).
         v_rest: Each compartment's own rest (Membrane.v_rest), where the
             substitution is made instead of v0; None: v0 everywhere.
 
@@ -793,6 +794,7 @@ def membrane(
                 float(soma_klt_scale),
                 float(ais_klt_scale),
                 float(dendrite_klt_scale),
+                axon_rest,  # sets v_rest, where the leak is built
             ),
             v_rest=v_rest,
         )

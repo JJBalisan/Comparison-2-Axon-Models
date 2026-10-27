@@ -19,9 +19,11 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 
 # The scripts don't depend on the Python version, so CI runs these on 3.12
 # only (deselect locally with -m "not slow"), in exact mode (no Rust
-# extension). na_availability's --quick (pooled; no searches where the 45-
-# compartment rest is unsteady, which cost minutes) took 47-56 s wall on 4
-# workers, 90 CPU-s, with this machine at a load average of ~215.
+# extension). na_availability's --quick (pooled; no searches where a rest is
+# unsteady, which cost minutes) took 47-56 s wall on 4 workers, 90 CPU-s, with
+# this machine at a load average of ~215, while its 45-compartment -58 mV rest
+# fired; since #128 every rest is steady and it runs every search (94.5 s
+# wall, Rust extension built, load average ~150).
 pytestmark = pytest.mark.slow
 
 
