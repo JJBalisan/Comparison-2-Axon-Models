@@ -219,7 +219,20 @@ def test_multi_initial_state_equals_the_old_inline_code(
         # flat (#128): V starts from the solved profile, gates at its steady
         # state; tests/test_rest.py checks that it is one
         new = multi.initial_state(morph, mem, v0)
-        assert np.array_equal(new[: morph.n], mem.v_rest)
+        V = mem.v_rest
+        # the old inline code's gate blocks, at the solved V
+        gates = (
+            C.minf(V),
+            C.hinf(V, mem.na_vhalf),
+            C.pinf(V),
+            C.winf(V),
+            C.zinf(V),
+            C.ainf(V),
+        )
+        want = np.concatenate([V, *gates])
+        assert new.dtype == want.dtype
+        assert new.shape == (7 * morph.n,)
+        assert new.tobytes() == want.tobytes()
         assert new[0] == v0
         return
     new, old = (

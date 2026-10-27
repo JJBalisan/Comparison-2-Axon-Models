@@ -69,10 +69,16 @@ def _residual(mem):
 def test_uniform_rebalance_is_unchanged_bit_for_bit(v0, morph, knobs):
     # at v0 = -68 the default axon_rest is v0, so the cable is rebalanced as
     # before #128 (the rebalanced golden traces depend on it); so is a whole
-    # cable rebalanced to v0 by asking for it
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", multi.UnstableRestWarning)
-        mem = multi.membrane(v0, morph=morph, rebalance_rest=True, **knobs)
+    # cable rebalanced to v0 by asking for it. A uniform -68 rest must not
+    # warn (an error here); the whole cable at -58 must
+    def build():
+        return multi.membrane(v0, morph=morph, rebalance_rest=True, **knobs)
+
+    if v0 == -68.0:
+        mem = _quiet(build)
+    else:
+        with pytest.warns(multi.UnstableRestWarning):
+            mem = build()
     rest = {k: v for k, v in knobs.items() if k != "axon_rest"}
     assert mem.vlk.tobytes() == _uniform_vlk(v0, morph, **rest).tobytes()
     assert mem.v_rest is None
@@ -83,6 +89,20 @@ def test_uniform_rebalance_is_unchanged_bit_for_bit(v0, morph, knobs):
 def test_axon_rest_needs_a_rebalance():
     with pytest.raises(ValueError, match="axon_rest needs rebalance_rest"):
         multi.membrane(-58.0, axon_rest=-58.0)
+
+
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_axon_rest_must_be_finite(bad):
+    with pytest.raises(ValueError, match="axon_rest must be finite"):
+        multi.membrane(-58.0, rebalance_rest=True, axon_rest=bad)
+
+
+def test_unstable_rest_warning_is_re_exported():
+    import msoaxon  # noqa: PLC0415
+
+    assert msoaxon.UnstableRestWarning is multi.UnstableRestWarning
+    assert "UnstableRestWarning" in msoaxon.__all__
+    assert issubclass(msoaxon.UnstableRestWarning, UserWarning)
 
 
 def test_axon_rest_is_part_of_the_key():
@@ -176,7 +196,8 @@ def test_rest_jacobian_finds_the_nodal_hopf_mode():
     assert abs(lead.imag) == pytest.approx(2.250, abs=2e-3)
     soma_only = multi.membrane(-58.0, rebalance_rest=True)
     lam = np.linalg.eigvals(multi.rest_jacobian(soma_only)[0])
-    assert -0.01 < lam.real.max() < 0
+    # measured -0.0028 /ms: the slowest gate, at the soma
+    assert lam.real.max() == pytest.approx(-0.0028, abs=1e-4)
 
 
 @pytest.mark.parametrize(

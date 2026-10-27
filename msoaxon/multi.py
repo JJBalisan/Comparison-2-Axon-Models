@@ -13,6 +13,7 @@ has 7 blocks of n = 45 + dendrite compartments.
 """
 
 import dataclasses
+import math
 import types
 import warnings
 from typing import Any
@@ -206,8 +207,9 @@ class Membrane:
             of length n; None unless rebalance_rest.
         v_rest: The root-found resting potential per compartment [mV],
             where initial_state starts V; None when every compartment
-            rests at v0 (no rebalance, or the soma and the axon
-            rebalanced to the same potential), which starts V at v0.
+            starts at v0: no rebalance (msoAxon.m's start, which drifts
+            about 0.9 mV), or the soma and the axon rebalanced to the
+            same potential (an exact steady state).
     """
 
     key: tuple[float | bool, ...]
@@ -639,8 +641,8 @@ def _klt_to_leak(
         the new leak reversal).
 
     Raises:
-        ValueError: For "slope", if the slope conductance of KLT at v0 is
-            not positive (v0 well below E_K).
+        ValueError: For "slope", if the slope conductance of KLT at v0
+            (at v_rest, if given) is not positive (well below E_K).
     """
     V = np.full(morph.n, v0) if v_rest is None else v_rest
 
@@ -654,9 +656,14 @@ def _klt_to_leak(
         h = 1e-3  # central difference [mV]
         g_eff = (current(V + h) - current(V - h)) / (2 * h)
         if ((g_klt > 0) & (g_eff <= 0)).any():
+            where = (
+                f"v0={v0} mV"
+                if v_rest is None
+                else "each compartment's rebalanced rest (Membrane.v_rest)"
+            )
             raise ValueError(
                 f"klt_to_leak='slope' needs a positive KLT slope conductance "
-                f"at v0={v0} mV, which it lacks below about E_K ({V_K} mV)"
+                f"at {where}, which it lacks below about E_K ({V_K} mV)"
             )
         # compartments without KLT have nothing to move (g_eff == 0)
         e = V - current(V) / np.where(g_eff > 0, g_eff, 1.0)
@@ -704,12 +711,15 @@ def membrane(
             axial current flows at rest, so the steady state is
             root-found: the soma's leak reversal is solved to hold it at
             v0 exactly, and V starts from the solved profile
-            (Membrane.v_rest). The full linearisation at the rest is
-            checked, and an UnstableRestWarning is issued when its
-            leading eigenvalue has a positive real part: the nodes of
-            Ranvier fire on their own once they rest above about -60.5
-            mV (#128), which is why the axon is not moved to v0 by
-            default.
+            (Membrane.v_rest). The model is then linearised at the rest
+            (rest_jacobian: active-full, every gate evolving, whatever
+            model_type a run later uses), and an UnstableRestWarning is
+            issued when its leading eigenvalue has a positive real part:
+            the nodes of Ranvier fire on their own once they rest above
+            about -60.5 mV (#128), which is why the axon is not moved to
+            v0 by default. The check is linear only: a rest that is
+            linearly stable but fires after a large enough kick is not
+            caught.
         morph: The morphology these arrays are for (default: msoAxon.m's
             chain).
         dendrite_klt_scale: Multiplies gKLT in the dendrite compartments
@@ -747,7 +757,8 @@ def membrane(
         ValueError: If dendrite_klt_scale is set for a morphology
             without dendrites, klt_to_leak is not None, "chord" or
             "slope", "slope" at a v0 where KLT has no positive slope
-            conductance, or axon_rest is set without rebalance_rest.
+            conductance, or axon_rest is set without rebalance_rest or
+            is not finite.
         RuntimeError: If the steady state of a rebalanced rest cannot
             be found.
 
@@ -762,6 +773,8 @@ def membrane(
     if axon_rest is not None and not rebalance_rest:
         raise ValueError("axon_rest needs rebalance_rest=True")
     axon_rest = AXON_REST if axon_rest is None else float(axon_rest)
+    if not math.isfinite(axon_rest):
+        raise ValueError(f"axon_rest must be finite, got {axon_rest}")
     if dendrite_klt_scale != 1.0 and morph.n == N:
         raise ValueError(
             "dendrite_klt_scale needs a morphology with dendrites "
@@ -1134,7 +1147,10 @@ def _rhs(
 
 
 def initial_state(morph: Morphology, mem: Membrane, v0: float) -> np.ndarray:
-    """Returns mso_axon's initial state: V at v0, then the six gates.
+    """Returns mso_axon's initial state: V, then the six gates.
+
+    V is mem.v_rest when set (a rebalanced rest that is not uniform),
+    and v0 is then ignored; otherwise V is v0 in every compartment.
 
     Args:
         morph: The morphology (its n sets the block length).
