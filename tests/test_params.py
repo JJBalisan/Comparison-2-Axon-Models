@@ -161,7 +161,7 @@ def test_morphology_dendrite_fields():
 
 def test_membrane_keys():
     m = multi.membrane(-68.0)
-    assert m.key == (-68.0, 1.0, 1.0, -62.5, False, 1.0)
+    assert m.key == (-68.0, 1.0, 1.0, -62.5, False, 1.0, -68.0)
     assert m.morph_key == "lumped"
     assert m.morph is multi.LUMPED
     assert m.y0_gates is None
@@ -175,7 +175,7 @@ def test_membrane_keys():
         morph=d,
         dendrite_klt_scale=0.5,
     )
-    assert m.key == (-60.0, 3.0, 2.0, -77.0, True, 0.5)
+    assert m.key == (-60.0, 3.0, 2.0, -77.0, True, 0.5, -68.0)
     assert m.morph_key == d.key
     assert m.y0_gates is not None and len(m.y0_gates) == 6
 
@@ -191,7 +191,8 @@ def test_keys_feed_the_caches():
     assert len(_dispatch._MEMBRANE_KEY) == len(m.key)
     assert _dispatch.describe("multi", 3, -68.0, mem=m).endswith(
         "mem=membrane(v0=-68.0, soma_klt_scale=1.0, ais_klt_scale=1.0, "
-        "soma_na_vhalf=-62.5, rebalance_rest=False, dendrite_klt_scale=1.0)"
+        "soma_na_vhalf=-62.5, rebalance_rest=False, dendrite_klt_scale=1.0, "
+        "axon_rest=-68.0)"
     )
 
 
@@ -213,6 +214,14 @@ def test_multi_initial_state_equals_the_old_inline_code(
 ):
     morph = multi.with_dendrites() if dendrites else multi.LUMPED
     mem = multi.membrane(v0, morph=morph, rebalance_rest=rebalance_rest)
+    if mem.v_rest is not None:
+        # a rest rebalanced away from the axon's -68 mV is root-found, not
+        # flat (#128): V starts from the solved profile, gates at its steady
+        # state; tests/test_rest.py checks that it is one
+        new = multi.initial_state(morph, mem, v0)
+        assert np.array_equal(new[: morph.n], mem.v_rest)
+        assert new[0] == v0
+        return
     new, old = (
         multi.initial_state(morph, mem, v0),
         _old_multi_y0(morph, mem, v0),

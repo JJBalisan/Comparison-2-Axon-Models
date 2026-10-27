@@ -301,6 +301,7 @@ _MEMBRANE_KEY = (
     "soma_na_vhalf",
     "rebalance_rest",
     "dendrite_klt_scale",
+    "axon_rest",
 )
 
 

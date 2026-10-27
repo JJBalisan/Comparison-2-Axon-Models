@@ -13,10 +13,12 @@ has 7 blocks of n = 45 + dendrite compartments.
 """
 
 import dataclasses
+import types
+import warnings
 from typing import Any
 
 import numpy as np
-from scipy import sparse
+from scipy import optimize, sparse
 
 from msoaxon import _common, _fast, _solve, constants as C, synaptic
 
@@ -31,6 +33,23 @@ R_AXIAL = 100.0  # specific axial resistivity [Ohm cm]
 _G_AX = (2 / R_AXIAL) / (C.L_CM[:-1] / C.XA_CM[:-1] + C.L_CM[1:] / C.XA_CM[1:])
 
 MSO_STIM_TYPES = _common.STIM_TYPES + ("EPSGbilateral",)
+
+# msoAxon.m's resting potential [mV]: where membrane(rebalance_rest=True)
+# holds the axon (internodes and nodes) unless axon_rest says otherwise
+AXON_REST = -68.0
+_AXON_LABELS = ("internode", "node")
+# largest |dV/dt| [mV/ms] and |dgate/dt| [1/ms] membrane() accepts at the
+# steady state it root-finds for a rebalanced rest
+_REST_RESIDUAL = 1e-9
+
+
+class UnstableRestWarning(UserWarning):
+    """A rebalanced resting state is unstable: the cell fires on its own.
+
+    membrane(rebalance_rest=True) linearises the full right-hand side at
+    the rest it builds and issues this when the leading eigenvalue has a
+    positive real part (#128).
+    """
 
 
 # which gating blocks (m, h, p, w, z, a) evolve for each model type
@@ -181,6 +200,10 @@ class Membrane:
         vlk: Leak reversal per compartment [mV].
         y0_gates: Initial (m, h, p, w, z, a) steady-state blocks, each
             of length n; None unless rebalance_rest.
+        v_rest: The root-found resting potential per compartment [mV],
+            where initial_state starts V; None when every compartment
+            rests at v0 (no rebalance, or the soma and the axon
+            rebalanced to the same potential), which starts V at v0.
     """
 
     key: tuple[float | bool, ...]
@@ -191,6 +214,7 @@ class Membrane:
     na_vhalf: np.ndarray
     vlk: np.ndarray
     y0_gates: tuple[np.ndarray, ...] | None
+    v_rest: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         """Freezes the arrays (see Morphology)."""
@@ -590,6 +614,7 @@ def _klt_to_leak(
     vlk: np.ndarray,
     v0: float,
     key: tuple[float, ...],
+    v_rest: np.ndarray | None = None,
 ) -> tuple[np.ndarray, Morphology, np.ndarray]:
     """Moves KLT into the leak (membrane's klt_to_leak).
 
@@ -601,6 +626,8 @@ def _klt_to_leak(
         v0: The resting potential [mV].
         key: The scale factors g_klt was built with, for the new
             morphology's key (the leak depends on all of them).
+        v_rest: Each compartment's own rest (Membrane.v_rest), where the
+            substitution is made instead of v0; None: v0 everywhere.
 
     Returns:
         (zero gKLT, a copy of morph with the larger leak and its own key,
@@ -610,7 +637,7 @@ def _klt_to_leak(
         ValueError: For "slope", if the slope conductance of KLT at v0 is
             not positive (v0 well below E_K).
     """
-    V = np.full(morph.n, v0)
+    V = np.full(morph.n, v0) if v_rest is None else v_rest
 
     def current(v: np.ndarray) -> np.ndarray:
         """Steady-state KLT current density at v [pA/um^2]."""
@@ -627,7 +654,7 @@ def _klt_to_leak(
                 f"at v0={v0} mV, which it lacks below about E_K ({V_K} mV)"
             )
         # compartments without KLT have nothing to move (g_eff == 0)
-        e = v0 - current(V) / np.where(g_eff > 0, g_eff, 1.0)
+        e = V - current(V) / np.where(g_eff > 0, g_eff, 1.0)
     g_lk = morph.g_lk + g_eff
     # one linear leak standing for the old leak plus g_eff * (V - e)
     vlk = (morph.g_lk * vlk + g_eff * e) / g_lk
@@ -646,6 +673,7 @@ def membrane(
     morph: Morphology | None = None,
     dendrite_klt_scale: float = 1.0,
     klt_to_leak: str | None = None,
+    axon_rest: float | None = None,
 ) -> Membrane:
     """Builds per-compartment channel overrides for the multi model.
 
@@ -662,10 +690,21 @@ def membrane(
         soma_na_vhalf: Somatic Na steady-state inactivation midpoint
             [mV]; Scott et al 2010 (J Neurosci 30:2039) measured -77 at
             the soma.
-        rebalance_rest: Set each compartment's leak reversal so the net
-            current at v0 is zero with gating at steady state, and start
-            from that steady state. msoAxon.m does neither, so stronger
-            KLT would otherwise shift rest.
+        rebalance_rest: Set the leak reversals so the soma rests at v0
+            with gating at steady state, and start from that steady
+            state. msoAxon.m does neither, so stronger KLT would
+            otherwise shift rest. Only the soma, the AIS and any
+            dendrites are rebalanced to v0; the axon (internodes and
+            nodes) is rebalanced to axon_rest. When the two differ, the
+            axial current flows at rest, so the steady state is
+            root-found: the soma's leak reversal is solved to hold it at
+            v0 exactly, and V starts from the solved profile
+            (Membrane.v_rest). The full linearisation at the rest is
+            checked, and an UnstableRestWarning is issued when its
+            leading eigenvalue has a positive real part: the nodes of
+            Ranvier fire on their own once they rest above about -60.5
+            mV (#128), which is why the axon is not moved to v0 by
+            default.
         morph: The morphology these arrays are for (default: msoAxon.m's
             chain).
         dendrite_klt_scale: Multiplies gKLT in the dendrite compartments
@@ -685,23 +724,39 @@ def membrane(
             which keeps the steady input resistance. The leak lives in
             the morphology, so the returned Membrane carries a copy
             of it with its own key (pass mem alone, or
-            morph=mem.morph).
+            morph=mem.morph). With a rebalanced rest that is not uniform,
+            each compartment's KLT is replaced at its own rest.
+        axon_rest: With rebalance_rest, the potential the axon's
+            internodes and nodes are rebalanced to [mV]. None (default)
+            is msoAxon.m's AXON_REST, -68 mV, so at v0 = -68 the whole
+            cable is rebalanced to v0 as before. axon_rest=v0 rebalances
+            the whole cable to v0, which is unstable above about -60.5
+            mV.
 
     Returns:
         A Membrane with key, morph_key, morph, g_na, g_klt, na_vhalf,
-        vlk and y0_gates (None unless rebalance_rest).
+        vlk, y0_gates (None unless rebalance_rest) and v_rest (None
+        unless the rebalanced rest is not uniform).
 
     Raises:
         ValueError: If dendrite_klt_scale is set for a morphology
             without dendrites, klt_to_leak is not None, "chord" or
-            "slope", or "slope" at a v0 where KLT has no positive slope
-            conductance.
+            "slope", "slope" at a v0 where KLT has no positive slope
+            conductance, or axon_rest is set without rebalance_rest.
+        RuntimeError: If the steady state of a rebalanced rest cannot
+            be found.
+
+    Warns:
+        UnstableRestWarning: If a rebalanced rest is unstable.
     """
     morph = morph or LUMPED
     if klt_to_leak not in (None, "chord", "slope"):
         raise ValueError(
             f'klt_to_leak must be None, "chord" or "slope", got {klt_to_leak!r}'
         )
+    if axon_rest is not None and not rebalance_rest:
+        raise ValueError("axon_rest needs rebalance_rest=True")
+    axon_rest = AXON_REST if axon_rest is None else float(axon_rest)
     if dendrite_klt_scale != 1.0 and morph.n == N:
         raise ValueError(
             "dendrite_klt_scale needs a morphology with dendrites "
@@ -715,25 +770,17 @@ def membrane(
     na_vhalf = np.full(morph.n, 62.5)
     na_vhalf[0] = -soma_na_vhalf
     vlk = np.full(morph.n, float(v0))
-    y0_gates = None
+    y0_gates = v_rest = None
     if rebalance_rest:
         V = np.full(morph.n, float(v0))
-        gates = (
-            C.minf(V),
-            C.hinf(V, na_vhalf),
-            C.pinf(V),
-            C.winf(V),
-            C.zinf(V),
-            C.ainf(V),
-        )
-        mi, hi, pi, wi, zi, ai = gates
-        I_ion = (
-            C.na_open(mi, hi, morph.g_na) * (V - V_NA)
-            + morph.g_kht * pi * (V - V_K)
-            + g_klt * wi**4 * zi * (V - V_K)
-            + morph.g_h * ai * (V - V_H)
-        )
-        vlk = V + I_ion / morph.g_lk
+        V[np.isin(morph.labels, _AXON_LABELS)] = axon_rest
+        # each compartment balanced on its own, as if V were uniform: exact
+        # when it is (no axial current flows), else the starting guess
+        gates = _gates_at(V, na_vhalf)
+        vlk = V + _ionic(V, gates, morph.g_na, g_klt, morph) / morph.g_lk
+        if axon_rest != v0:
+            V, vlk = _solve_rest(V, vlk, morph, g_klt, na_vhalf)
+            gates, v_rest = _gates_at(V, na_vhalf), V
         y0_gates = gates
     if klt_to_leak:
         g_klt, morph, vlk = _klt_to_leak(
@@ -747,11 +794,12 @@ def membrane(
                 float(ais_klt_scale),
                 float(dendrite_klt_scale),
             ),
+            v_rest=v_rest,
         )
-    return Membrane(
+    mem = Membrane(
         # v0 is in the key because the leak reversals (vlk) are built from
         # it: without it, membrane(-60) and membrane(-68) would share a
-        # pre-stimulus cache entry
+        # pre-stimulus cache entry; axon_rest likewise
         key=(
             float(v0),
             float(soma_klt_scale),
@@ -759,6 +807,7 @@ def membrane(
             float(soma_na_vhalf),
             bool(rebalance_rest),
             float(dendrite_klt_scale),
+            axon_rest,
         ),
         morph_key=morph.key,
         morph=morph,
@@ -767,6 +816,165 @@ def membrane(
         na_vhalf=na_vhalf,
         vlk=vlk,
         y0_gates=y0_gates,
+        v_rest=v_rest,
+    )
+    if rebalance_rest:
+        _warn_if_unstable(mem, float(v0), axon_rest)
+    return mem
+
+
+def _gates_at(V: np.ndarray, na_vhalf: np.ndarray) -> tuple[np.ndarray, ...]:
+    """Returns the steady-state gates (m, h, p, w, z, a) at V."""
+    return (
+        C.minf(V),
+        C.hinf(V, na_vhalf),
+        C.pinf(V),
+        C.winf(V),
+        C.zinf(V),
+        C.ainf(V),
+    )
+
+
+def _ionic(
+    V: np.ndarray,
+    gates: tuple[np.ndarray, ...],
+    g_na: np.ndarray,
+    g_klt: np.ndarray,
+    morph: Morphology,
+) -> np.ndarray:
+    """Returns the ionic current density but the leak [pA/um^2].
+
+    In membrane()'s original float order, which the rebalanced golden
+    traces depend on.
+    """
+    mi, hi, pi, wi, zi, ai = gates
+    return (
+        C.na_open(mi, hi, g_na) * (V - V_NA)
+        + morph.g_kht * pi * (V - V_K)
+        + g_klt * wi**4 * zi * (V - V_K)
+        + morph.g_h * ai * (V - V_H)
+    )
+
+
+def _solve_rest(
+    V: np.ndarray,
+    vlk: np.ndarray,
+    morph: Morphology,
+    g_klt: np.ndarray,
+    na_vhalf: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Root-finds a rebalanced rest that is not uniform.
+
+    The unknowns are the soma's leak reversal and every other
+    compartment's V; the soma's V stays at V[0] (v0) and the gates
+    follow V at steady state, so the zero of _dv is a steady state of
+    _rhs with the soma at v0 exactly.
+
+    Args:
+        V: The rest each compartment was balanced to [mV]; V[0] is v0.
+        vlk: Their leak reversals, balanced compartment by compartment
+            (vlk[0] is the starting guess) [mV].
+        morph: The morphology.
+        g_klt: gKLT per compartment [nS/um^2].
+        na_vhalf: Negated Na inactivation midpoint per compartment [mV].
+
+    Returns:
+        (V, vlk) at the steady state.
+
+    Raises:
+        RuntimeError: If the solver does not reach the steady state.
+    """
+    v0 = V[0]
+
+    def unpack(u: np.ndarray) -> tuple[np.ndarray, types.SimpleNamespace]:
+        """Returns the state and a stand-in Membrane for unknowns u."""
+        v = np.concatenate([[v0], u[1:]])
+        lk = np.concatenate([u[:1], vlk[1:]])
+        x = np.concatenate([v, *_gates_at(v, na_vhalf)])
+        mem = types.SimpleNamespace(
+            g_na=morph.g_na, g_klt=g_klt, na_vhalf=na_vhalf, vlk=lk
+        )
+        return x, mem
+
+    def residual(u: np.ndarray) -> np.ndarray:
+        """Returns dV/dt at the state the unknowns u describe."""
+        x, mem = unpack(u)
+        return _dv(0.0, x, "none", None, 1, mem, morph)
+
+    sol = optimize.root(
+        residual,
+        np.concatenate([vlk[:1], V[1:]]),
+        method="hybr",
+        options={"xtol": 1e-14},
+    )
+    x, mem = unpack(sol.x)
+    worst = np.abs(_rhs(0.0, x, "none", None, 1, (True,) * 6, mem, morph)).max()
+    if not worst <= _REST_RESIDUAL:
+        raise RuntimeError(
+            f"no steady state for a rebalanced rest at v0={v0} mV "
+            f"({sol.message}; largest derivative {worst:.3g})"
+        )
+    return x[: morph.n], mem.vlk
+
+
+def rest_jacobian(mem: Membrane) -> tuple[np.ndarray, np.ndarray]:
+    """Returns the Jacobian of the quiet right-hand side at mem's rest.
+
+    Every gate evolves (active-full), and the rest is mem's starting
+    state (initial_state), which is a steady state only when mem was
+    built with rebalance_rest. Central differences, steps of 1e-6
+    relative (at least 1e-6 absolute).
+
+    Args:
+        mem: The membrane.
+
+    Returns:
+        (J, x): the 7n x 7n Jacobian [1/ms] and the state it is taken
+        at.
+    """
+    morph = mem.morph
+    x = initial_state(morph, mem, mem.key[0])
+    active = (True,) * 6
+    J = np.empty((x.size, x.size))
+    for j in range(x.size):
+        h = 1e-6 * max(1.0, abs(x[j]))
+        up, down = x.copy(), x.copy()
+        up[j] += h
+        down[j] -= h
+        J[:, j] = (
+            _rhs(0.0, up, "none", None, 1, active, mem, morph)
+            - _rhs(0.0, down, "none", None, 1, active, mem, morph)
+        ) / (2 * h)
+    return J, x
+
+
+def _warn_if_unstable(mem: Membrane, v0: float, axon_rest: float) -> None:
+    """Issues UnstableRestWarning if mem's rebalanced rest is unstable.
+
+    Args:
+        mem: A membrane built with rebalance_rest.
+        v0: The soma's rest [mV].
+        axon_rest: The axon's [mV].
+    """
+    J, x = rest_jacobian(mem)
+    lam, vec = np.linalg.eig(J)
+    i = int(np.argmax(lam.real))
+    if lam[i].real <= 0:
+        return
+    n = mem.morph.n
+    k = int(np.argmax(np.abs(vec[:n, i])))  # where the growing mode lives
+    family = mem.morph.labels[k]
+    rests = x[:n][np.array(mem.morph.labels) == family]
+    warnings.warn(
+        f"the rebalanced rest (soma {v0} mV, axon {axon_rest} mV) is "
+        f"unstable: the leading eigenvalue is {lam[i].real:+.3f} "
+        f"+/- {abs(lam[i].imag):.3f}j /ms, and its mode is largest in "
+        f"the {family} compartments (most at compartment {k + 1}), which "
+        f"rest at {rests.min():.1f} to {rests.max():.1f} mV. The cell will "
+        f"fire with no input; nodes of Ranvier rebalanced above about "
+        f"-60.5 mV do (#128).",
+        UnstableRestWarning,
+        stacklevel=3,
     )
 
 
@@ -876,7 +1084,9 @@ def initial_state(morph: Morphology, mem: Membrane, v0: float) -> np.ndarray:
     Args:
         morph: The morphology (its n sets the block length).
         mem: The channel overrides; its y0_gates (rebalance_rest) are the
-            starting gates, else msoAxon.m's rounded _GATE0.
+            starting gates, else msoAxon.m's rounded _GATE0, and its
+            v_rest, if set, the starting V instead of v0 (a rebalanced
+            rest that is not uniform: the root-found steady state).
         v0: The initial potential [mV].
 
     Returns:
@@ -888,6 +1098,8 @@ def initial_state(morph: Morphology, mem: Membrane, v0: float) -> np.ndarray:
         return np.concatenate(
             [np.full(n, float(v0))] + [np.full(n, g) for g in _GATE0]
         )
+    if mem.v_rest is not None:
+        return np.concatenate([mem.v_rest, *mem.y0_gates])
     return np.concatenate([np.full(n, float(v0)), *mem.y0_gates])
 
 
