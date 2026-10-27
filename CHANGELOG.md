@@ -6,6 +6,48 @@ and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least. The `msoaxon-fast` crate in `rust/` carries the
 same version as the package, bumped in the same release PR.
 
+## 1.8.0 (27 Oct 2026)
+
+Phase 1's third round, three lanes reviewed and merged in parallel: native
+mode becomes the default, the two-compartment model can trade its KLT for a
+leak that keeps rest, and the coupling plane of Goldwyn et al. 2019 gets its
+sweep. The golden traces, the 28 pinned thresholds and the benchmark's 300
+runs hold in every mode and no tolerance moved. Under the new default the
+results move within the solver tolerance (at most 0.31 of the golden
+tolerance over the 15 golden cases, with every last-time equal); `mode="fast"`
+or `MSOAXON_MODE=fast` gives the previous numbers bit for bit.
+
+### Added
+
+- `klt_to_leak` (`"chord"` | `"slope"` | `None`) on `two_cpt` and
+  `two.get_params`, replacing the soma's and the axon's KLT by a leak that
+  keeps rest; no existing result changes (#132).
+- `scripts/coupling_plane.py`: the two-compartment window and threshold over
+  the (forward, backward) coupling plane of Goldwyn et al. 2019, with the
+  45-compartment model located on it (#84). A cell counts as spiking only
+  with a spike of at least 30 mV, since graded responses also clear the
+  10 mV criterion. `--quick`, `--step`, `--ceiling`, `--mode`, `--workers`;
+  saves `figures/coupling_plane/coupling_plane.{png,json}`. With
+  `tests/test_coupling_plane.py` and the plane-sweep protocol in PYTHON.md
+  under the free two-compartment coupling (#130).
+
+### Changed
+
+- `mode="native"` (diffsol's BDF in Rust) is now the default whenever the
+  `msoaxon-fast` extension is installed (#106). Results move within the
+  solver tolerance; `mode="fast"` and `mode="exact"`, or
+  `MSOAXON_MODE=fast|exact`, give the previous results. Without the
+  extension the default is still `"exact"` (#131).
+- A diffsol failure in native mode raises
+  `RuntimeError("integration failed on [a, b]: diffsol: ...")`, like
+  scipy's in the other modes, instead of `ValueError`. Both DriftWarnings
+  name the new default (#131).
+- `scripts/inhibition_window.py` builds its equal-leak column from
+  `membrane(klt_to_leak="chord")` instead of its own helper (printed tables
+  unchanged; JSON digits differ at 1e-7) and adds the two-compartment
+  equal-leak column; `scripts/resonance.py` adds two-compartment
+  substitution arms (#132).
+
 ## 1.7.0 (26 Oct 2026)
 
 Phase 1's second round and the three Python lanes from the 25 October
