@@ -41,6 +41,10 @@ _AXON_LABELS = ("internode", "node")
 # largest |dV/dt| [mV/ms] and |dgate/dt| [1/ms] membrane() accepts at the
 # steady state it root-finds for a rebalanced rest
 _REST_RESIDUAL = 1e-9
+# _warn_if_unstable's verdicts (None or the warning's message), by
+# (Membrane.key, morph_key), oldest dropped first
+_STABILITY: dict[tuple[Any, ...], str | None] = {}
+_STABILITY_SIZE = 64
 
 
 class UnstableRestWarning(UserWarning):
@@ -919,13 +923,37 @@ def _solve_rest(
     return x[: morph.n], mem.vlk
 
 
+def _column_groups(pattern: sparse.csc_matrix) -> list[np.ndarray]:
+    """Groups the columns of a sparsity pattern that share no row.
+
+    Greedy first fit. Perturbing a group's columns together gives each
+    of them its own finite difference on its own rows, so a Jacobian
+    costs one pair of evaluations per group instead of per column.
+    """
+    groups: list[list[int]] = []
+    taken: list[set[int]] = []
+    for j in range(pattern.shape[1]):
+        rows = set(pattern.indices[pattern.indptr[j] : pattern.indptr[j + 1]])
+        for cols, used in zip(groups, taken, strict=True):
+            if not rows & used:
+                cols.append(j)
+                used.update(rows)
+                break
+        else:
+            groups.append([j])
+            taken.append(rows)
+    return [np.array(cols) for cols in groups]
+
+
 def rest_jacobian(mem: Membrane) -> tuple[np.ndarray, np.ndarray]:
     """Returns the Jacobian of the quiet right-hand side at mem's rest.
 
     Every gate evolves (active-full), and the rest is mem's starting
     state (initial_state), which is a steady state only when mem was
     built with rebalance_rest. Central differences, steps of 1e-6
-    relative (at least 1e-6 absolute).
+    relative (at least 1e-6 absolute), taken a group of columns at a
+    time over the morphology's sparsity pattern (morph.jac): each entry
+    is the one a column-by-column difference gives.
 
     Args:
         mem: The membrane.
@@ -937,21 +965,47 @@ def rest_jacobian(mem: Membrane) -> tuple[np.ndarray, np.ndarray]:
     morph = mem.morph
     x = initial_state(morph, mem, mem.key[0])
     active = (True,) * 6
-    J = np.empty((x.size, x.size))
-    for j in range(x.size):
-        h = 1e-6 * max(1.0, abs(x[j]))
+    pattern = sparse.csc_matrix(morph.jac)
+    J = np.zeros((x.size, x.size))
+    for cols in _column_groups(pattern):
+        h = 1e-6 * np.maximum(1.0, np.abs(x[cols]))
         up, down = x.copy(), x.copy()
-        up[j] += h
-        down[j] -= h
-        J[:, j] = (
-            _rhs(0.0, up, "none", None, 1, active, mem, morph)
-            - _rhs(0.0, down, "none", None, 1, active, mem, morph)
-        ) / (2 * h)
+        up[cols] += h
+        down[cols] -= h
+        diff = _rhs(0.0, up, "none", None, 1, active, mem, morph) - _rhs(
+            0.0, down, "none", None, 1, active, mem, morph
+        )
+        for j, hj in zip(cols, h, strict=True):
+            rows = pattern.indices[pattern.indptr[j] : pattern.indptr[j + 1]]
+            J[rows, j] = diff[rows] / (2 * hj)
     return J, x
 
 
 def _warn_if_unstable(mem: Membrane, v0: float, axon_rest: float) -> None:
     """Issues UnstableRestWarning if mem's rebalanced rest is unstable.
+
+    The verdict is cached by the membrane's settings (key and morph_key,
+    which carry everything the rest is built from), so rebuilding a
+    membrane, as _fast.self_check does on each call, skips the
+    eigenvalue problem; an unstable rest still warns every time.
+
+    Args:
+        mem: A membrane built with rebalance_rest.
+        v0: The soma's rest [mV].
+        axon_rest: The axon's [mV].
+    """
+    key = (mem.key, mem.morph_key)
+    if key not in _STABILITY:
+        if len(_STABILITY) >= _STABILITY_SIZE:
+            _STABILITY.pop(next(iter(_STABILITY)))
+        _STABILITY[key] = _instability(mem, v0, axon_rest)
+    message = _STABILITY[key]
+    if message is not None:
+        warnings.warn(message, UnstableRestWarning, stacklevel=3)
+
+
+def _instability(mem: Membrane, v0: float, axon_rest: float) -> str | None:
+    """Returns UnstableRestWarning's message for mem, or None if stable.
 
     Args:
         mem: A membrane built with rebalance_rest.
@@ -959,24 +1013,23 @@ def _warn_if_unstable(mem: Membrane, v0: float, axon_rest: float) -> None:
         axon_rest: The axon's [mV].
     """
     J, x = rest_jacobian(mem)
+    # eigenvalues alone cost a sixteenth of eig: vectors only if unstable
+    if np.linalg.eigvals(J).real.max() <= 0:
+        return None
     lam, vec = np.linalg.eig(J)
     i = int(np.argmax(lam.real))
-    if lam[i].real <= 0:
-        return
     n = mem.morph.n
     k = int(np.argmax(np.abs(vec[:n, i])))  # where the growing mode lives
     family = mem.morph.labels[k]
     rests = x[:n][np.array(mem.morph.labels) == family]
-    warnings.warn(
+    return (
         f"the rebalanced rest (soma {v0} mV, axon {axon_rest} mV) is "
         f"unstable: the leading eigenvalue is {lam[i].real:+.3f} "
         f"+/- {abs(lam[i].imag):.3f}j /ms, and its mode is largest in "
         f"the {family} compartments (most at compartment {k + 1}), which "
         f"rest at {rests.min():.1f} to {rests.max():.1f} mV. The cell will "
         f"fire with no input; nodes of Ranvier rebalanced above about "
-        f"-60.5 mV do (#128).",
-        UnstableRestWarning,
-        stacklevel=3,
+        f"-60.5 mV do (#128)."
     )
 
 

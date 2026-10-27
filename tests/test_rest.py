@@ -179,6 +179,37 @@ def test_rest_jacobian_finds_the_nodal_hopf_mode():
     assert -0.01 < lam.real.max() < 0
 
 
+@pytest.mark.parametrize(
+    "morph", [multi.LUMPED, D], ids=["lumped", "dendrites"]
+)
+def test_rest_jacobian_equals_column_by_column_differences(morph):
+    # the grouped columns share no row, so each entry is the one a
+    # column-by-column central difference gives, bit for bit
+    mem = multi.membrane(-58.0, rebalance_rest=True, morph=morph)
+    J, x = multi.rest_jacobian(mem)
+    want = np.empty_like(J)
+    for j in range(x.size):
+        h = 1e-6 * max(1.0, abs(x[j]))
+        up, down = x.copy(), x.copy()
+        up[j] += h
+        down[j] -= h
+        want[:, j] = (
+            multi._rhs(0.0, up, "none", None, 1, (True,) * 6, mem, morph)
+            - multi._rhs(0.0, down, "none", None, 1, (True,) * 6, mem, morph)
+        ) / (2 * h)
+    assert np.array_equal(J, want)
+
+
+def test_a_cached_verdict_still_warns_every_time():
+    # the verdict is cached by the membrane's settings; the warning is not
+    for _ in range(2):
+        with pytest.warns(multi.UnstableRestWarning, match="node"):
+            multi.membrane(-58.0, rebalance_rest=True, axon_rest=-58.0)
+    key = multi.membrane(-58.0, rebalance_rest=True).key
+    assert (key, "lumped") in multi._STABILITY
+    assert multi._STABILITY[key, "lumped"] is None
+
+
 def _na_availability():
     spec = importlib.util.spec_from_file_location(
         "na_availability", REPO / "scripts" / "na_availability.py"
