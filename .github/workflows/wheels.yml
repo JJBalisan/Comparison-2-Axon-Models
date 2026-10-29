@@ -38,7 +38,7 @@ jobs:
           - {name: macos-x86_64, os: macos-15-intel, target: x86_64-apple-darwin}
           - {name: windows-x86_64, os: windows-2025-vs2026, target: x64}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # diffsol makes a clean build ~100 s (#109). rust-cache hashes
       # rust/Cargo.lock into its key; the explicit key repeats it so a lock
       # bump visibly misses, and the wheel name keeps the five targets apart.
@@ -60,7 +60,9 @@ jobs:
           args: --release --out dist
           # manylinux on Linux (the default), ignored elsewhere
           manylinux: auto
-      - uses: astral-sh/setup-uv@v7
+      # setup-uv v10.3.0, pinned by commit: setup-uv publishes no moving
+      # major tag, so `@v10` (or the old `@v6`) does not resolve.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
       # A fresh venv per Python: msoaxon from this checkout plus the wheel
       # that was just built (not the path source, which would rebuild it),
       # then import, the self-check and a fast run. The script lives outside
