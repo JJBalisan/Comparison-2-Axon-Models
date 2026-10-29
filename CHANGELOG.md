@@ -6,6 +6,48 @@ and a change that moves them beyond the golden-trace tolerance is a new
 minor version at least. The `msoaxon-fast` crate in `rust/` carries the
 same version as the package, bumped in the same release PR.
 
+## 1.9.0 (29 Oct 2026)
+
+`rebalance_rest=True` no longer builds a cell that fires on its own (#128):
+it rebalances the soma and AIS to `v0` and leaves the axon at its own rest,
+and every rebalanced membrane is checked for a stable rest. The repository
+is renamed `msoaxon` (formerly Comparison-2-Axon-Models). The golden traces
+are bit-identical, since their rebalances at −68 mV take the old uniform
+path, and no tolerance moved. Only a rebalance away from −68 mV starts from
+a different state.
+
+### Added
+
+- `axon_rest` on `multi.membrane` (default `None`, meaning
+  `multi.AXON_REST = -68.0`): the rest the axon's internodes and nodes are
+  rebalanced to. `axon_rest=v0` rebalances the whole cable as before; it is
+  the last field of `Membrane.key` (#134).
+- `multi.UnstableRestWarning` and `multi.rest_jacobian(mem)`: a rebalanced
+  membrane is linearised at its rest and warns, naming the compartment
+  family of the growing mode, when the leading eigenvalue's real part is
+  positive. About 17 ms per new setting, cached after (#134).
+- `Membrane.v_rest`: the root-found steady state when the soma and axon
+  rests differ, which `initial_state` starts from (#134).
+
+### Changed
+
+- `rebalance_rest=True` rebalances the soma, the AIS and any dendrites to
+  `v0`, and the axon to `axon_rest`. A whole cable rebalanced above
+  −60.54 mV put the nodes past their Hopf bifurcation and fired at 461 Hz
+  with no input; the soma-only cell at −58 mV is stable (#134).
+- `klt_to_leak` with a non-uniform rest substitutes KLT at each
+  compartment's own rest; the uniform case is unchanged bit for bit (#134).
+- `scripts/na_availability.py`'s `ripple()` watches every compartment
+  against its own rest, not only the soma (#134).
+- The docs and PyPI trusted publisher name the repository `msoaxon` (#142).
+
+### Known
+
+- The spike criterion (node minus soma, 10 mV) assumes a shared rest. With
+  the soma-only rebalance at −58 mV, node 3 rests 0.17 mV below the soma,
+  which raises rheobase by about 0.25%. Left unchanged, because changing it
+  moves published numbers (#134).
+
 ## 1.8.0 (27 Oct 2026)
 
 Phase 1's third round, three lanes reviewed and merged in parallel: native
