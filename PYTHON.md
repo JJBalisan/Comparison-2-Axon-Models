@@ -98,7 +98,7 @@ index). To enable it:
 
 1. On pypi.org, create the project `msoaxon-fast` (a pending publisher does
    this on the first upload) with a trusted publisher: owner `JJBalisan`,
-   repository `Comparison-2-Axon-Models`, workflow `wheels.yml`, environment
+   repository `msoaxon`, workflow `wheels.yml`, environment
    left blank.
 2. Set the repository variable: `gh variable set PUBLISH_PYPI --body true`
    (or Settings > Secrets and variables > Actions > Variables).
@@ -240,7 +240,7 @@ Jacobian pattern above is unchanged.
 
 ## Port contract
 
-[Issue #28](https://github.com/JJBalisan/Comparison-2-Axon-Models/issues/28)
+[Issue #28](https://github.com/JJBalisan/msoaxon/issues/28)
 plans a Rust port with its own integrator; Python stays the reference. What the
 tests hold a new integrator to:
 
