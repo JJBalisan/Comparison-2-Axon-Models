@@ -15,8 +15,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@v7
+      # setup-uv v10.3.0, pinned by commit: setup-uv publishes no moving
+      # major tag, so `@v10` (or the old `@v6`) does not resolve.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
       # same ruff as .pre-commit-config.yaml
       - run: uvx ruff@0.16.10 format --check .
       - run: uvx ruff@0.16.10 check .
@@ -29,8 +31,10 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@v7
+      # setup-uv v10.3.0, pinned by commit: setup-uv publishes no moving
+      # major tag, so `@v10` (or the old `@v6`) does not resolve.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --locked
@@ -51,8 +55,10 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@v7
+      # setup-uv v10.3.0, pinned by commit: setup-uv publishes no moving
+      # major tag, so `@v10` (or the old `@v6`) does not resolve.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
         with:
           python-version: "3.12"
       - run: uv sync --locked
@@ -67,8 +73,10 @@ jobs:
     runs-on: windows-2025-vs2026
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@v7
+      # setup-uv v10.3.0, pinned by commit: setup-uv publishes no moving
+      # major tag, so `@v10` (or the old `@v6`) does not resolve.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
         with:
           python-version: "3.12"
       - run: uv sync --locked
@@ -96,7 +104,7 @@ jobs:
           - {os: windows-2025-vs2026, timeout: 25, lint: false, pytest-args: '-m "not slow"'}
           - {os: ubuntu-24.04-arm, timeout: 15, lint: false, pytest-args: ""}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # the toolchain is pinned (rust/rust-toolchain.toml says why); the
       # action stays on its major tag, the compiler version is its input
       - uses: dtolnay/rust-toolchain@stable
@@ -114,7 +122,9 @@ jobs:
             prototype/diffsol-real
           key: ${{ hashFiles('rust/Cargo.lock', 'prototype/diffsol-real/Cargo.lock') }}
           cache-on-failure: true
-      - uses: astral-sh/setup-uv@v7
+      # setup-uv v10.3.0, pinned by commit: setup-uv publishes no moving
+      # major tag, so `@v10` (or the old `@v6`) does not resolve.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
         with:
           python-version: "3.12"
       - if: matrix.lint
